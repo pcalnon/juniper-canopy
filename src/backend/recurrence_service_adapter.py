@@ -11,7 +11,7 @@
 # File Path:     JuniperCanopy/juniper_canopy/src/backend/
 #
 # Date Created:  2026-06-22
-# Last Modified: 2026-06-22
+# Last Modified: 2026-10-04
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -102,6 +102,11 @@ _DEFAULT_TRAIN_READ_TIMEOUT = 300.0
 _DEFAULT_CONNECT_TIMEOUT = 10.0
 _DEFAULT_STATUS_TIMEOUT = 10.0
 
+# The most a service-supplied ``detail`` may add to an error message (W0.5 / F-C1). The message reaches canopy's log,
+# ``completion_reason`` on ``/api/status`` and the status bar, so a long pydantic error list or an echoed payload must
+# not grow it without limit.
+_DETAIL_MAX_CHARS = 300
+
 
 class RecurrenceServiceError(RuntimeError):
     """Base error for any failed juniper-recurrence service interaction.
@@ -175,6 +180,66 @@ class RecurrenceStatus:
     final_metrics: Optional[dict[str, float]]
     stopped_reason: Optional[str]
     events: list[dict[str, Any]] = field(default_factory=list)
+
+
+def _validation_error_text(item: Any) -> str:
+    """One FastAPI / pydantic validation error as ``loc -> msg`` (``body.dataset.generator -> Field required``).
+
+    Only ``loc`` and ``msg`` are rendered. ``input`` -- the offending value, echoed back verbatim -- is deliberately left
+    out: what an operator needs is *which field* and *which rule*, and an echo of the request has no place in a status
+    line. An item without a ``msg`` falls back to ``str()``.
+    """
+    if isinstance(item, Mapping) and item.get("msg") is not None:
+        loc = item.get("loc")
+        if isinstance(loc, (list, tuple)) and loc:
+            return f"{'.'.join(str(part) for part in loc)} -> {item['msg']}"
+        if isinstance(loc, str) and loc:
+            return f"{loc} -> {item['msg']}"
+        return str(item["msg"])
+    return str(item)
+
+
+def _service_detail(response: httpx.Response) -> Optional[str]:
+    """Render the service's ``{"detail": ...}`` error body as one bounded line (W0.5 / F-C1), else ``None``.
+
+    The recurrence service answers a refused request the FastAPI way: an ``HTTPException`` gives ``{"detail": "<text>"}``
+    (its dataset validator says ``invalid dataset: X_train has non-finite values (NaN/Inf)``), and a request that fails
+    validation gives ``{"detail": [{"loc": [...], "msg": "...", ...}, ...]}``. That text is *why* the request was
+    refused, and canopy used to keep it only as ``body=`` on the exception, which nothing read.
+
+    A string is used as is; a list becomes ``loc -> msg`` pairs joined by ``; ``; anything else is ``str()``-ed.
+    Whitespace is collapsed and the result is bounded to ``_DETAIL_MAX_CHARS``, ending in an ellipsis when cut.
+    ``None`` -- leave the message as it was -- for a body that is not JSON, not an object, or has no usable ``detail``.
+
+    It never raises. The detail only decorates the message, so nothing a reply holds may change which typed error
+    ``_parse`` raises -- including a body nested deeply enough that the JSON decoder raises ``RecursionError``, which is
+    not a ``ValueError``.
+    """
+    try:
+        return _render_detail(response.json())
+    except Exception:  # noqa: BLE001 -- a describer must not raise: the typed error stands whatever the body holds
+        return None
+
+
+def _render_detail(payload: Any) -> Optional[str]:
+    """The ``detail`` of a decoded error body as one bounded line, or ``None`` when there is none to show."""
+    if not isinstance(payload, dict):
+        return None
+    detail = payload.get("detail")
+    if detail is None:
+        return None
+    if isinstance(detail, str):
+        text = detail
+    elif isinstance(detail, list):
+        text = "; ".join(_validation_error_text(item) for item in detail)
+    else:
+        text = str(detail)
+    collapsed = " ".join(text.split())
+    if not collapsed:
+        return None
+    if len(collapsed) > _DETAIL_MAX_CHARS:
+        return collapsed[: _DETAIL_MAX_CHARS - 1].rstrip() + "…"
+    return collapsed
 
 
 class RecurrenceServiceAdapter:
@@ -323,14 +388,29 @@ class RecurrenceServiceAdapter:
 
     @staticmethod
     def _parse(response: httpx.Response, method: str, path: str) -> dict[str, Any]:
-        """Raise the appropriate typed error for a non-2xx response, else return the JSON body."""
+        """Raise the appropriate typed error for a non-2xx response, else return the JSON body.
+
+        A 4xx error message ends with the service's own ``detail`` (``…: <detail>``) when the body carries one (W0.5 /
+        F-C1): it is the only place the service says *why* it refused the request, and the message is what reaches the
+        log, ``completion_reason`` and the status bar. ``body`` still holds the raw response text, unchanged.
+
+        A 5xx detail is NOT appended, deliberately. A 4xx is the service's judgement of THIS request (validation,
+        conflict, auth, not-found); a 5xx says the service itself failed, and on this service its detail relays its own
+        upstream's exception text: ``map_data_error`` (juniper-recurrence ``routers/_common.py``) answers a juniper-data
+        client failure with ``502 f"data fetch failed: {exc}"``, and juniper-data-client 0.5.0 words a refused header
+        as ``Request failed: … in header value: ' <key>'``. A padded juniper-data key on the service would therefore
+        reach ``completion_reason`` -- which an anonymous caller can read -- verbatim. That is transport text one hop
+        removed, which is what ``outbound_errors`` keeps from callers (#683).
+        """
         code = response.status_code
+        detail = _service_detail(response) if httpx.codes.is_client_error(code) else None
+        suffix = f": {detail}" if detail else ""
         if code == httpx.codes.CONFLICT:  # 409
-            raise RecurrenceTrainInProgressError(f"recurrence training already in progress ({method} {path})", status_code=code, body=response.text)
+            raise RecurrenceTrainInProgressError(f"recurrence training already in progress ({method} {path}){suffix}", status_code=code, body=response.text)
         if code in (httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN):  # 401 / 403
-            raise RecurrenceServiceAuthError(f"recurrence service rejected the request ({code} on {method} {path}) — check recurrence_api_key", status_code=code, body=response.text)
+            raise RecurrenceServiceAuthError(f"recurrence service rejected the request ({code} on {method} {path}) — check recurrence_api_key{suffix}", status_code=code, body=response.text)
         if code >= httpx.codes.BAD_REQUEST:  # any other 4xx / 5xx
-            raise RecurrenceServiceError(f"recurrence service error {code} on {method} {path}", status_code=code, body=response.text)
+            raise RecurrenceServiceError(f"recurrence service error {code} on {method} {path}{suffix}", status_code=code, body=response.text)
         try:
             payload = response.json()
         except ValueError as exc:

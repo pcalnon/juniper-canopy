@@ -21,14 +21,20 @@ dataset ref + hyperparameters are forwarded; the cascade-only surface is stubbed
 unsupported controls (stop/pause/resume) fail closed.
 """
 
+import json
+import logging
 import threading
 import time
 
+import httpx
 import pytest
 
 from backend.protocol import BackendProtocol
 from backend.recurrence_backend import RecurrenceBackend
-from backend.recurrence_service_adapter import RecurrenceServiceError, RecurrenceTrainResult
+from backend.recurrence_service_adapter import RecurrenceServiceAdapter, RecurrenceServiceError, RecurrenceServiceUnavailableError, RecurrenceTrainResult
+
+_BACKEND_LOGGER = "juniper_canopy.backend.recurrence_backend"
+_NON_FINITE = "invalid dataset: X_train has non-finite values (NaN/Inf)"
 
 
 def _make_result():
@@ -174,6 +180,82 @@ class TestFailureHandling:
         backend.start_training(generator="equities_seq")
         assert _wait_until(lambda: not backend.is_training_active())
         assert backend.get_status()["completion_reason"] == "recurrence service error 503 on POST /v1/train"
+
+
+def _fit_warnings(caplog):
+    return [record for record in caplog.records if record.name == _BACKEND_LOGGER and record.levelno == logging.WARNING]
+
+
+@pytest.mark.unit
+class TestA422DetailReachesTheOperator:
+    """W0.5 / F-C1: a refused fit's reason reaches ``completion_reason`` and the WARNING, not just its status code.
+
+    The WARNING is logged after the state flips, outside the lock, so these wait for the record itself rather than for
+    ``is_training_active()`` to clear.
+    """
+
+    def test_completion_reason_and_the_warning_carry_the_detail(self, caplog):
+        error = RecurrenceServiceError(f"recurrence service error 422 on POST /v1/train: {_NON_FINITE}", status_code=422, body=json.dumps({"detail": _NON_FINITE}))
+        backend = RecurrenceBackend(_FakeAdapter(error=error))
+        with caplog.at_level(logging.WARNING, logger=_BACKEND_LOGGER):
+            backend.start_training(generator="equities_seq")
+            assert _wait_until(lambda: bool(_fit_warnings(caplog)))
+        status = backend.get_status()
+        assert status["failed"] is True
+        assert "non-finite" in status["completion_reason"]
+        (warning,) = _fit_warnings(caplog)
+        assert warning.getMessage() == f"recurrence fit failed (status=422): recurrence service error 422 on POST /v1/train: {_NON_FINITE}"
+
+    def test_the_real_adapters_422_reaches_completion_reason(self, caplog):
+        """The whole canopy-side chain: the service's JSON body -> ``_parse`` -> ``outbound_error_text`` -> the field.
+
+        A fake adapter would pass whatever message the test wrote; this one builds it the way production does.
+        """
+
+        def refuse(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(422, json={"detail": _NON_FINITE})
+
+        backend = RecurrenceBackend(RecurrenceServiceAdapter("http://rec.test:8210", transport=httpx.MockTransport(refuse)))
+        with caplog.at_level(logging.WARNING, logger=_BACKEND_LOGGER):
+            backend.start_training(generator="equities_seq")
+            assert _wait_until(lambda: bool(_fit_warnings(caplog)))
+        assert backend.get_status()["completion_reason"] == f"recurrence service error 422 on POST /v1/train: {_NON_FINITE}"
+        (warning,) = _fit_warnings(caplog)
+        assert "status=422" in warning.getMessage()
+        assert _NON_FINITE in warning.getMessage()
+
+    def test_a_5xx_detail_relaying_a_refused_key_reaches_neither_the_field_nor_the_log(self, caplog):
+        """The service's 502 relays its own juniper-data client's failure, and that text can quote the service's key.
+
+        Built with the real adapter: the reply's ``detail`` is exactly what juniper-recurrence's ``map_data_error``
+        sends for a juniper-data client that refused a padded key. Only a 4xx detail is appended, so neither the
+        anonymous-readable field nor canopy's log carries it.
+        """
+        relayed = "data fetch failed: Request failed: Invalid leading whitespace, reserved character(s), or return character(s) in header value: ' LEAKME-rec-data'"
+
+        def fail(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(502, json={"detail": relayed})
+
+        backend = RecurrenceBackend(RecurrenceServiceAdapter("http://rec.test:8210", transport=httpx.MockTransport(fail)))
+        with caplog.at_level(logging.WARNING, logger=_BACKEND_LOGGER):
+            backend.start_training(generator="equities_seq")
+            assert _wait_until(lambda: bool(_fit_warnings(caplog)))
+        status = backend.get_status()
+        assert status["completion_reason"] == "recurrence service error 502 on POST /v1/train"
+        assert "LEAKME" not in repr(status)
+        (warning,) = _fit_warnings(caplog)
+        assert warning.getMessage() == "recurrence fit failed (status=502): recurrence service error 502 on POST /v1/train"
+
+    def test_a_transport_failure_logs_no_status_and_keeps_its_text_out_of_the_field(self, caplog):
+        """#683 still holds: no status code, so ``completion_reason`` is the type name; the full text stays in the log."""
+        error = RecurrenceServiceUnavailableError("recurrence service unreachable on POST /v1/train: Illegal header value b' LEAKME-rec'")
+        backend = RecurrenceBackend(_FakeAdapter(error=error))
+        with caplog.at_level(logging.WARNING, logger=_BACKEND_LOGGER):
+            backend.start_training(generator="equities_seq")
+            assert _wait_until(lambda: bool(_fit_warnings(caplog)))
+        assert backend.get_status()["completion_reason"] == "RecurrenceServiceUnavailableError"
+        (warning,) = _fit_warnings(caplog)
+        assert warning.getMessage().startswith("recurrence fit failed (status=None): recurrence service unreachable on POST /v1/train")
 
 
 @pytest.mark.unit

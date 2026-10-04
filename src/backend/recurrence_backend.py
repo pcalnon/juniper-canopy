@@ -11,7 +11,7 @@
 # File Path:     JuniperCanopy/juniper_canopy/src/backend/
 #
 # Date Created:  2026-06-22
-# Last Modified: 2026-09-24
+# Last Modified: 2026-10-04
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -215,14 +215,19 @@ class RecurrenceBackend:
         """Daemon-thread target: run the blocking fit, then record terminal state."""
         # ``_error`` becomes ``completion_reason`` on /api/status, which an anonymous caller
         # reads: the service's answer, or the exception's type -- never transport text, which
-        # quoted the recurrence key when httpx refused to send it (#683 validation).
+        # quoted the recurrence key when httpx refused to send it (#683 validation). The
+        # service's answer includes its ``detail`` -- the adapter folds it into the message
+        # (W0.5 / F-C1) -- so the reason a 422 gives reaches the operator, not just its code.
         try:
             result = self._adapter.train(**dataset_ref, **hyperparams)
         except RecurrenceServiceError as exc:
             with self._lock:
                 self._error = outbound_error_text(exc)
                 self._state = "failed"
-            logger.warning("recurrence fit failed: %s", exc)
+            # The full message names the method, path and the service's detail; the status code
+            # is logged on its own so a 422 (a refused request) reads apart from a 5xx or a
+            # transport failure (``status=None``) without parsing the text.
+            logger.warning("recurrence fit failed (status=%s): %s", exc.status_code, exc)
             return
         except Exception as exc:  # defensive: never leave the state stuck in "training"
             with self._lock:

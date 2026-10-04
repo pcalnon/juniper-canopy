@@ -1875,6 +1875,10 @@ class MetricsPanel(BaseComponent):
         ``metrics_data`` is ``RecurrenceBackend.get_metrics_history()`` — a single flat point
         ``{r2, mse, rmse, mae, loss, epoch}`` once the fit lands, or empty while it runs (then a
         spinner is shown). Regression-generic: never an accuracy/percentage readout.
+
+        The numbers are IN-SAMPLE (W0.7; plan findings F-S5 / F-SCI3): ``POST /v1/train`` scores
+        the fit on the training split it was fitted on, so the card says so in its title and
+        caption rather than presenting them as a held-out result. No number changes.
         """
         if not metrics_data:
             return html.Div(
@@ -1906,7 +1910,8 @@ class MetricsPanel(BaseComponent):
         ]
         return html.Div(
             [
-                html.H5("Recurrence (LMU) — final regression metrics", style={"marginBottom": "12px"}),
+                html.H5("Recurrence (LMU) — in-sample (train split) regression metrics", style={"marginBottom": "4px"}),
+                html.P("Computed on the training split the fit saw; not a held-out score.", style={"fontSize": "0.85rem", "color": "var(--text-muted)", "marginBottom": "12px"}),
                 html.Div(cards, style={"display": "flex", "justifyContent": "space-around", "gap": "10px"}),
             ]
         )

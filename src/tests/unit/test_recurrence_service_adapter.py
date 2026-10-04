@@ -18,6 +18,11 @@
 A1 enabler). Exercises request shaping, the outbound ``X-API-Key`` header, the generous
 train timeout, JSON parsing, and the typed error mapping (409 / 401 / 403 / other-HTTP /
 timeout / unreachable / non-JSON) — all against an injected ``httpx.MockTransport``.
+
+``TestServiceDetailInTheMessage`` pins W0.5 / F-C1: on a 4xx the service's ``{"detail": …}``
+-- the only place it says *why* it refused -- rides on the exception message, bounded, while
+``body`` keeps the raw response text. A 5xx detail never does: there the service relays its
+own upstream's exception text, which can quote a key.
 """
 
 import json
@@ -69,6 +74,15 @@ def _responder(payload, status_code=200, sink=None):
         if sink is not None:
             sink.append(request)
         return httpx.Response(status_code, json=payload)
+
+    return handler
+
+
+def _raw_responder(status_code, content, content_type="application/json"):
+    """A MockTransport handler returning ``content`` byte-for-byte, so ``body`` can be pinned exactly."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code, content=content.encode("utf-8"), headers={"content-type": content_type})
 
     return handler
 
@@ -149,6 +163,13 @@ class TestTrain:
         adapter.train(generator="equities_seq")
         assert "X-API-Key" not in sink[0].headers
 
+    def test_train_tolerates_a_response_key_it_does_not_know(self):
+        """The service is gaining ``metrics_scope: "in_sample"`` on this response (W0.7); an unknown key must not break parsing."""
+        adapter = _adapter(_responder({**_TRAIN_OK, "metrics_scope": "in_sample"}))
+        result = adapter.train(generator="equities_seq")
+        assert result.final_metrics["r2"] == pytest.approx(0.97)
+        assert result.stopped_reason == "fit_complete"
+
     def test_train_requires_dataset_ref(self):
         """No dataset reference → local ValueError, before any HTTP call."""
         sink = []
@@ -207,6 +228,166 @@ class TestTrainErrorMapping:
         adapter = _adapter(handler)
         with pytest.raises(RecurrenceServiceError):
             adapter.train(generator="equities_seq")
+
+
+_NON_FINITE = "invalid dataset: X_train has non-finite values (NaN/Inf)"
+
+
+def _train_error(handler):
+    """The exception ``train`` raises against ``handler``."""
+    with pytest.raises(RecurrenceServiceError) as caught:
+        _adapter(handler).train(generator="equities_seq")
+    return caught.value
+
+
+@pytest.mark.unit
+class TestServiceDetailInTheMessage:
+    """W0.5 / F-C1: the service's ``detail`` reaches the exception message; ``body`` is untouched."""
+
+    def test_a_422_string_detail_is_appended(self):
+        raw = json.dumps({"detail": _NON_FINITE})
+        error = _train_error(_raw_responder(422, raw))
+        assert str(error) == f"recurrence service error 422 on POST /v1/train: {_NON_FINITE}"
+        assert error.status_code == 422
+        assert error.body == raw  # the raw response text, exactly as before
+
+    def test_a_validation_error_list_renders_loc_and_msg_pairs(self):
+        """FastAPI's 422 shape. ``input`` echoes the request back verbatim and is never rendered."""
+        detail = [
+            {"type": "missing", "loc": ["body", "dataset", "generator"], "msg": "Field required", "input": {"split": "train"}},
+            {"type": "int_parsing", "loc": ["body", "d"], "msg": "Input should be a valid integer, unable to parse string as an integer", "input": "ECHO-7c1d"},
+        ]
+        error = _train_error(_responder({"detail": detail}, status_code=422))
+        assert str(error) == "recurrence service error 422 on POST /v1/train: body.dataset.generator -> Field required; body.d -> Input should be a valid integer, unable to parse string as an integer"
+        assert "ECHO-7c1d" not in str(error)
+
+    @pytest.mark.parametrize(
+        "item, rendered",
+        [
+            ({"loc": ["body", "dataset", "params", "symbols", 0], "msg": "Input should be a valid string"}, "body.dataset.params.symbols.0 -> Input should be a valid string"),
+            ({"loc": "query", "msg": "bad"}, "query -> bad"),
+            ({"loc": [], "msg": "no location"}, "no location"),
+            ({"msg": "no loc key"}, "no loc key"),
+            ({"type": "custom", "loc": ["body"]}, "{'type': 'custom', 'loc': ['body']}"),
+            ("a bare string item", "a bare string item"),
+        ],
+        ids=["int-in-loc", "string-loc", "empty-loc", "missing-loc", "missing-msg", "non-mapping"],
+    )
+    def test_each_validation_item_shape(self, item, rendered):
+        error = _train_error(_responder({"detail": [item]}, status_code=422))
+        assert str(error) == f"recurrence service error 422 on POST /v1/train: {rendered}"
+
+    @pytest.mark.parametrize(
+        "detail, rendered",
+        [({"reason": "bad"}, "{'reason': 'bad'}"), (42, "42"), (True, "True")],
+        ids=["object", "number", "boolean"],
+    )
+    def test_any_other_detail_is_stringified(self, detail, rendered):
+        error = _train_error(_responder({"detail": detail}, status_code=422))
+        assert str(error) == f"recurrence service error 422 on POST /v1/train: {rendered}"
+
+    def test_whitespace_in_the_detail_is_collapsed(self):
+        error = _train_error(_responder({"detail": "line one\n\tline two   three\r\n"}, status_code=422))
+        assert str(error) == "recurrence service error 422 on POST /v1/train: line one line two three"
+
+    def test_a_long_detail_is_bounded_with_an_ellipsis(self):
+        prefix = "recurrence service error 422 on POST /v1/train: "
+        error = _train_error(_responder({"detail": "x" * 1000}, status_code=422))
+        message = str(error)
+        assert message.startswith(prefix)
+        rendered = message[len(prefix) :]
+        assert len(rendered) == 300
+        assert rendered.endswith("…"), "a cut detail must show that it was cut"
+
+    def test_a_detail_at_the_bound_is_not_cut(self):
+        error = _train_error(_responder({"detail": "y" * 300}, status_code=422))
+        assert str(error).endswith(": " + "y" * 300)
+
+    @pytest.mark.parametrize(
+        "status_code, content, content_type",
+        [
+            (400, "<html><body>400 Bad Request</body></html>", "text/html"),
+            (404, "Not Found", "text/plain"),
+            (422, json.dumps({"error": "no detail key"}), "application/json"),
+            (422, json.dumps({"detail": None}), "application/json"),
+            (422, json.dumps({"detail": ""}), "application/json"),
+            (422, json.dumps({"detail": " \n\t "}), "application/json"),
+            (422, json.dumps(["detail", "a list body"]), "application/json"),
+            (429, "", "application/json"),
+        ],
+        ids=["html", "plain-text", "json-without-detail", "null-detail", "empty-detail", "blank-detail", "json-list-body", "empty-body"],
+    )
+    def test_a_body_without_a_usable_detail_leaves_the_message_unchanged(self, status_code, content, content_type):
+        """All 4xx -- the codes that WOULD carry a detail -- so each case exercises the 'no usable detail' path."""
+        error = _train_error(_raw_responder(status_code, content, content_type))
+        assert str(error) == f"recurrence service error {status_code} on POST /v1/train"
+        assert error.body == content
+
+    @pytest.mark.parametrize(
+        "status_code, error_type, message",
+        [
+            (401, RecurrenceServiceAuthError, "recurrence service rejected the request (401 on POST /v1/train) — check recurrence_api_key"),
+            (409, RecurrenceTrainInProgressError, "recurrence training already in progress (POST /v1/train)"),
+            (422, RecurrenceServiceError, "recurrence service error 422 on POST /v1/train"),
+        ],
+        ids=["401", "409", "422"],
+    )
+    def test_a_body_the_decoder_cannot_handle_never_changes_the_error(self, status_code, error_type, message):
+        """Deep nesting makes the JSON decoder raise ``RecursionError``, which is not a ``ValueError``.
+
+        Reading the detail is decoration: whatever the body holds, the typed error and its message must stand.
+        """
+        error = _train_error(_raw_responder(status_code, "[" * 100_000 + "]" * 100_000))
+        assert type(error) is error_type
+        assert str(error) == message
+        assert error.status_code == status_code
+
+    def test_409_keeps_its_wording_and_appends_the_detail(self):
+        raw = json.dumps({"detail": "a training run is already in progress"})
+        error = _train_error(_raw_responder(409, raw))
+        assert isinstance(error, RecurrenceTrainInProgressError)
+        assert str(error) == "recurrence training already in progress (POST /v1/train): a training run is already in progress"
+        assert error.status_code == 409
+        assert error.body == raw
+
+    def test_409_without_a_detail_is_unchanged(self):
+        error = _train_error(_raw_responder(409, "", "text/plain"))
+        assert str(error) == "recurrence training already in progress (POST /v1/train)"
+
+    @pytest.mark.parametrize("code", [401, 403])
+    def test_auth_errors_keep_the_remedy_and_append_the_detail(self, code):
+        raw = json.dumps({"detail": "Invalid or missing API key"})
+        error = _train_error(_raw_responder(code, raw))
+        assert isinstance(error, RecurrenceServiceAuthError)
+        assert str(error) == f"recurrence service rejected the request ({code} on POST /v1/train) — check recurrence_api_key: Invalid or missing API key"
+        assert error.body == raw
+
+    def test_the_status_route_carries_the_detail_too(self):
+        """``_parse`` is shared, so ``GET /v1/training/status`` gets the same treatment."""
+        with pytest.raises(RecurrenceServiceError) as caught:
+            _adapter(_responder({"detail": "Rate limit exceeded"}, status_code=429)).training_status()
+        assert str(caught.value) == "recurrence service error 429 on GET /v1/training/status: Rate limit exceeded"
+
+    @pytest.mark.parametrize("status_code", [500, 502, 503])
+    def test_a_5xx_detail_is_never_appended(self, status_code):
+        """A 5xx detail relays the service's OWN upstream's exception text, which can quote a key.
+
+        juniper-recurrence's ``map_data_error`` answers a juniper-data client failure with
+        ``502 f"data fetch failed: {exc}"``, and juniper-data-client 0.5.0 words a refused header exactly as below. The
+        message -- what reaches ``completion_reason`` and the log -- keeps only canopy's own words; ``body`` keeps the
+        raw text, as it always has.
+        """
+        relayed = "data fetch failed: Request failed: Invalid leading whitespace, reserved character(s), or return character(s) in header value: ' LEAKME-5xx'"
+        raw = json.dumps({"detail": relayed})
+        error = _train_error(_raw_responder(status_code, raw))
+        assert str(error) == f"recurrence service error {status_code} on POST /v1/train"
+        assert "LEAKME" not in str(error)
+        assert error.body == raw
+
+    def test_a_success_body_is_still_returned_as_is(self):
+        """A 2xx is never searched for a ``detail``: only an error status renders one."""
+        status = _adapter(_responder({"state": "idle", "detail": "not an error"})).training_status()
+        assert status.state == "idle"
 
 
 @pytest.mark.unit

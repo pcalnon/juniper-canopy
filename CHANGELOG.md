@@ -119,8 +119,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pre-change tree. The other two are the negative control and the agreement check, and neither
   exercises canopy code.
 
+### Changed
+
+- **The recurrence regression card says its numbers are in-sample (W0.7, the label half of plan
+  findings F-S5 and F-SCI3).** The plan is juniper-ml's
+  `notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md`.
+  `POST /v1/train` scores the fit on the training split it was fitted on. The card's title in
+  `MetricsPanel._build_oneshot_result` read
+  `Recurrence (LMU) — final regression metrics`, which looks like a held-out score. It now reads
+  `Recurrence (LMU) — in-sample (train split) regression metrics`, over a muted caption:
+  *Computed on the training split the fit saw; not a held-out score.* No number changes. The
+  service now returns `metrics_scope: "in_sample"` on that response (juniper-recurrence#190), and
+  the adapter already ignores a response key it does not know, so canopy needs no change for it.
+  A new test in `src/tests/unit/test_recurrence_service_adapter.py` pins that tolerance.
+  `src/tests/unit/test_recurrence_oneshot_result.py` gains 6 tests, 4 of which fail on the parent;
+  the other 2 check that the numbers and the awaiting placeholder are unchanged.
+
 ### Fixed
 
+- **A failed recurrence fit now says why: the service's 422 `detail` reaches the log,
+  `completion_reason` and the status bar (W0.5; plan finding F-C1).** The recurrence service
+  answers a bad dataset with HTTP 422 and a JSON body such as
+  `{"detail": "invalid dataset: X_train has non-finite values (NaN/Inf)"}`. canopy dropped that
+  text at every hop. The adapter kept it only as `body=` on the exception, and
+  `outbound_error_text` passed on a message that did not contain it. The backend logged
+  `recurrence fit failed: recurrence service error 422 on POST /v1/train`, and the status bar showed
+  `Failed — recurrence service error 422 on POST /v1/train`.
+  - `RecurrenceServiceAdapter._parse` (`src/backend/recurrence_service_adapter.py`) appends a 4xx
+    body's `detail` to the message as `…: <detail>`. That covers the generic 4xx branch and the
+    409 and 401/403 branches, which keep their wording and their `check recurrence_api_key`
+    remedy. A string detail is used as is. A FastAPI validation list becomes `loc -> msg` pairs
+    joined by `; `, without the echoed `input`. Anything else is `str()`-ed. Whitespace is
+    collapsed and the detail is bounded to 300 characters. A non-JSON body, or JSON without a
+    usable `detail`, leaves the message unchanged, and `body=` still holds the raw response text.
+    Reading the detail never raises. A body nested deeply enough that the JSON decoder raises
+    `RecursionError`, which is not a `ValueError`, still produces the same typed error and message.
+  - **A 5xx detail is never appended.** On a 5xx the recurrence service relays its own
+    upstream's exception text. juniper-recurrence's `map_data_error` answers a juniper-data client
+    failure with `502 data fetch failed: {exc}`, and juniper-data-client 0.5.0 words a refused
+    header as `Request failed: … in header value: ' <key>'`. A padded juniper-data key on the
+    service would therefore reach `completion_reason`, which an anonymous caller can read. That is
+    the transport text #683 keeps from callers, relayed one hop. A 5xx message stays as it was:
+    status code, method and path.
+  - `outbound_error_text` (`src/outbound_errors.py`) is unchanged. A status-bearing error is the
+    upstream's answer and passes as `str(exc)`, which now includes a 4xx detail. A transport
+    failure carries no status code and is still named by its type only, so the #683 guarantee holds.
+    `docs/api/API_REFERENCE.md` § Upstream Failures now states what the recurrence answer carries.
+  - `RecurrenceBackend._run_fit` logs `recurrence fit failed (status=<code>): <message>`. The
+    WARNING carries the status code, the method, the path and the detail.
+  - The status bar keeps its 120-character label. When the label has to cut a failure reason, the
+    status text renders as a `Span` whose `title` holds the whole reason, so hovering shows the part
+    the cut dropped. The tooltip is bounded at 400 characters, which fits the adapter's longest
+    wording plus a 300-character detail. A reason the label already holds gets no tooltip. Every
+    other state still renders a plain string, and the callback's outputs are unchanged.
+  - Tests: `src/tests/unit/test_recurrence_service_adapter.py` (+34),
+    `src/tests/unit/backend/test_recurrence_backend.py` (+4),
+    `src/tests/unit/frontend/test_completion_reason_status_bar.py` (+18) and
+    `src/tests/unit/test_outbound_errors.py` (+6). `TestA422ReachesTheStatusBar` drives the whole
+    chain: a real adapter over an `httpx.MockTransport`, the real backend, the real `/api/status`
+    route and the real status-bar builder. 37 of the 62 fail on the parent. The other 25 are
+    controls that pin behaviour this change must keep: a body with no usable `detail`, a body the
+    JSON decoder cannot handle, a 5xx detail that relays a refused key, and a reason short enough
+    for the label. The 7 5xx pins also fail when the adapter appends a 5xx detail, which is what
+    makes them guards.
 - **The replay player's range plays its last frame, its sliders stop at the last frame, and its own
   renders no longer send control requests (follow-ups to F-CANOPY-059 and F-CANOPY-056).**
   - cascor's range end is exclusive (`set_range`: `[start, end)`), while the range slider is
