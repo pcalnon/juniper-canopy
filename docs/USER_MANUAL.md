@@ -1,8 +1,8 @@
 # Juniper Canopy User Manual
 
-**Version:** 0.26.2
+**Version:** 0.26.4
 **Status:** ✅ Production Ready
-**Last Updated:** September 5, 2026
+**Last Updated:** October 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -161,6 +161,10 @@ You should see:
 - 🟠 **Orange ● Standby** - Server connected, not healthy
 - 🔴 **Red ● Error** - Connection or server error
 
+#### Training status line
+
+The training status text is separate from the connection dots above. A failed recurrence fit reads `Failed — <reason>`. On `main` that reason is the status code, method, and path (`recurrence service error 422 on POST /v1/train`). canopy#702 (not on `main`) appends the service's 4xx `detail`. When the line cuts the reason at 120 characters it ends in `…`; hover that text for the rest (up to 400 characters). A 5xx failure stays the status code, method, and path.
+
 #### WebSocket Status (Top Right)
 
 - **`N connection(s)`** (Green) - Active WebSocket connections
@@ -260,6 +264,15 @@ The dashboard ships **15 tabs**, in tab-bar order: [Training Metrics](#training-
 [About](#about-tab). The five cascade-only tabs — Candidate Metrics, Network Topology, Network
 Evolution, Decision Boundary and Workers — are hidden while a one-shot model such as
 *Recurrence (LMU)* is selected.
+
+While Recurrence (LMU) is selected, the Training Metrics tab shows one regression card
+instead of the per-epoch loss and accuracy plots. On `main` the card is titled
+`Recurrence (LMU) — final regression metrics`. The numbers are R², RMSE, MSE, MAE, and
+Loss from `POST /v1/train`, scored on the training split the fit saw. canopy#702 (not on
+`main`) retitles the card `Recurrence (LMU) — in-sample (train split) regression metrics`
+and adds the caption `Computed on the training split the fit saw; not a held-out score.`
+The numbers do not change. While the fit is still running, the card is the spinner
+`Awaiting recurrence (LMU) fit result…`.
 
 ### Training Metrics Tab
 
@@ -385,7 +398,12 @@ The selection panel is view state. It highlights nodes on the graph; it does not
 | Click any member of a box/lasso set | The *whole* set clears (same toggle). |
 | Click empty canvas | **Nothing.** Plotly emits `plotly_click` only when a point is hit. The callback never runs. |
 
-The panel *used to say* *"(Click again or elsewhere to deselect)"* after a click and *"(Click elsewhere to deselect)"* after a box select. The "elsewhere" half was described but never implemented. canopy#573 fixed it: a **Clear selection** button appears only while something is selected, the click hint reads *"(Click again to deselect)"*, and the box/lasso panel carries no hint, because the button is the affordance. See [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046).
+The panel *used to say* *"(Click again or elsewhere to deselect)"* after a click and
+*"(Click elsewhere to deselect)"* after a box select. The "elsewhere" half was described
+but never implemented. canopy#573 fixed it: a **Clear selection** button appears only
+while something is selected, the click hint reads *"(Click again to deselect)"*, and the
+box/lasso panel carries no hint, because the button is the affordance. See
+[AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046).
 
 - **Camera (modebar)** — download the current figure as PNG
   (`canopy_network_<YYYYmmdd>_<HHMMSS>.png`, 2× scale). SVG from the
@@ -938,6 +956,20 @@ upper-cased under the `JUNIPER_CANOPY_` prefix, with `__` between a nested secti
 ## Troubleshooting
 
 ### Common Issues
+
+#### Recurrence fit: a status code and no reason
+
+**Symptoms:** The status line is `Failed — recurrence service error 422 on POST /v1/train`. The recurrence service's `detail` (for example a non-finite `X_train`) is missing.
+
+**Cause:** On `main`, that text stays on the adapter exception's `body`. `GET /api/status` `completion_reason` is the message without `detail`.
+
+**What to read:**
+
+```bash
+curl -s http://127.0.0.1:8050/api/status | python -m json.tool
+```
+
+On `main`, use the recurrence service log for the reason. After canopy#702, a 4xx `detail` is on `completion_reason` and at the end of the status line. Hover when the line ends in `…`. A 5xx `detail` is still absent from both: it can quote the recurrence service's upstream header value, so canopy keeps its own status code, method, and path. See [AGENTS_REFERENCE.md § Recurrence fit refusal and in-sample scores](AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores).
 
 #### 1. "No data available" in Dashboard Tabs
 

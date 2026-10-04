@@ -1,7 +1,7 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** 2026-09-05  
-**Version:** v0.26.2
+**Last Updated:** 2026-10-04  
+**Version:** v0.26.4
 
 Complete guide to testing the Juniper Canopy application.
 
@@ -119,9 +119,17 @@ pytest -k "demo_mode and advanced"
 # X7 slice 1c — classifier, status-bar class routing, breaker isolation, staleness
 # Landed with #578.
 pytest src/tests/regression/test_x7_status_cache.py -v
+
+# Recurrence 4xx detail, 5xx omission, and in-sample card — pins land with #702
+pytest src/tests/unit/test_recurrence_service_adapter.py \
+  src/tests/unit/backend/test_recurrence_backend.py \
+  src/tests/unit/frontend/test_completion_reason_status_bar.py \
+  src/tests/unit/test_recurrence_oneshot_result.py \
+  src/tests/unit/test_outbound_errors.py -q
 ```
 
 See [TESTING_REFERENCE.md — X7 Status Cache](TESTING_REFERENCE.md#x7-status-cache-slice-1c)
+and [TESTING_REFERENCE.md — Recurrence fit refusal](TESTING_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores)
 and [AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
 
 ### Running with Coverage

@@ -1,7 +1,7 @@
 # Testing Quick Start Guide
 
-**Last Updated:** September 5, 2026  
-**Version:** v0.25.2
+**Last Updated:** October 4, 2026  
+**Version:** v0.25.3
 
 Get up and running with tests in **5 minutes**.
 
@@ -162,6 +162,7 @@ src/tests/
 | `pytest -v`             | Verbose output          |
 | `pytest --cov=src`      | Run with coverage       |
 | `pytest src/tests/regression/test_x7_status_cache.py -v` | X7 1c status cache (landed with `#578`) |
+| `pytest src/tests/unit/test_recurrence_service_adapter.py src/tests/unit/frontend/test_completion_reason_status_bar.py src/tests/unit/test_recurrence_oneshot_result.py -q` | Recurrence 4xx detail and in-sample card (pins land with `#702`) |
 | `pytest --lf`           | Run last failed tests   |
 | `pytest --ff`           | Run failures first      |
 

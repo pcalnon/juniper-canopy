@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.3
+**Version:** 0.25.5
 **Status:** Active
-**Last Updated:** September 5, 2026
+**Last Updated:** October 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -22,6 +22,7 @@
 - [Testing Reference](#testing-reference)
 - [Event-loop I/O discipline (X7)](#event-loop-io-discipline-x7)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
+- [Recurrence fit refusal and in-sample scores](#recurrence-fit-refusal-and-in-sample-scores)
 - [CI/CD Reference](#cicd-reference)
 - [CasCor Backend Reference](#cascor-backend-reference)
 - [Demo Mode Reference](#demo-mode-reference)
@@ -222,6 +223,24 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 Distinct from the 1a / 1b off-loop runbook, which landed via the docs
 consolidation `#583` (`#568` was closed superseded).
 
+## Recurrence fit refusal and in-sample scores
+
+canopy#702 is not on `main`. On `main`, a refused recurrence fit's `completion_reason` is the status code, method, and path. The service's `detail` stays on the exception `body`. The one-shot card is titled `Recurrence (LMU) — final regression metrics` even though `POST /v1/train` scores the training split. #702 appends a 4xx `detail` (300 characters; a validation `input` is omitted), leaves a 5xx `detail` off that field, and retitles the card in-sample.
+
+| Surface | Purpose |
+| --- | --- |
+| [AGENTS_REFERENCE.md § Recurrence fit refusal and in-sample scores](AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores) | Operator runbook: 4xx suffix, 5xx omission, status-bar tooltip, in-sample card |
+| `src/backend/recurrence_service_adapter.py` | `_parse` / `_service_detail` |
+| `src/backend/recurrence_backend.py` | `_run_fit` log and `completion_reason` |
+| `src/frontend/dashboard_manager.py` | 120-character label; 400-character hover when the label cuts |
+| `src/frontend/components/metrics_panel.py` | `_build_oneshot_result` |
+
+```bash
+curl -s http://127.0.0.1:8050/api/status | python -m json.tool
+```
+
+Distinct from the cascor status cache. Recurrence does not use it.
+
 ## CI/CD Reference
 
 Pipeline configuration, hooks, and workflow reference.
@@ -318,6 +337,6 @@ The most commonly used environment variables for juniper-canopy configuration. F
 
 ---
 
-**Last Updated:** September 5, 2026
-**Version:** 0.25.3
+**Last Updated:** October 4, 2026
+**Version:** 0.25.5
 **Maintainer:** Paul Calnon

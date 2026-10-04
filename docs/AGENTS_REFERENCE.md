@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-09-05
+**Last Updated**: 2026-10-04
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -25,6 +25,7 @@ pointer only helps an agent that already knows to look.
 - [Configuration Reference](#configuration-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
+- [Recurrence fit refusal and in-sample scores](#recurrence-fit-refusal-and-in-sample-scores)
 - [Further Reading](#further-reading)
 
 ---
@@ -1424,6 +1425,124 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 Design of record (juniper-ml):
 `notes/JUNIPER_2026-09-03_JUNIPER-CANOPY_X7-EVENT-LOOP-BLOCKING-REMEDIATION-DESIGN.md` §5.3 / §5.6.
+
+## Recurrence fit refusal and in-sample scores
+
+Operator runbook for canopy#702, which is **not on `main`**. Two gaps in the tree at `1b2dd43`:
+
+1. A refused recurrence fit's HTTP `detail` never reaches the log line, `/api/status`, or the status bar.
+2. The one-shot regression card titles training-split scores as final regression metrics.
+
+Recurrence does not use the [cascor status cache](#cascor-status-cache-x7-slice-1c). `/api/status` serves `RecurrenceBackend.get_status()` directly.
+
+### What `main` does
+
+`RecurrenceServiceAdapter._parse` (`src/backend/recurrence_service_adapter.py`) raises with the status code, method, and path. The response text stays on `RecurrenceServiceError.body` and is not part of `str(exc)`.
+
+`RecurrenceBackend._run_fit` stores `outbound_error_text(exc)` (`src/outbound_errors.py`). An HTTP answer passes `str(exc)`, so a failed fit's `completion_reason` is `recurrence service error 422 on POST /v1/train`. The WARNING is `recurrence fit failed: <message>`.
+
+The status bar already appends that reason on `failed`, flattened and cut at 120 characters (`DashboardManager._COMPLETION_REASON_MAX_CHARS`). There is no hover text.
+
+`MetricsPanel._build_oneshot_result` (`src/frontend/components/metrics_panel.py`) titles the card `Recurrence (LMU) — final regression metrics`. The figures are still `final_metrics` from `POST /v1/train`, which scores the training split the fit saw.
+
+A transport failure has no integer `status_code`, so `completion_reason` is the exception type name (`RecurrenceServiceUnavailableError` or `RecurrenceServiceTimeoutError`). The log line can still carry the transport text. #702 keeps that split and writes the WARNING as `recurrence fit failed (status=None): <message>`.
+
+### After canopy#702
+
+#### 4xx `detail`
+
+`_parse` appends a client-error body's `detail` as `: <detail>` on the generic 4xx branch and on the 409 and 401/403 branches. The 409 branch keeps `recurrence training already in progress (<method> <path>)`. The 401/403 branch keeps `check recurrence_api_key`. `body` stays the raw response text.
+
+| Body | What is appended |
+| --- | --- |
+| `{"detail": "<text>"}` | that text, with whitespace runs collapsed to single spaces |
+| `{"detail": [{"loc", "msg", ...}, ...]}` | `loc -> msg` pairs joined by `; `. A list `loc` is dotted (`body.dataset.params.symbols.0`). `input` is left out |
+| any other `detail` | `str(detail)` |
+| non-JSON, a non-object, or a missing, null, or blank `detail` | nothing; the message stays the status code, method, and path |
+
+The rendered detail is at most 300 characters (`_DETAIL_MAX_CHARS`). A cut ends with `…`. A detail of exactly 300 is kept whole. Reading the body never raises and never changes which typed error `_parse` raises, including a body deep enough that `response.json()` raises `RecursionError`.
+
+The gate is `httpx.codes.is_client_error` (400–499). The same `_parse` covers `GET /v1/training/status`. The fit the status bar shows is `POST /v1/train`.
+
+A non-finite training matrix from the service looks like this, and it fits in the 120-character label (104 characters):
+
+```text
+recurrence service error 422 on POST /v1/train: invalid dataset: X_train has non-finite values (NaN/Inf)
+```
+
+#### 5xx `detail` stays off the operator surfaces
+
+A 5xx message stays `recurrence service error <code> on <method> <path>`. The service's `detail` is not appended.
+
+On this service a 5xx `detail` can relay the recurrence process's own upstream exception.
+juniper-recurrence `map_data_error` answers a juniper-data client failure with
+`502 data fetch failed: {exc}`, and juniper-data-client 0.5.0 can include a refused
+header value in that text. `completion_reason` is what an anonymous `GET /api/status`
+returns. Leaving the 5xx `detail` off the message keeps that header value off the
+status field and off the WARNING. The raw body remains on the exception object and is
+not copied into either.
+
+The WARNING becomes `recurrence fit failed (status=<code>): <message>`. A transport failure logs `status=None`. `outbound_error_text` itself is unchanged: a status-bearing error passes `str(exc)`, which now includes a 4xx `detail`, and a transport failure stays the type name.
+
+#### Status bar
+
+Visible text is `Failed — <label>`. The label is the reason on one line, cut at 120 characters with `…`.
+
+When that cut drops the tail, `top-status-display` renders an `html.Span` whose `title`
+is the same reason cut at 400 characters (`_FAILURE_REASON_TOOLTIP_MAX_CHARS`). Hover
+shows it. The tooltip is the reason alone, without the `Failed — ` prefix. A reason the
+label already holds stays a plain string. `Completed` and `Running` never get this
+tooltip, including a long free-text `completion_reason` on a completed run. The
+`· partial data` mark stays on the visible children. The tooltip is still the reason.
+
+The longest prefix the adapter places before a `detail` is the 401/403 line: 92 characters, ending `— check recurrence_api_key: `. A 300-character detail on that prefix is 392 characters, inside the 400-character tooltip. `test_the_tooltip_holds_every_reason_the_adapter_can_build_uncut` builds that case through the real `_parse` for 400, 401, 403, 404, 409, 422, and 429.
+
+The Span is the children of the existing status Output. The callback's output list is unchanged, so a later status does not keep a stale title.
+
+#### In-sample regression card
+
+After #702 the card title is `Recurrence (LMU) — in-sample (train split) regression metrics`, with the caption `Computed on the training split the fit saw; not a held-out score.` R², RMSE, MSE, MAE, and Loss are the same `final_metrics` fields, formatted the same way. The waiting state stays the spinner text `Awaiting recurrence (LMU) fit result…` and does not claim a scope.
+
+`RecurrenceTrainResult` copies `final_metrics`, `n_epochs`, `stopped_reason`, and `dataset` only. An extra `metrics_scope` key on the train JSON is ignored. The card does not read that key; the title is fixed in `_build_oneshot_result`. This change does not add a held-out score.
+
+#702 also adds one paragraph to `docs/api/API_REFERENCE.md` § Upstream Failures. On `main` that section still states the pass-through rule (an HTTP answer passes through; anything else is the exception type name) and does not yet name the 300-character bound or the 5xx omission.
+
+### Read a failed fit
+
+```bash
+curl -s http://127.0.0.1:8050/api/status | python -m json.tool
+# completion_reason on a failed recurrence fit
+```
+
+On `main`, expect the status code, method, and path, and look in the recurrence service's own log for why. After #702, a 4xx `detail` is on that field and at the end of the status-bar label; hover when the label ends in `…`. A 5xx field still has no `detail`.
+
+### Tests
+
+The pins land with #702. On `main` these files do not assert the `detail` suffix, the tooltip, or the in-sample title.
+
+| File | What #702 adds |
+| --- | --- |
+| `src/tests/unit/test_recurrence_service_adapter.py` | `TestServiceDetailInTheMessage`; `test_train_tolerates_a_response_key_it_does_not_know` |
+| `src/tests/unit/backend/test_recurrence_backend.py` | `TestA422DetailReachesTheOperator` |
+| `src/tests/unit/frontend/test_completion_reason_status_bar.py` | `TestFailedRecurrenceFitReason`, `TestA422ReachesTheStatusBar` |
+| `src/tests/unit/test_recurrence_oneshot_result.py` | `TestTheCardSaysInSample` |
+| `src/tests/unit/test_outbound_errors.py` | a 4xx detail passes through; a 5xx detail that relays a refused header value does not |
+
+```bash
+cd src && pytest tests/unit/test_recurrence_service_adapter.py \
+  tests/unit/backend/test_recurrence_backend.py \
+  tests/unit/frontend/test_completion_reason_status_bar.py \
+  tests/unit/test_recurrence_oneshot_result.py \
+  tests/unit/test_outbound_errors.py -q
+```
+
+### Pitfalls
+
+- Leave a 5xx `detail` off the message. Appending it puts the service's upstream exception text, which can quote a header value, onto `completion_reason`.
+- Leave a validation item's `input` out of the rendered detail. It echoes the request onto a status line `GET /api/status` returns.
+- Read the regression card as a training-split score. The title change does not add a held-out number.
+- Keep the tooltip as the Span's `title`. A new Output would have to be cleared on every other return path or a failure tooltip would survive into the next run.
+- A 4xx body with no usable `detail` still reads as the status code, method, and path. That is the message when the body has nothing to show.
 
 ## Further Reading
 

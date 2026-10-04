@@ -1,7 +1,7 @@
 # Testing Reference
 
-**Last Updated:** September 5, 2026  
-**Version:** v0.26.3
+**Last Updated:** October 4, 2026  
+**Version:** v0.26.5
 
 Technical reference for the active pytest configuration, markers, fixtures, and CI-equivalent commands.
 
@@ -15,6 +15,7 @@ Technical reference for the active pytest configuration, markers, fixtures, and 
 4. [Environment and Gating Variables](#environment-and-gating-variables)
 5. [Command Reference](#command-reference)
 6. [X7 Status Cache (slice 1c)](#x7-status-cache-slice-1c)
+6. [Recurrence fit refusal and in-sample scores](#recurrence-fit-refusal-and-in-sample-scores)
 6. [X7 Event-Loop Discipline](#x7-event-loop-discipline)
 7. [Coverage Reference](#coverage-reference)
 8. [CI Mapping](#ci-mapping)
@@ -297,6 +298,31 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 Do not mark these `slow`. The coverage gate runs `-m "not slow"`. Operator runbook:
 [AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
+
+---
+
+## Recurrence fit refusal and in-sample scores
+
+The pins land with canopy#702, which is not on `main`. On `main` these files exist and do not assert the `detail` suffix, the status-bar tooltip, or the in-sample card title.
+
+| File | What #702 adds |
+| --- | --- |
+| `src/tests/unit/test_recurrence_service_adapter.py` | `TestServiceDetailInTheMessage`; extra `metrics_scope` is ignored |
+| `src/tests/unit/backend/test_recurrence_backend.py` | `TestA422DetailReachesTheOperator` |
+| `src/tests/unit/frontend/test_completion_reason_status_bar.py` | `TestFailedRecurrenceFitReason`, `TestA422ReachesTheStatusBar` |
+| `src/tests/unit/test_recurrence_oneshot_result.py` | `TestTheCardSaysInSample` |
+| `src/tests/unit/test_outbound_errors.py` | a 4xx detail passes through; a 5xx detail that relays a refused header value does not |
+
+```bash
+cd src && pytest tests/unit/test_recurrence_service_adapter.py \
+  tests/unit/backend/test_recurrence_backend.py \
+  tests/unit/frontend/test_completion_reason_status_bar.py \
+  tests/unit/test_recurrence_oneshot_result.py \
+  tests/unit/test_outbound_errors.py -q
+```
+
+Operator runbook:
+[AGENTS_REFERENCE.md § Recurrence fit refusal and in-sample scores](../AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores).
 
 ---
 

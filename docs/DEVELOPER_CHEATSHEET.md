@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.4
-**Date**: 2026-09-05
+**Version**: 1.0.6
+**Date**: 2026-10-04
 **Project**: juniper-canopy
 
 ---
@@ -160,7 +160,8 @@ pytest tests/unit/test_network_visualizer.py -k "Hierarchy or hierarchy or depth
 
 ### 6. Clear a Topology Node Selection
 
-`handle_node_selection` Inputs are `-graph.clickData` and `-graph.selectedData`. Plotly emits `plotly_click` only on a point hit, so empty-canvas clicks never run the callback (`prevent_initial_call=True`). Clicking the selected node again *does* deselect (toggle; also clears a whole box/lasso set). Do not write `[]` over an already-empty `-selected-nodes` — that store is an Input of `update_network_graph` (1.5–31 s). canopy#573 added a **Clear selection** button; the hint is "(Click again to deselect)".
+`handle_node_selection` Inputs are `-graph.clickData` and `-graph.selectedData`. Plotly emits `plotly_click` only on a point hit, so empty-canvas clicks never run the callback (`prevent_initial_call=True`). Clicking the selected node again *does* deselect (toggle; also clears a whole box/lasso set). Do not write `[]` over an already-empty `-selected-nodes` — that store is an Input of `update_network_graph` (1.5–31 s).
+canopy#573 added a **Clear selection** button; the hint is "(Click again to deselect)".
 
 > See: [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046)
 
@@ -184,6 +185,16 @@ half-dead 200 (that path has no `error` and shows "Stopped"). Landed with `#578`
 cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 > See: [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)
+
+### 7. Read a Failed Recurrence Fit
+
+On `main`, a 422 `detail` stays on the exception `body`. `/api/status` `completion_reason` is `recurrence service error 422 on POST /v1/train`. canopy#702 (not merged) appends a 4xx `detail` (300 characters; validation `input` omitted) and leaves a 5xx `detail` off that field. Hover the status bar when the 120-character label ends in `…`. The regression card's numbers are the training split; #702 retitles the card in-sample.
+
+```bash
+curl -s http://127.0.0.1:8050/api/status | python -m json.tool
+```
+
+> See: [AGENTS_REFERENCE.md § Recurrence fit refusal](AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores)
 
 ---
 
@@ -295,6 +306,7 @@ Coverage includes:
 | Modebar camera clicks; no PNG, CSP `img-src` in console | `blob:` missing from `img-src` | Keep `img-src 'self' data: blob:`; do not move `blob:` onto `script-src`. See [AGENTS_REFERENCE § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) |
 | Status bar says "Stopped" while cascor is down   | Half-dead 200 has no `error`; UI read the payload (X7 1c) | Confirm `status_class` on `/api/status`; run `test_x7_status_cache.py` (landed with `#578`) |
 | Status bar says "Unreachable" during a skipped poll | Class rendered as UNREACHABLE instead of INDETERMINATE | `"circuit open"` must classify `indeterminate` → "Unknown"; do not share `_cb` with the refresher |
+| Recurrence fit fails and the bar shows only `422` | On `main` the service `detail` stays on the exception `body` | After #702, read `completion_reason` and hover if the label ends in `…`. A 5xx still omits `detail`. See [Recurrence fit refusal](AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores) |
 
 ---
 
@@ -323,6 +335,6 @@ Coverage includes:
 
 ---
 
-**Last Updated:** 2026-09-05
-**Version:** 1.0.4
+**Last Updated:** 2026-10-04
+**Version:** 1.0.6
 **Maintainer:** Paul Calnon

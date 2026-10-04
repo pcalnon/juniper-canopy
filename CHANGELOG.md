@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Operator runbook for a refused recurrence fit and the in-sample regression card.**
+  `docs/AGENTS_REFERENCE.md` § Recurrence fit refusal and in-sample scores. On `main`, a recurrence
+  422 `detail` stays on the exception `body`: `completion_reason` and the status bar carry
+  `recurrence service error 422 on POST /v1/train`, and the one-shot card is titled
+  `Recurrence (LMU) — final regression metrics` even though `POST /v1/train` scores the training
+  split. canopy#702 (not on `main`) appends a 4xx `detail` (300 characters; a validation `input`
+  is omitted), leaves a 5xx `detail` off `completion_reason` and the WARNING, shows a cut reason
+  on a status-bar hover (400 characters), and retitles the card in-sample. Pointers in
+  `docs/REFERENCE.md`, `docs/DEVELOPER_CHEATSHEET.md`, `docs/QUICK_START.md`, `docs/USER_MANUAL.md`,
+  and the testing guides. #702's own paragraph in `docs/api/API_REFERENCE.md` § Upstream Failures
+  is separate and is not on `main`.
 - **The publish path asserts that the image serves, and that it is the version it is tagged**
   (`util/check_image_serves.py`, new; `publish-image.yml`). The existing checks cover what the image
   contains and that `juniper_canopy` imports. Neither can see a stale version. The worker's 0.5.0 and

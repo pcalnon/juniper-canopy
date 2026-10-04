@@ -2,9 +2,9 @@
 
 ## Get Juniper Canopy running in 5 minutes
 
-**Version:** 0.25.3
+**Version:** 0.25.5
 **Status:** ✅ Production Ready
-**Last Updated:** September 5, 2026
+**Last Updated:** October 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -556,6 +556,24 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 **See:** [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)
 
+### Issue 11: Recurrence Fit Shows a Status Code and No Reason
+
+**Symptom:** A Recurrence (LMU) fit fails. The status bar reads `Failed — recurrence service error 422 on POST /v1/train`. The service answered with a `detail` such as `invalid dataset: X_train has non-finite values (NaN/Inf)`, and that text is not in the bar.
+
+**Cause:** On `main`, `RecurrenceServiceAdapter._parse` keeps the response text on the exception `body`. `completion_reason` is `str(exc)`, which does not include `detail`.
+
+**Check:**
+
+```bash
+curl -s http://127.0.0.1:8050/api/status | python -m json.tool
+```
+
+On `main`, `completion_reason` stops at the path. canopy#702 (not merged) appends a 4xx `detail`, flattened and cut at 300 characters. A validation list becomes `loc -> msg` pairs and omits each item's `input`. A 5xx `detail` stays off `completion_reason` and off the WARNING, because that text can quote the recurrence service's own upstream header value. When the status-bar label cuts a long reason at 120 characters, hover the bar: the tooltip holds the rest, up to 400 characters.
+
+The regression card on `main` is titled `Recurrence (LMU) — final regression metrics`. Those numbers are the training split `POST /v1/train` scored. #702 retitles the card `Recurrence (LMU) — in-sample (train split) regression metrics` and adds `Computed on the training split the fit saw; not a held-out score.`
+
+**See:** [AGENTS_REFERENCE.md § Recurrence fit refusal and in-sample scores](AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores)
+
 ## Next Steps
 
 ### Learn More
@@ -565,6 +583,7 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 - **[AGENTS.md](../AGENTS.md)** - Development guide and conventions
 - **[Event-loop I/O discipline (X7)](AGENTS_REFERENCE.md#event-loop-io-discipline-x7)** - Keep `/v1/health/live` answerable when cascor is down
 - **[Cascor status cache (X7 slice 1c)](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)** - Why `/api/status` publishes a class, not a raw payload
+- **[Recurrence fit refusal and in-sample scores](AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores)** - Where a 422 `detail` goes, and why the regression card is a training-split score
 - **[CI/CD Guide](ci_cd/CICD_QUICK_START.md)** - Testing and CI/CD workflows
 
 ### Start Developing
@@ -825,8 +844,8 @@ conda list | grep -E "(fastapi|dash|uvicorn)"
 
 ---
 
-**Last Updated:** September 5, 2026  
-**Version:** 0.25.3  
+**Last Updated:** October 4, 2026  
+**Version:** 0.25.5  
 **Status:** ✅ Production Ready
 
 **Last Updated:** 2026-03-15
