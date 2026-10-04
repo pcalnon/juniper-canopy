@@ -74,15 +74,16 @@ class TestF059RangeDictFromCascor:
         idle_style, active_style = out[0], out[1]
         assert idle_style == {"display": "none"}, "the idle placeholder still shows for a live cascor session"
         assert active_style == {"display": "block"}, "the player's controls never render for a cascor session"
-        assert out[9] == [0, 12], "the range slider value must be a [lo, hi] list"
-        assert out[11] == "[0, 12]", "the range readout"
+        # cascor's range end is exclusive and its window end is a count: 12 frames are indexes 0..11.
+        assert out[9] == [0, 11], "the range slider value must be an inclusive [lo, hi] list"
+        assert out[11] == "[0, 11]", "the range readout"
         assert out[14] == "V2 ✓ weights", "weights_available is true in the measured payload"
 
     def test_a_narrowed_dict_range_is_shown(self, render_session):
         block = dict(MEASURED_DATA_BLOCK, session=dict(MEASURED_SESSION, range={"start": 3, "end": 9}))
         out = render_session(block)
-        assert out[9] == [3, 9]
-        assert out[11] == "[3, 9]"
+        assert out[9] == [3, 8], "cascor's end 9 is exclusive: the last frame played is 8"
+        assert out[11] == "[3, 8]"
 
     def test_the_legacy_list_shape_still_renders(self, render_session):
         block = dict(MEASURED_DATA_BLOCK, session=dict(MEASURED_SESSION, range=[2, 7]))
@@ -94,7 +95,7 @@ class TestF059RangeDictFromCascor:
         block = dict(MEASURED_DATA_BLOCK, session=dict(MEASURED_SESSION, range=raw))
         out = render_session(block)
         assert out[1] == {"display": "block"}, f"render_session must not fail on range={raw!r}"
-        assert out[9] == [0, 12]
+        assert out[9] == [0, 11]
 
 
 @pytest.mark.unit
@@ -102,8 +103,8 @@ class TestF059SessionRangeHelper:
     @pytest.mark.parametrize(
         "raw, expected",
         [
-            ({"start": 0, "end": 12}, [0, 12]),
-            ({"start": 4, "end": 8}, [4, 8]),
+            ({"start": 0, "end": 13}, [0, 12]),  # cascor's end is exclusive
+            ({"start": 4, "end": 8}, [4, 7]),
             ([4, 8], [4, 8]),
             ((4, 8), [4, 8]),
             ({"start": -5, "end": 99}, [0, 12]),  # clamped to the window

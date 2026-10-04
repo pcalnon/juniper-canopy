@@ -121,8 +121,10 @@ class ReplayPlayerPanel(BaseComponent):
                 #   {snapshot_id, fsm_state, time_index, range: [start, end] | None,
                 #    speed, playing}
                 # cascor's replay block nests range/speed/weights_available under
-                # ``session``, with range as {start, end}; ``_session_range``
-                # normalises both shapes (F-CANOPY-059).
+                # ``session``, with range as {start, end}, end EXCLUSIVE;
+                # ``_session_range`` normalises both shapes to an inclusive
+                # [lo, hi] (F-CANOPY-059). ``time_index.snapshot_window.end_epoch``
+                # is the history length, so the last index is end_epoch - 1.
                 dcc.Store(id="replay-player-session", data=None),
                 # Trigger the player to issue a control request. The
                 # callbacks below write here when buttons / sliders fire;
@@ -400,15 +402,27 @@ class ReplayPlayerPanel(BaseComponent):
 
     @staticmethod
     def _session_window(session: Optional[Dict[str, Any]]) -> tuple[int, int]:
-        """Extract (start_epoch, end_epoch) from the session payload.
+        """Extract the first and last playable index, inclusive, from the session payload.
 
         Tolerates the unified response shape (``time_index.snapshot_window``)
         and the legacy/test shape (``length`` / ``window``).
+
+        cascor's ``snapshot_window.end_epoch`` is a COUNT, the length of the
+        history (``_compute_snapshot_window``), and its replay indexes run
+        ``0 .. length - 1``. So the last playable index is ``end_epoch - 1``;
+        reading the count as an index put one unplayable position on the
+        scrubber and the range slider. The legacy ``window.end_epoch`` is
+        already the last index (``length - 1``).
         """
         if not session:
             return 0, 1
         ti = session.get("time_index") or {}
-        window = ti.get("snapshot_window") or session.get("window") or {}
+        unified = ti.get("snapshot_window") if isinstance(ti, dict) else None
+        if unified:
+            start = int(unified.get("start_epoch", 0))
+            end = int(unified.get("end_epoch", start + 1)) - 1
+            return start, max(start, end)
+        window = session.get("window") or {}
         start = int(window.get("start_epoch", 0))
         end = int(window.get("end_epoch", session.get("length", 1) - 1))
         if end < start:
@@ -438,19 +452,24 @@ class ReplayPlayerPanel(BaseComponent):
 
     @staticmethod
     def _session_range(raw: Any, start: int, end: int) -> list:
-        """The playback range as a ``[lo, hi]`` list, clamped to the snapshot window (F-CANOPY-059).
+        """The playback range as an inclusive ``[lo, hi]`` list, clamped to the snapshot window (F-CANOPY-059).
 
         cascor's ``state_summary()`` serves ``range`` as a dict, ``{"start": …, "end": …}``
         (cascor ``manager.py``, since cascor#178). canopy#532 read it one level deeper for
         F-CANOPY-015 but indexed it as a list, so every session cascor served raised
         ``KeyError: 0`` inside ``render_session`` and the player never rendered. The list
-        shape stays accepted (legacy sessions, and ``_merge_session``'s local fallback).
-        Anything else, or an unparsable value, falls back to the full window.
+        shape stays accepted (legacy sessions). Anything else, or an unparsable value,
+        falls back to the full window.
+
+        cascor's ``end`` is EXCLUSIVE (``set_range``: "``[start, end)``"), while the slider
+        and its readout are inclusive, so the dict's ``end`` maps to ``end - 1``.
+        ``queue_control`` adds the 1 back when it sends a range. The list shape is
+        canopy's own and already inclusive.
         """
         lo, hi = start, end
         try:
             if isinstance(raw, dict) and "start" in raw and "end" in raw:
-                lo, hi = int(raw["start"]), int(raw["end"])
+                lo, hi = int(raw["start"]), int(raw["end"]) - 1
             elif isinstance(raw, (list, tuple)) and len(raw) == 2:
                 lo, hi = int(raw[0]), int(raw[1])
         except (TypeError, ValueError):
@@ -659,6 +678,15 @@ class ReplayPlayerPanel(BaseComponent):
 
             Writes ``{action, params}`` to ``-control-trigger`` Store; a
             sibling callback issues the HTTP POST.
+
+            ``render_session`` writes the scrubber, speed and range values
+            whenever the session changes, and those writes are this
+            callback's Inputs. So a slider value that equals what the
+            session already shows is an echo of that render, not a user
+            action, and queues nothing. Without this, every session write
+            sent a control request whose result wrote the session again
+            (the ``can015-replay-player-control-loop`` exemption in
+            ``test_f048_replay_cycle.py``).
             """
             ctx = dash.callback_context
             if not ctx.triggered or not session or not session.get("snapshot_id"):
@@ -680,17 +708,23 @@ class ReplayPlayerPanel(BaseComponent):
                     return dash.no_update
                 return {"action": "stop", "ts": stop}
             if prop_id.endswith("-scrubber.value"):
-                if value is None:
+                if value is None or int(value) == self._session_current_index(session):
                     return dash.no_update
                 return {"action": "seek", "params": {"time_index": int(value)}}
+            summary = self._session_summary(session)
             if prop_id.endswith("-speed.value"):
-                if value is None:
+                if value is None or float(value) == float(summary.get("speed", SPEED_DEFAULT)):
                     return dash.no_update
                 return {"action": "speed", "params": {"value": float(value)}}
             if prop_id.endswith("-range.value"):
                 if not value or len(value) != 2:
                     return dash.no_update
-                return {"action": "range", "params": {"start": int(value[0]), "end": int(value[1])}}
+                lo, hi = int(value[0]), int(value[1])
+                start, end = self._session_window(session)
+                if [lo, hi] == self._session_range(summary.get("range"), start, end):
+                    return dash.no_update
+                # The slider is inclusive; cascor's range end is exclusive.
+                return {"action": "range", "params": {"start": lo, "end": hi + 1}}
             return dash.no_update
 
         @app.callback(
@@ -916,7 +950,9 @@ class ReplayPlayerPanel(BaseComponent):
             summary["speed"] = float(params.get("value", SPEED_DEFAULT))
             new["playing"] = abs(summary["speed"]) > 1e-9
         elif action == "range":
-            ReplayPlayerPanel._summary_for_write(new)["range"] = [int(params.get("start", 0)), int(params.get("end", 0))]
+            # ``params`` is the outbound request, whose ``end`` is exclusive, so
+            # store it in cascor's own ``{start, end}`` shape.
+            ReplayPlayerPanel._summary_for_write(new)["range"] = {"start": int(params.get("start", 0)), "end": int(params.get("end", 0))}
         return new
 
     @staticmethod

@@ -127,7 +127,7 @@ class TestF056ControlResultsReachTheSession:
         assert new["time_index"]["snapshot_window"] == {"start_epoch": 0, "end_epoch": 12}, "the window must survive"
         out = callbacks["render_session"](new)
         assert out[6] == 7, "scrubber value"
-        assert out[10] == "7 / 12", "epoch readout"
+        assert out[10] == "7 / 11", "epoch readout: 12 frames are indexes 0..11"
 
     def test_seek_shows_cascors_clamped_index_not_the_request(self, callbacks):
         new = _dispatch(callbacks, "seek", _envelope("seek", _summary(time_index=11)), params={"time_index": 40})
@@ -142,8 +142,8 @@ class TestF056ControlResultsReachTheSession:
     def test_range_reaches_the_slider(self, callbacks):
         new = _dispatch(callbacks, "range", _envelope("range", _summary(range={"start": 3, "end": 9})), params={"start": 3, "end": 9})
         out = callbacks["render_session"](new)
-        assert out[9] == [3, 9], "range slider value"
-        assert out[11] == "[3, 9]", "range readout"
+        assert out[9] == [3, 8], "range slider value (cascor's end is exclusive)"
+        assert out[11] == "[3, 8]", "range readout"
 
     def test_no_envelope_key_lands_on_the_session(self, callbacks):
         new = _dispatch(callbacks, "play", _envelope("play", _summary(paused=False)))
@@ -168,7 +168,7 @@ class TestF056MergeSessionShapes:
         assert new["session"]["speed"] == 3.0
         assert "status" not in new and "meta" not in new
 
-    @pytest.mark.parametrize("action,params,key,expected", [("speed", {"value": 2.0}, "speed", 2.0), ("range", {"start": 2, "end": 8}, "range", [2, 8])])
+    @pytest.mark.parametrize("action,params,key,expected", [("speed", {"value": 2.0}, "speed", 2.0), ("range", {"start": 2, "end": 8}, "range", {"start": 2, "end": 8})])
     def test_the_local_fallback_writes_where_render_reads(self, action, params, key, expected):
         new = ReplayPlayerPanel._merge_session(copy.deepcopy(MEASURED_DATA_BLOCK), action, params, None)
         assert new["session"][key] == expected, "a nested session's summary is what render_session reads"
