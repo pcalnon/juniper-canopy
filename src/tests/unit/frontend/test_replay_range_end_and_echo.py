@@ -57,6 +57,8 @@ CID = "rp-echo"
 
 
 class _Ctx:
+    __slots__ = ("triggered",)
+
     def __init__(self, triggered):
         self.triggered = triggered
 
