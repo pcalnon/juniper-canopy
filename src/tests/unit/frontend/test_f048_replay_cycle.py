@@ -227,6 +227,9 @@ EXEMPT_CYCLES = {
     # programmatic scrubber/range/speed writes are Inputs of queue_control, so a chain that
     # starts at a session write made elsewhere is not pruned before it reaches queue_control
     # -- the trigger shape F-CANOPY-048's review found latent in the metrics replay block.
+    # queue_control now returns no_update for a value equal to what the session shows, so a
+    # render's own writes queue nothing (test_replay_range_end_and_echo.py). The graph cycle,
+    # and so this exemption, remains; still unmeasured live.
     "can015-replay-player-control-loop": frozenset(
         {
             "replay-player-session.data",

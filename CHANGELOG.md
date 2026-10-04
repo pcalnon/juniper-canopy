@@ -121,6 +121,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The replay player's range plays its last frame, its sliders stop at the last frame, and its own
+  renders no longer send control requests (follow-ups to F-CANOPY-059 and F-CANOPY-056).**
+  - cascor's range end is exclusive (`set_range`: `[start, end)`), while the range slider is
+    inclusive. `queue_control` now sends the slider's upper value plus one, and `_session_range`
+    shows cascor's `end` minus one. Before, a chosen range never played its last frame.
+  - cascor's `snapshot_window.end_epoch` is the history length, not the last index.
+    `_session_window` now ends that window at `end_epoch - 1`, so the scrubber and the range slider
+    no longer offer a position cascor clamps away. The legacy `window` shape already held the last
+    index and is unchanged.
+  - `render_session` writes the scrubber, speed and range values, and those are `queue_control`'s
+    Inputs. So every session write sent a control request whose result wrote the session again.
+    This is the `can015-replay-player-control-loop` cycle in `test_f048_replay_cycle.py`, which F-059
+    and F-056 had kept unreachable. `queue_control` now ignores a value equal to what the session
+    already shows.
+  - The local fallback stores a range in cascor's `{start, end}` shape.
+  - `src/tests/unit/frontend/test_replay_range_end_and_echo.py` is new, with 13 tests; 9 of them fail
+    on the parent. Fixtures that encoded the old off-by-one are corrected:
+    - `test_f059_replay_range_dict.py`, `test_f056_replay_control_envelope.py` and
+      `test_replay_player_panel.py`: the expected values.
+    - `test_replay_player_panel_gate_coverage.py`: the outbound end.
+    - `test_p2_wave_batch_a.py`: a window whose `end_epoch` disagreed with its `length`.
 - **Against cascor, the replay player's controls take effect, and Stop ends the session
   (F-CANOPY-056, P1).** canopy's `/replay/control` proxy passes cascor's envelope through unchanged,
   `{status, data: {…, result}, meta}`. `_merge_session` overlaid that envelope onto the session, and

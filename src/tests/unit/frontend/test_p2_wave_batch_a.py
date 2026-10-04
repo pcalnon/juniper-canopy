@@ -186,7 +186,7 @@ class TestF015ReplaySessionSummaryNesting:
         "operation": "replay",
         "snapshot_id": "snap-1",
         "status": "ok",
-        "time_index": {"current": 5, "snapshot_window": {"start_epoch": 0, "end_epoch": 40}},
+        "time_index": {"current": 5, "snapshot_window": {"start_epoch": 0, "end_epoch": 41}},
         "training_params": {},
         "session": {
             "length": 41,
@@ -204,7 +204,7 @@ class TestF015ReplaySessionSummaryNesting:
         summary = ReplayPlayerPanel._session_summary(self.DATA_BLOCK)
         assert summary.get("weights_available") is True, "the V2 weights badge reads False from a V2 snapshot"
         assert summary.get("range") == {"start": 3, "end": 37}
-        assert ReplayPlayerPanel._session_range(summary.get("range"), 0, 40) == [3, 37]
+        assert ReplayPlayerPanel._session_range(summary.get("range"), 0, 40) == [3, 36]  # cascor's end is exclusive
         assert summary.get("speed") == 2.0
 
     def test_flat_legacy_shape_still_resolves(self):

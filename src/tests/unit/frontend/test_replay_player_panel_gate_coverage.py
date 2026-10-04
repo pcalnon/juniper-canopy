@@ -133,7 +133,8 @@ class TestQueueControl:
     def test_range_change(self, registered):
         with patch("dash.callback_context", _trigger("rp-gate-range.value", [2, 8])):
             result = registered._cb_queue_control(0, 0, 0, 0, 1.0, [2, 8], _session())
-        assert result == {"action": "range", "params": {"start": 2, "end": 8}}
+        # The slider is inclusive; cascor's range end is exclusive, so [2, 8] is sent as end 9.
+        assert result == {"action": "range", "params": {"start": 2, "end": 9}}
 
     def test_range_bad_length_no_update(self, registered):
         with patch("dash.callback_context", _trigger("rp-gate-range.value", [2])):
