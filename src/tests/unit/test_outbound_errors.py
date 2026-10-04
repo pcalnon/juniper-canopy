@@ -49,7 +49,7 @@ from juniper_cascor_client.exceptions import JuniperCascorConflictError, Juniper
 from juniper_data_client.exceptions import JuniperDataClientError  # noqa: E402
 
 from backend.cascor_service_adapter import CascorServiceAdapter  # noqa: E402
-from backend.recurrence_service_adapter import RecurrenceServiceError, RecurrenceServiceUnavailableError  # noqa: E402
+from backend.recurrence_service_adapter import RecurrenceServiceAdapter, RecurrenceServiceError, RecurrenceServiceUnavailableError  # noqa: E402
 
 SRC = Path(__file__).resolve().parents[2]
 MARK = "LEAKME-7f3a"
@@ -97,6 +97,40 @@ class TestOutboundErrorText:
     def test_the_upstreams_answer_passes(self, exc, expected):
         """PR-B2 / N4 / CAN-015h surface cascor's own detail on purpose; an answered request had every header sendable."""
         assert outbound_error_text(exc) == expected
+
+    @pytest.mark.parametrize(
+        "status_code, body, expected",
+        [
+            (422, {"detail": "invalid dataset: X_train has non-finite values (NaN/Inf)"}, "recurrence service error 422 on POST /v1/train: invalid dataset: X_train has non-finite values (NaN/Inf)"),
+            (422, {"detail": [{"loc": ["body", "d"], "msg": "Input should be a valid integer", "input": MARK}]}, "recurrence service error 422 on POST /v1/train: body.d -> Input should be a valid integer"),
+            (409, {"detail": "a training run is already in progress"}, "recurrence training already in progress (POST /v1/train): a training run is already in progress"),
+        ],
+        ids=["recurrence-422-string", "recurrence-422-list", "recurrence-409"],
+    )
+    def test_the_recurrence_services_detail_passes(self, status_code, body, expected):
+        """W0.5 / F-C1: the adapter folds the service's JSON ``detail`` into the message, and that is the answer.
+
+        It is the server's reply, not transport text, so it passes like cascor's -- built by the real ``_parse``, and
+        without the validation item's ``input`` (``MARK`` here), which echoes the request and is never rendered.
+        """
+        with pytest.raises(RecurrenceServiceError) as caught:
+            RecurrenceServiceAdapter._parse(httpx.Response(status_code, json=body), "POST", "/v1/train")
+        assert outbound_error_text(caught.value) == expected
+        assert MARK not in outbound_error_text(caught.value)
+
+    @pytest.mark.parametrize("status_code", [500, 502, 503])
+    def test_a_recurrence_5xx_detail_that_relays_a_refused_key_never_passes(self, status_code):
+        """A 5xx detail is the service relaying its OWN upstream's failure -- transport text one hop removed.
+
+        juniper-recurrence's ``map_data_error`` answers a juniper-data client failure with ``502 f"data fetch failed:
+        {exc}"``, and juniper-data-client words a refused header value as below, so a padded juniper-data key on the
+        service would ride in the detail. The adapter never appends a 5xx detail, so it cannot reach a caller.
+        """
+        relayed = f"data fetch failed: Request failed: Invalid leading whitespace, reserved character(s), or return character(s) in header value: ' {MARK}'"
+        with pytest.raises(RecurrenceServiceError) as caught:
+            RecurrenceServiceAdapter._parse(httpx.Response(status_code, json={"detail": relayed}), "POST", "/v1/train")
+        assert outbound_error_text(caught.value) == f"recurrence service error {status_code} on POST /v1/train"
+        assert MARK not in outbound_error_text(caught.value)
 
     def test_an_answer_with_no_text_is_named_by_type(self):
         assert outbound_error_text(JuniperCascorConflictError("", status_code=409)) == "JuniperCascorConflictError"

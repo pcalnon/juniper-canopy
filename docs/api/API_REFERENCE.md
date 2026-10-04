@@ -1572,6 +1572,13 @@ or `detail` field, a control acknowledgement on the WebSocket, the `/api/status`
 - the exception's type name alone (for example `JuniperCascorConnectionError`) for anything else: a refused
   header value, an unreachable or timed-out upstream, a malformed reply.
 
+When the recurrence service refuses a request (a 4xx), its answer ends with the reply's own `detail`, flattened to
+one line and bounded to 300 characters, for example
+`recurrence service error 422 on POST /v1/train: invalid dataset: X_train has non-finite values (NaN/Inf)`.
+A validation-error list is rendered as `loc -> msg` pairs, separated by a semicolon and a space, without the
+`input` each item echoes. A 5xx answer carries no `detail`: there the service relays its own upstream's exception
+text (`data fetch failed: …`), which can quote that service's juniper-data key.
+
 The transport text of such a failure -- URLs, socket errors, and a header value a client refused to send --
 goes to canopy's logs only.
 

@@ -7339,6 +7339,13 @@ class DashboardManager:
     # raw exception string of unbounded length.
     _COMPLETION_REASON_MAX_CHARS = 120
 
+    # The longest a FAILED run's reason may occupy in the status bar's hover tooltip (W0.5 /
+    # F-C1). The bar keeps the short bound above; the tooltip carries the reason whole. The
+    # recurrence adapter bounds the service's ``detail`` at 300 characters behind at most 92 of
+    # its own (the 401/403 wording on ``POST /v1/train``), so 400 holds every recurrence failure
+    # reason uncut. The bound exists because the field is free text from any producer.
+    _FAILURE_REASON_TOOLTIP_MAX_CHARS = 400
+
     @staticmethod
     def _completion_reason_label(reason):
         """Map a backend's ``completion_reason`` to a status-bar suffix.
@@ -7379,7 +7386,7 @@ class DashboardManager:
         """Render a FAILED run's reason, which is free text rather than a vocabulary.
 
         ``RecurrenceBackend.get_status`` writes the raw adapter error into the same
-        ``completion_reason`` field on ``state == "failed"`` (``recurrence_backend.py:274``).
+        ``completion_reason`` field on ``state == "failed"`` (``recurrence_backend.py``).
         That is an overload: cascor's five values are all *completion* outcomes, so the
         consumer below was gated on ``status == "Completed"`` and a failure reason was written
         and then never read — the operator saw a bare "Failed" with the cause discarded.
@@ -7387,13 +7394,33 @@ class DashboardManager:
         Free text, so it is bounded and flattened rather than mapped. A mapping table cannot
         cover an exception string, and a status bar cannot carry a traceback.
         """
-        if not isinstance(reason, str):
+        return cls._flattened_and_bounded(reason, cls._COMPLETION_REASON_MAX_CHARS)
+
+    @classmethod
+    def _failure_reason_tooltip(cls, reason):
+        """The FAILED run's whole reason for the status bar's hover tooltip (W0.5 / F-C1).
+
+        The label above is cut at ``_COMPLETION_REASON_MAX_CHARS``, and the recurrence
+        service's 422 ``detail`` -- the part that says *why* -- sits at the END of the reason
+        (``recurrence service error 422 on POST /v1/train: <detail>``), so a long one is cut
+        exactly where the operator needs it. This is the same text, flattened the same way,
+        under the larger ``_FAILURE_REASON_TOOLTIP_MAX_CHARS`` bound.
+        """
+        return cls._flattened_and_bounded(reason, cls._FAILURE_REASON_TOOLTIP_MAX_CHARS)
+
+    @staticmethod
+    def _flattened_and_bounded(text, max_chars):
+        """``text`` on one line (whitespace runs collapsed), cut to ``max_chars`` with an ellipsis.
+
+        ``None`` for anything that is not a string or holds no visible text.
+        """
+        if not isinstance(text, str):
             return None
-        collapsed = " ".join(reason.split())
+        collapsed = " ".join(text.split())
         if not collapsed:
             return None
-        if len(collapsed) > cls._COMPLETION_REASON_MAX_CHARS:
-            return collapsed[: cls._COMPLETION_REASON_MAX_CHARS - 1].rstrip() + "…"
+        if len(collapsed) > max_chars:
+            return collapsed[: max_chars - 1].rstrip() + "…"
         return collapsed
 
     @staticmethod
@@ -7571,6 +7598,8 @@ class DashboardManager:
             "Failed": "#dc3545",  # Red
         }
         status_color = status_colors.get(status, "#6c757d")
+        # Set only by the Failed branch below (W0.5 / F-C1): the whole reason, when the label cut it.
+        status_tooltip = None
 
         # Issue #3 follow-up: on a completed run, append cascor's grow_network
         # completion_reason so the operator sees *why* it stopped (converged vs a
@@ -7590,9 +7619,17 @@ class DashboardManager:
             # Deliberately NOT routed through ``_completion_reason_label``: that is a
             # vocabulary table, and this value is free text. Passing it there would return
             # ``None`` for every real error and reinstate the silence.
-            failure_label = self._failure_reason_label(status_data.get("completion_reason"))
+            failure_reason = status_data.get("completion_reason")
+            failure_label = self._failure_reason_label(failure_reason)
             if failure_label:
                 status = f"{status} — {failure_label}"
+                # W0.5 / F-C1: when the label had to cut the reason, the whole reason rides
+                # on a hover tooltip -- the service's ``detail`` is at its end, which is
+                # exactly what the cut drops. A reason the label already holds gets none: a
+                # tooltip that repeats the label adds nothing.
+                failure_tooltip = self._failure_reason_tooltip(failure_reason)
+                if failure_tooltip != failure_label:
+                    status_tooltip = failure_tooltip
 
         # Partial-data contract: a run on a partial dataset carries the mark on the surface
         # every operator watches, in every state -- progress while it runs, result when it
@@ -7615,11 +7652,17 @@ class DashboardManager:
         # Build connection status text for backward compat (hidden element)
         connection_status = f"Status: {status} | Phase: {phase}"
 
+        # ``top-status-display.children`` is the plain status string in every case but one: a
+        # failure whose reason the label had to cut renders as a Span whose ``title`` (the
+        # browser's hover tooltip) holds the reason whole. Carrying it as the children keeps
+        # this callback's Output list -- and the 9-tuple every caller unpacks -- unchanged.
+        status_display = html.Span(status, title=status_tooltip) if status_tooltip else status
+
         return (
             latency_indicator_style,
             connection_status,
             latency_text,
-            status,
+            status_display,
             status_style,
             phase,
             phase_style,
