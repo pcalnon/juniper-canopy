@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-08-24
-**Version:** 0.28.0
+**Last Updated:** 2026-10-05
+**Version:** 0.28.1
 **Status:** Current
 
 ## Table of Contents
@@ -187,7 +187,7 @@ lint:
 | `.github/workflows/pr-base-branch-guard.yml` | `pull_request` + `merge_group`                                       | Fail if PR base is not the default branch            |
 | `.github/workflows/scheduled-tests.yml`     | daily cron + manual                                                  | Slow / integration tests                             |
 | `.github/workflows/agents-md-touch-up.yml`  | PR paths `AGENTS.md`                                                 | Verify `Last Updated` date (does not rewrite)        |
-| `.github/workflows/claude.yml`              | issue/PR comments containing `@claude`                               | Optional Claude Code assistant                       |
+| `.github/workflows/claude.yml`              | comment, submitted review, or new/assigned issue with `@claude`      | Optional assistant; not a merge gate. See [Claude Code workflow](#claude-code-workflow) |
 
 ## Main CI Workflow (`ci.yml`)
 
@@ -473,6 +473,37 @@ This catches broken internal file and heading links without requiring sibling re
   2. Publish to TestPyPI + install verification
   3. Publish to PyPI
 
+### Claude Code workflow
+
+Live file: `.github/workflows/claude.yml`. The header says this copy is the fleet template, that `juniper-ml/.github/workflows/claude.yml` is the source of truth, and that the action invocation stays generic. The workflow name is `Claude Code`. It is not a required status check.
+
+The job `claude` runs only when its `if` sees the case-sensitive substring `@claude`:
+
+| Event | Types | Text that must contain `@claude` |
+| --- | --- | --- |
+| `issue_comment` | `created` | `github.event.comment.body` |
+| `pull_request_review_comment` | `created` | `github.event.comment.body` |
+| `pull_request_review` | `submitted` | `github.event.review.body` |
+| `issues` | `opened`, `assigned` | `github.event.issue.body` or `github.event.issue.title` |
+
+Opening or editing a pull request does not subscribe. `@claude` in a pull-request title or body never schedules the job. Editing an issue or a submitted review does not either.
+
+Job permissions: `contents: write`, `pull-requests: write`, `issues: write`, `id-token: write`, `actions: read`.
+
+Steps:
+
+- Checkout is SHA-pinned with `fetch-depth: 1`. That pin is a separate `uses:` line.
+- `anthropics/claude-code-action` is SHA-pinned. The version record is the `# vX.Y.Z` comment on that line. Do not copy the SHA into this reference. The only `with:` input is `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}`.
+
+`.github/dependabot.yml` groups only `github/codeql-action*`. A Claude action bump is one line in `claude.yml`. It does not move the checkout pin, `codeql.yml`, or `ci.yml`. Review the bump by confirming `with:` is still only `anthropic_api_key`.
+
+The job `if` is not the last gate. The pinned action then applies its own checks before it calls the model:
+
+- No `prompt` input is set, so the action stays in tag mode. `trigger_phrase` is unset and defaults to `@claude`. That check is case-insensitive and requires the phrase as its own token: start of text or whitespace, then `@claude`, then whitespace or one of `.,!?;:`. `@Claude` never schedules the job, because the workflow `if` uses case-sensitive `contains`. A substring such as `foo@claude` or `@claudefoo` can schedule the job and then miss this token check.
+- When the token check fails, the step logs `No trigger found, skipping remaining steps` and returns without failing. Assigning an issue is this case. The workflow `if` matches `@claude` already present in the title or body, but `assignee_trigger` is unset, so the action does not treat the assignee as a trigger and it does not re-read the title or body on `assigned`.
+- A matching human with write access continues. `allowed_bots` is unset; the default empty string allows no bots. A bot whose text matches the token fails the step (non-human actor) instead of running. `allowed_non_write_users` is unset, so an actor without write access fails the step (`Actor does not have write permissions to the repository`) before the trigger check.
+- Bedrock, Vertex, Foundry, and the workload-identity inputs are unset. `id-token: write` is still granted. The workflow header says `ANTHROPIC_API_KEY` is an org secret and that this repo must be able to read it. No other auth input is passed. The action installs its own Claude Code CLI; that version is inside the action pin, not a canopy setting.
+
 ## Tooling and Configuration Sources
 
 | Concern                     | Source of Truth                                |
@@ -482,7 +513,8 @@ This catches broken internal file and heading links without requiring sibling re
 | CI dependencies             | `conf/requirements_ci.txt`                     |
 | Security scan excludes      | `.bandit.yml` + workflow commands              |
 | CodeQL action pins          | SHA comments on `codeql.yml` + `ci.yml` `upload-sarif` |
-| Dependabot action groups    | `.github/dependabot.yml` (`codeql-action`)     |
+| Claude action pin           | `# vX.Y.Z` comment on the `claude.yml` `uses:` line (ungrouped) |
+| Dependabot action groups    | `.github/dependabot.yml` (`codeql-action` only) |
 | Doc-link validation rules   | `scripts/check_doc_links.py`                   |
 
 ## Documentation Link Validation

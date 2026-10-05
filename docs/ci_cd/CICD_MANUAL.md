@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-08-24
-**Version:** 0.27.0
+**Last Updated:** 2026-10-05
+**Version:** 0.27.1
 **Status:** Current
 
 ## Table of Contents
@@ -655,6 +655,7 @@ It is source-verified against:
 - `.github/workflows/security-scan.yml`
 - `.github/workflows/lockfile-update.yml`
 - `.github/workflows/publish.yml`
+- `.github/workflows/claude.yml`
 - `.github/dependabot.yml`
 - `pyproject.toml`
 - `scripts/check_doc_links.py`
@@ -1563,6 +1564,16 @@ The `codeql-action` group updates `init` / `autobuild` / `analyze` in `codeql.ym
     languages: ${{ matrix.language }}
     queries: +security-and-quality
 ```
+
+### Claude Code assistant
+
+`claude.yml` is an optional assistant, not a merge gate. The contract is [Claude Code workflow](CICD_REFERENCE.md#claude-code-workflow).
+
+1. Mention `@claude` (that exact case) in a new issue comment, a pull-request review comment, a submitted review body, or the title or body of an issue you are opening.
+2. Do not expect a pull-request description, an issue edit, or an assignee change to call the model. Assigning an issue whose text already contains `@claude` starts the job, then the action skips (`assignee_trigger` is unset).
+3. The actor must be a human with write access. Bot comments are not on `allowed_bots`, so a matching bot comment fails the step.
+4. Confirm the repo can read `ANTHROPIC_API_KEY`. The workflow header calls that an org secret. The step passes no other auth input.
+5. A Dependabot pull request that only changes the `anthropics/claude-code-action` `uses:` line and its `# vX.Y.Z` comment is the expected shape. It is not in the `codeql-action` group. Leave the SHA in the workflow comment.
 
 ---
 

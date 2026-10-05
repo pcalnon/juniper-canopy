@@ -1,7 +1,7 @@
 # CI/CD Environment Setup
 
-**Last Updated:** 2026-08-24
-**Version:** 0.28.0
+**Last Updated:** 2026-10-05
+**Version:** 0.28.1
 **Status:** Current
 
 ## Table of Contents
@@ -23,6 +23,7 @@ The workflow definitions are:
 - `.github/workflows/security-scan.yml`
 - `.github/workflows/publish.yml`
 - `.github/workflows/lockfile-update.yml`
+- `.github/workflows/claude.yml` (optional assistant; not a merge gate)
 
 ## Runner and Python Strategy
 
@@ -97,6 +98,8 @@ pip install -e .
 
 - `CROSS_REPO_DISPATCH_TOKEN`:
   Used by `lockfile-update.yml` to push lockfile updates in Dependabot branches with CI retriggering behavior.
+- `ANTHROPIC_API_KEY`:
+  Read by `claude.yml` as the only auth input (`anthropic_api_key`). The workflow header says this is an org secret and that the repo must be able to read it. Bedrock, Vertex, Foundry, and workload-identity inputs are not set.
 
 ### Workflow permissions
 
@@ -104,6 +107,7 @@ pip install -e .
 - `codeql.yml`: `actions: read`, `contents: read`, `security-events: write` for CodeQL analyze
 - `publish.yml`: `id-token: write` for OIDC trusted publishing
 - `lockfile-update.yml`: `contents: write` for bot lockfile commits
+- `claude.yml`: `contents: write`, `pull-requests: write`, `issues: write`, `id-token: write`, `actions: read`. Not a required check. `id-token: write` is granted even though the workload-identity inputs are unset.
 
 ## Quality Gates That Depend on Environment
 
@@ -166,6 +170,10 @@ Reproduce with that interpreter locally and run the same marker filters used in 
 ### `Analyze (python)` is red after a GitHub Actions bump
 
 Confirm `.github/workflows/codeql.yml` and the `ci.yml` `upload-sarif` step share the same `github/codeql-action` SHA comment. Dependabot groups those uses; splitting the pins is the usual review mistake.
+
+### `@claude` did not call the model
+
+The job in `.github/workflows/claude.yml` starts only for a case-sensitive `@claude` on a new comment, a submitted review body, or an issue being opened or assigned (title or body). A pull-request description does not match. If the job starts and the step logs `No trigger found, skipping remaining steps`, the action's token check rejected it — assigning an issue does this, because `assignee_trigger` is unset. A bot that does match fails the step; `allowed_bots` is empty. Then confirm `ANTHROPIC_API_KEY` is visible to the repo. Full contract: [Claude Code workflow](CICD_REFERENCE.md#claude-code-workflow).
 
 ## References
 

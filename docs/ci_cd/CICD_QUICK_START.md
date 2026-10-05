@@ -1,8 +1,8 @@
 # CI/CD Quick Start
 
-**Last Updated:** 2026-08-24  
+**Last Updated:** 2026-10-05  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.27.0  
+**Version:** 0.27.1  
 **Status:** Current
 
 ## Prerequisites
@@ -113,6 +113,10 @@ Open the PR checks and confirm these gates complete:
   The group pattern `github/codeql-action*` covers `init` / `autobuild` / `analyze` **and** `upload-sarif` (Bandit SARIF). Review both files; keep the SHA comments in lockstep.
 - Waiting only on `Security Scans` (Bandit / pip-audit / Gitleaks) for a SAST signal:
   Semantic CodeQL is `Analyze (python)` from `.github/workflows/codeql.yml`.
+- `@claude` in a pull-request description does nothing, and assigning an issue does not call the model:
+  The job `if` in `.github/workflows/claude.yml` is a case-sensitive substring check on a comment, a submitted review body, or an issue being opened or assigned. The action then requires `@claude` as its own token, so an assignment still skips. See [Claude Code workflow](CICD_REFERENCE.md#claude-code-workflow).
+- A `ci: bump anthropics/claude-code-action` pull request looks like a one-line pin move:
+  That action is not in the `codeql-action` group. Confirm `with:` is still only `anthropic_api_key`, and leave the version in the `# vX.Y.Z` comment.
 
 ## Next Steps
 
