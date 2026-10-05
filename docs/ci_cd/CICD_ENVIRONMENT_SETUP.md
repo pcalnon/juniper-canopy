@@ -1,7 +1,7 @@
 # CI/CD Environment Setup
 
 **Last Updated:** 2026-10-05
-**Version:** 0.28.2
+**Version:** 0.28.3
 **Status:** Current
 
 ## Table of Contents

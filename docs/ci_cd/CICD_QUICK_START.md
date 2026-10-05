@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-10-05  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.27.2  
+**Version:** 0.27.3  
 **Status:** Current
 
 ## Prerequisites

@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
 **Last Updated:** 2026-10-05
-**Version:** 0.28.2
+**Version:** 0.28.3
 **Status:** Current
 
 ## Table of Contents
@@ -728,6 +728,6 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 ---
 
 **Last Updated:** 2026-10-05
-**Version:** 0.28.2
+**Version:** 0.28.3
 **Maintained By:** Development Team
 **Status:** ✅ Current

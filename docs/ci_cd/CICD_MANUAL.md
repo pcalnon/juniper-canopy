@@ -1,7 +1,7 @@
 # CI/CD Manual
 
 **Last Updated:** 2026-10-05
-**Version:** 0.27.2
+**Version:** 0.27.3
 **Status:** Current
 
 ## Table of Contents
