@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-08-24
-**Version:** 0.28.0
+**Last Updated:** 2026-10-05
+**Version:** 0.28.2
 **Status:** Current
 
 ## Table of Contents
@@ -182,6 +182,7 @@ lint:
 | `.github/workflows/security-scan.yml`       | weekly cron + manual                                                 | Scheduled Bandit + pip-audit                         |
 | `.github/workflows/lockfile-update.yml`     | Dependabot push branches                                             | Auto-refresh `requirements.lock`                     |
 | `.github/workflows/publish.yml`             | release published                                                    | Build + TestPyPI + PyPI publish                      |
+| `.github/workflows/publish-image.yml`       | release `v*`, path-filtered PR, manual dispatch                     | GHCR multi-arch image; serve-and-version gate        |
 | `.github/workflows/sequence-safety.yml`     | `pull_request` to `main`/`develop`                                   | Compositional-loss screens (standalone job)          |
 | `.github/workflows/main-verify.yml`         | push to `main`                                                       | Post-merge sequence-safety net                       |
 | `.github/workflows/pr-base-branch-guard.yml` | `pull_request` + `merge_group`                                       | Fail if PR base is not the default branch            |
@@ -473,6 +474,54 @@ This catches broken internal file and heading links without requiring sibling re
   2. Publish to TestPyPI + install verification
   3. Publish to PyPI
 
+### Container image (`publish-image.yml`)
+
+Publishes `ghcr.io/pcalnon/juniper-canopy` as one manifest for `linux/amd64` and `linux/arm64`. Each arch builds on a native runner. This workflow is separate from `ci.yml`. A pull request runs it only when one of its `paths` changes: `Dockerfile`, `requirements.lock`, `pyproject.toml`, `src/**`, `juniper_canopy/**`, `conf/app_config.yaml`, `conf/logging_config.yaml`, `conf/layouts/**`, `util/check_image_cpu_only.py`, `util/check_image_no_secrets.py`, `util/check_image_serves.py`, or the workflow file itself.
+
+| Event | What runs |
+| --- | --- |
+| Pull request (path filter matches) | Build only. Image tag on the runner is `canopy-smoke:<arch>`. Nothing is pushed. |
+| `workflow_dispatch` with `push: false` (the default) | Same build-only path. |
+| `release` published, tag starts with `v` | Push each arch by digest, then the serve-and-version check, then the `merge` job writes tags. |
+| `workflow_dispatch` with `push: true` | Same publish path. The merge tag is `dispatch-<sha>`. |
+
+A release whose tag does not start with `v` skips the build job. `strategy.fail-fast` is `false`, so one arch's failure still leaves the other arch's result visible. The `merge` job is the only step that writes a tag (`X.Y.Z`, `X.Y`, and `latest` on a release). It runs only after `build` succeeds.
+
+#### Serve and version gate
+
+`util/check_image_serves.py` starts the image with its own `CMD` (`python src/main.py`) and checks the process from inside the container. The image binds `127.0.0.1:8050` (`JUNIPER_CANOPY_SERVER__HOST` in the Dockerfile), so the probe is `docker exec` to that address. A host port mapping does not reach the process.
+
+On the build-only arm the call is:
+
+```bash
+python3 util/check_image_serves.py \
+  --image 'canopy-smoke:amd64' \
+  --dist juniper-canopy \
+  --module juniper_canopy \
+  --port 8050 \
+  --expect-version "<pyproject.toml project.version>"
+```
+
+`--expect-version` on that arm is the `app_version` output of the provenance step, which reads `project.version` from `pyproject.toml`. On a publish the `--image` is `ghcr.io/pcalnon/juniper-canopy@<digest>` of the arch just pushed. On a release, `--expect-version` is the tag with one leading `v` removed. If that string differs from `project.version`, the step exits 1 before the script runs, with the message that the image would be tagged one version and report another.
+
+These three values must all equal `--expect-version`:
+
+1. Installed metadata for the `juniper-canopy` distribution.
+2. `juniper_canopy.__version__`. A missing `__version__` is a failure.
+3. `GET /v1/health` returns 200 and its `version` field matches the metadata.
+
+The script default `--health-path` is `/v1/health`, which is the path this workflow uses. That body includes `version` (`main.py` `health_check`). The workflow leaves `--health-version` at `required` and passes no `--enveloped-path`.
+
+The image sets `JUNIPER_CANOPY_DEMO_MODE=false` and `CASCOR_SERVICE_URL=http://juniper-cascor:8200`. Startup probes that URL. When CasCor does not answer, `main.py` shuts the service backend down and continues in demo mode, so `/v1/health` can still return 200 in a container that has no CasCor beside it. The gate checks status and `version`. It does not read `demo_mode`.
+
+Readiness stays off this gate. `/v1/health/ready` probes JuniperData and CasCor, which a standalone container does not have. `/v1/health/live` returns `{"status": "alive"}` and has no `version` field, so it is the wrong path for a version check.
+
+Exit codes from the script: `0` every check passed, `1` a check failed or the container exited before liveness, `2` usage or environment (no `docker`, the image cannot run Python, or `--expect-version` is not semver). The default wait is 120 seconds, polling every 3 seconds. The container is removed when the script finishes.
+
+Export of the digest runs only after this step succeeds. A failing arch therefore never reaches `merge`, and no tag is written for that publish.
+
+The same build and publish arms also run `util/check_image_cpu_only.py` (the image's `ARG TORCH_VERSION` plus `+cpu`, and no CUDA stack) and `util/check_image_no_secrets.py`. Those are separate scripts.
+
 ## Tooling and Configuration Sources
 
 | Concern                     | Source of Truth                                |
@@ -480,6 +529,7 @@ This catches broken internal file and heading links without requiring sibling re
 | Pytest markers and defaults | `pyproject.toml` (`[tool.pytest.ini_options]`) |
 | Coverage thresholds         | `pyproject.toml` and `ci.yml` job args         |
 | CI dependencies             | `conf/requirements_ci.txt`                     |
+| Image serve-and-version     | `util/check_image_serves.py`, `publish-image.yml` |
 | Security scan excludes      | `.bandit.yml` + workflow commands              |
 | CodeQL action pins          | SHA comments on `codeql.yml` + `ci.yml` `upload-sarif` |
 | Dependabot action groups    | `.github/dependabot.yml` (`codeql-action`)     |
@@ -715,7 +765,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-08-24
-**Version:** 0.28.0
+**Last Updated:** 2026-10-05
+**Version:** 0.28.2
 **Maintained By:** Development Team
 **Status:** ✅ Current

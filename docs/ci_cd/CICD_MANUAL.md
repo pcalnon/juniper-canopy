@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-08-24
-**Version:** 0.27.0
+**Last Updated:** 2026-10-05
+**Version:** 0.27.2
 **Status:** Current
 
 ## Table of Contents
@@ -655,6 +655,8 @@ It is source-verified against:
 - `.github/workflows/security-scan.yml`
 - `.github/workflows/lockfile-update.yml`
 - `.github/workflows/publish.yml`
+- `.github/workflows/publish-image.yml`
+- `util/check_image_serves.py`
 - `.github/dependabot.yml`
 - `pyproject.toml`
 - `scripts/check_doc_links.py`
@@ -810,6 +812,27 @@ Review findings at GitHub Security → Code scanning. The `ci.yml` `Quality Gate
 4. Publish to PyPI (`environment: pypi`)
 
 Do not bypass TestPyPI stage; production publish is intentionally downstream.
+
+### Runbook: Container image serve and version
+
+`publish-image.yml` is the GHCR image workflow. The package publish above does not build this image. Contract and flags: [Serve and version gate](CICD_REFERENCE.md#serve-and-version-gate).
+
+When it runs:
+
+1. A `v*` release, or a manual dispatch with `push: true`, builds `linux/amd64` and `linux/arm64` on native runners and pushes each arch by digest.
+2. `util/check_image_serves.py` starts that digest with the image `CMD` and requires `GET /v1/health` on port 8050 inside the container, plus one version on three surfaces: installed `juniper-canopy` metadata, `juniper_canopy.__version__`, and the health body's `version` field.
+3. On a release that version is the tag with the leading `v` removed, and it must equal `pyproject.toml` `project.version` or the step stops before the script.
+4. The digest is exported only after the check passes. The `merge` job then writes `X.Y.Z`, `X.Y`, and `latest`. A failed arch uploads no digest, so no tag is written.
+
+A pull request runs the same check only when a path in the workflow filter changes, against the local tag `canopy-smoke:<arch>`, and pushes nothing. The expected version on that arm is `project.version`.
+
+Reading a failure:
+
+- `installed metadata version … != expected` or `__version__ … != metadata`: the image's package version and the tag (or `pyproject.toml` on a PR) disagree. Fix the version source that is wrong, then rebuild. An import-only smoke test stays green in this case.
+- `liveness answered …, not 200` or the container exited: `/v1/health` did not come up within 120 seconds. The step prints the last log lines. The image binds `127.0.0.1`, so check the in-container probe, not a host-published port.
+- `release vX.Y.Z names X.Y.Z, but pyproject.toml says …`: the tag and `project.version` disagree. Retag or fix `pyproject.toml` before publishing. The script has not run yet.
+
+The image is built with demo mode off and `CASCOR_SERVICE_URL=http://juniper-cascor:8200`. When that host does not answer, startup falls back to demo mode so `/v1/health` can still return 200. The gate does not require a live CasCor, and it does not call `/v1/health/ready`.
 
 ## Quality Gates and Merge Criteria
 
