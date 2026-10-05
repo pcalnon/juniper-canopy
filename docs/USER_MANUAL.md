@@ -1,8 +1,8 @@
 # Juniper Canopy User Manual
 
-**Version:** 0.26.2
+**Version:** 0.26.6
 **Status:** ✅ Production Ready
-**Last Updated:** September 5, 2026
+**Last Updated:** October 5, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -904,7 +904,8 @@ upper-cased under the `JUNIPER_CANOPY_` prefix, with `__` between a nested secti
 | `demo_mode`                                   | `JUNIPER_CANOPY_DEMO_MODE`                                       | `false`                        |
 | `cascor_service_url`                          | `JUNIPER_CANOPY_CASCOR_SERVICE_URL`                              | unset (demo fallback)          |
 | `juniper_data_url`                            | `JUNIPER_DATA_URL` (or `JUNIPER_CANOPY_JUNIPER_DATA_URL`)        | `http://localhost:8100`        |
-| `recurrence_service_url`                      | `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL`                          | unset                          |
+| `recurrence_service_url`                      | `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL` (fallback `RECURRENCE_SERVICE_URL`) | unset                          |
+| `recurrence_api_key`                          | `JUNIPER_CANOPY_RECURRENCE_API_KEY` or `_FILE` (then the shared `JUNIPER_RECURRENCE_API_KEY` pair) | unset                          |
 | `training.<param>.{min,max,default}`          | `JUNIPER_CANOPY_TRAINING__<PARAM>__{MIN,MAX,DEFAULT}`            | see `TrainingSettings`         |
 | `demo_cascade_every`                          | `JUNIPER_CANOPY_DEMO_CASCADE_EVERY`                              | `30`                           |
 | `demo_update_interval`                        | `JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL` — declared, **not applied** (fixed 1.0 s) | `1.0`           |
@@ -1198,6 +1199,33 @@ pytest tests/regression/test_csp_plotly_image_export.py \
 Do not "fix" this by adding `blob:` to `script-src` or by replacing
 `data:` (Bootstrap icons need `data:`). Developer contract:
 [AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047).
+
+#### 7. Recurrence fit names the API key, or says to retry
+
+**Symptoms:**
+
+- The status bar mentions the recurrence API key, or it says `retry after 30 s`
+- The visible line ends in `…`
+
+**Causes:**
+
+- A 401 or 403 means the key canopy sends as `X-API-Key` is missing or is not a key the service accepts. On `main` the sentence is `check recurrence_api_key`. After canopy#722 it names `JUNIPER_CANOPY_RECURRENCE_API_KEY` and `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`.
+- A 429 means the recurrence service rate-limited the call. The wait is the reply's `Retry-After`. The dashboard polls canopy, so another client is usually sharing that key or address.
+- The status line shows 120 characters. Hover it for the rest (480 characters after #722).
+
+**Solutions:**
+
+✅ **Set the key, then restart canopy.** The `_FILE` form is read first. The shared `JUNIPER_RECURRENCE_API_KEY` pair applies when the canopy-prefixed pair is unset.
+
+```bash
+export JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE=/run/secrets/recurrence_api_key
+```
+
+✅ **On `retry after`, wait out that window.** A 429 with no `Retry-After` header has no wait clause. The window is still closed.
+
+✅ **A restored snapshot is a model.** `restored` means the service loaded a snapshot (`restored_from` names it). It does not mean the fit you just started succeeded. The model version is read from the service, and no screen shows it yet.
+
+See [AGENTS_REFERENCE.md § Recurrence key, restored model, and service version](AGENTS_REFERENCE.md#recurrence-key-restored-model-and-service-version).
 
 ### Diagnostic Commands
 

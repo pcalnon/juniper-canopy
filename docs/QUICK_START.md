@@ -2,9 +2,9 @@
 
 ## Get Juniper Canopy running in 5 minutes
 
-**Version:** 0.25.3
+**Version:** 0.25.7
 **Status:** ✅ Production Ready
-**Last Updated:** September 5, 2026
+**Last Updated:** October 5, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -556,6 +556,24 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 **See:** [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)
 
+### Issue 13: Recurrence Fit Names the Key, or Says Retry After
+
+**Symptom:** A recurrence fit fails and the status bar mentions the API key, or it says `retry after 30 s`. On `main` the key sentence is `check recurrence_api_key`. After canopy#722 it names `JUNIPER_CANOPY_RECURRENCE_API_KEY` and `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`. The visible line cuts at 120 characters and ends in `…`.
+
+**Cause:** 401 / 403 means the outbound `X-API-Key` is missing or wrong. 429 means the recurrence service rate-limited the call and sent `Retry-After`. The dashboard polls canopy, so a 429 usually means another client shares that key or address.
+
+**Check:**
+
+```bash
+# Prefixed pair wins. The shared JUNIPER_RECURRENCE_API_KEY pair applies when this pair is unset.
+# The _FILE form is read before the direct variable. Restart canopy after changing either.
+export JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE=/run/secrets/recurrence_api_key
+```
+
+Hover the status text for the rest of the reason (up to 480 characters after #722). A restored snapshot counts as a model (`model_present`); it does not mean the fit you just started succeeded. The recurrence model version is read from the service, and no screen shows it yet.
+
+**See:** [AGENTS_REFERENCE.md § Recurrence key, restored model, and service version](AGENTS_REFERENCE.md#recurrence-key-restored-model-and-service-version)
+
 ## Next Steps
 
 ### Learn More
@@ -565,6 +583,7 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 - **[AGENTS.md](../AGENTS.md)** - Development guide and conventions
 - **[Event-loop I/O discipline (X7)](AGENTS_REFERENCE.md#event-loop-io-discipline-x7)** - Keep `/v1/health/live` answerable when cascor is down
 - **[Cascor status cache (X7 slice 1c)](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)** - Why `/api/status` publishes a class, not a raw payload
+- **[Recurrence key, restored model, and service version](AGENTS_REFERENCE.md#recurrence-key-restored-model-and-service-version)** - What a 401, a 429, a restored snapshot, and a blank model version mean
 - **[CI/CD Guide](ci_cd/CICD_QUICK_START.md)** - Testing and CI/CD workflows
 
 ### Start Developing
@@ -825,8 +844,8 @@ conda list | grep -E "(fastapi|dash|uvicorn)"
 
 ---
 
-**Last Updated:** September 5, 2026  
-**Version:** 0.25.3  
+**Last Updated:** October 5, 2026  
+**Version:** 0.25.7  
 **Status:** ✅ Production Ready
 
 **Last Updated:** 2026-03-15

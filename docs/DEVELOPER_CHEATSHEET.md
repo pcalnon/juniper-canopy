@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.4
-**Date**: 2026-09-05
+**Version**: 1.0.8
+**Date**: 2026-10-05
 **Project**: juniper-canopy
 
 ---
@@ -185,6 +185,20 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 > See: [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)
 
+### 7. Read a recurrence 401, 429, restore, or version (W1.6, W1.7)
+
+A refused key names `JUNIPER_CANOPY_RECURRENCE_API_KEY` or `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`. The shared `JUNIPER_RECURRENCE_API_KEY` pair still applies when the prefixed pair is unset. A 429 copies `Retry-After` into the message (`retry after 30 s` for a numeric wait).
+
+`restored` on `GET /v1/training/status` counts as a model (`model_present`), with `restored_from` naming the snapshot. The model version comes from the service (`GET /v1/health`, else `GET /openapi.json`), and the seed version is blank. No UI renders that version yet. Lands with canopy#722.
+
+```bash
+cd src
+pytest tests/unit/test_recurrence_service_adapter.py \
+       tests/unit/test_model_registry.py -q
+```
+
+> See: [AGENTS_REFERENCE.md § Recurrence key, restored model, and service version](AGENTS_REFERENCE.md#recurrence-key-restored-model-and-service-version)
+
 ---
 
 ## Environment Variables
@@ -212,6 +226,9 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 | `JUNIPER_CANOPY_LOG_FORMAT`                 | text                | Set `json` for structured JSON logging                                                                            |
 | `JUNIPER_CANOPY_SENTRY_DSN`                 | unset               | Sentry error tracking DSN                                                                                         |
 | `JUNIPER_CANOPY_METRICS_ENABLED`            | `false`             | Enable Prometheus metrics (`juniper_canopy_*`)                                                                    |
+| `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL`     | unset               | juniper-recurrence base URL. Shared fallback: `RECURRENCE_SERVICE_URL`                                            |
+| `JUNIPER_CANOPY_RECURRENCE_API_KEY`         | unset               | Outbound recurrence `X-API-Key`. A 401 names this variable (canopy#722)                                           |
+| `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`    | unset               | File form of the recurrence key. Read before the direct variable                                                  |
 
 > See: [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) | [REFERENCE.md -- Configuration Reference](REFERENCE.md#configuration-reference)
 
@@ -295,6 +312,9 @@ Coverage includes:
 | Modebar camera clicks; no PNG, CSP `img-src` in console | `blob:` missing from `img-src` | Keep `img-src 'self' data: blob:`; do not move `blob:` onto `script-src`. See [AGENTS_REFERENCE § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) |
 | Status bar says "Stopped" while cascor is down   | Half-dead 200 has no `error`; UI read the payload (X7 1c) | Confirm `status_class` on `/api/status`; run `test_x7_status_cache.py` (landed with `#578`) |
 | Status bar says "Unreachable" during a skipped poll | Class rendered as UNREACHABLE instead of INDETERMINATE | `"circuit open"` must classify `indeterminate` → "Unknown"; do not share `_cb` with the refresher |
+| Recurrence fit says `check recurrence_api_key` | The tree predates canopy#722 | After #722 the message names `JUNIPER_CANOPY_RECURRENCE_API_KEY` and `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`. Hover the status bar: the visible line cuts at 120 characters. See [Recurrence key, restored model, and service version](AGENTS_REFERENCE.md#recurrence-key-restored-model-and-service-version) |
+| Recurrence fit says `retry after 30 s` | The service returned 429 with `Retry-After` | Wait out that window. Another client is usually sharing the key or address. A 429 with no header has no wait clause. |
+| Recurrence model version reads `0.1.0` or blank | The seed was a constant; #722 blanks it | The version is `service_version()` (`/v1/health`, else `/openapi.json`). A failed lookup reads `unknown (version lookup failed)`. Nothing in the UI renders it yet. |
 
 ---
 
@@ -323,6 +343,6 @@ Coverage includes:
 
 ---
 
-**Last Updated:** 2026-09-05
-**Version:** 1.0.4
+**Last Updated:** 2026-10-05
+**Version:** 1.0.8
 **Maintainer:** Paul Calnon

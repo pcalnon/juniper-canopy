@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.3
+**Version:** 0.25.7
 **Status:** Active
-**Last Updated:** September 5, 2026
+**Last Updated:** October 5, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -22,6 +22,7 @@
 - [Testing Reference](#testing-reference)
 - [Event-loop I/O discipline (X7)](#event-loop-io-discipline-x7)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
+- [Recurrence key, restored model, and service version](#recurrence-key-restored-model-and-service-version)
 - [CI/CD Reference](#cicd-reference)
 - [CasCor Backend Reference](#cascor-backend-reference)
 - [Demo Mode Reference](#demo-mode-reference)
@@ -222,6 +223,24 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 Distinct from the 1a / 1b off-loop runbook, which landed via the docs
 consolidation `#583` (`#568` was closed superseded).
 
+## Recurrence key, restored model, and service version
+
+Operator contract for canopy#722 (W1.6 / W1.7). On `main` a refused recurrence key still says `check recurrence_api_key`, and the model seed still says version `0.1.0`.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Recurrence key, restored model, and service version](AGENTS_REFERENCE.md#recurrence-key-restored-model-and-service-version) | 401 variable names, 429 `Retry-After`, `restored` as a model, version read from the service |
+| [API_REFERENCE.md § Upstream Failures](api/API_REFERENCE.md#upstream-failures) | What a caller reads when an upstream HTTP call fails (the section that exists on `main`) |
+
+```bash
+cd src
+pytest tests/unit/test_recurrence_service_adapter.py \
+       tests/unit/test_model_registry.py \
+       tests/unit/frontend/test_completion_reason_status_bar.py -q
+```
+
+The W1.6 / W1.7 assertions in those files land with canopy#722.
+
 ## CI/CD Reference
 
 Pipeline configuration, hooks, and workflow reference.
@@ -315,9 +334,12 @@ The most commonly used environment variables for juniper-canopy configuration. F
 | `JUNIPER_CANOPY_LOG_FORMAT` | `text` | Set `json` for structured JSON logging |
 | `JUNIPER_CANOPY_SENTRY_DSN` | unset | Sentry error tracking DSN |
 | `JUNIPER_CANOPY_METRICS_ENABLED` | `false` | Enable Prometheus metrics (`juniper_canopy_*`) |
+| `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL` | unset | juniper-recurrence base URL. Shared fallback: `RECURRENCE_SERVICE_URL` |
+| `JUNIPER_CANOPY_RECURRENCE_API_KEY` | unset | Outbound `X-API-Key`. A 401 names this variable and the `_FILE` form (canopy#722) |
+| `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE` | unset | File whose contents are the recurrence key. Read before the direct variable |
 
 ---
 
-**Last Updated:** September 5, 2026
-**Version:** 0.25.3
+**Last Updated:** October 5, 2026
+**Version:** 0.25.7
 **Maintainer:** Paul Calnon

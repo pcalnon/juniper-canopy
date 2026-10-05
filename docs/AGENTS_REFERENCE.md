@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-09-05
+**Last Updated**: 2026-10-05
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -25,6 +25,7 @@ pointer only helps an agent that already knows to look.
 - [Configuration Reference](#configuration-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
+- [Recurrence key, restored model, and service version](#recurrence-key-restored-model-and-service-version)
 - [Further Reading](#further-reading)
 
 ---
@@ -1424,6 +1425,80 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 Design of record (juniper-ml):
 `notes/JUNIPER_2026-09-03_JUNIPER-CANOPY_X7-EVENT-LOOP-BLOCKING-REMEDIATION-DESIGN.md` §5.3 / §5.6.
+
+## Recurrence key, restored model, and service version
+
+Written against canopy#722 (`feat/w1-6-w1-7-recurrence-status-version`, W1.6 / W1.7, findings F-C5 through F-C8). That branch is the behavior below. On `main` a refused key still says `check recurrence_api_key`, the status-bar hover bound is 400 characters, and the recurrence model seed says `version="0.1.0"`.
+
+Primary code: `src/backend/recurrence_service_adapter.py`, `src/model_registry.py`, `src/settings.py` (`_check_recurrence_api_key`), `src/frontend/dashboard_manager.py` (status-bar bounds), `src/backend/recurrence_backend.py` (`completion_reason` via `outbound_error_text`).
+
+### A refused key names the variables
+
+A 401 or 403 raises `RecurrenceServiceAuthError`. The message names the variables that set the outbound `X-API-Key`:
+
+`recurrence service rejected the request (401 on POST /v1/train) — set JUNIPER_CANOPY_RECURRENCE_API_KEY or JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE to a key the service accepts`
+
+That prefix is 174 characters. A 4xx `detail` is still appended after `: ` (300 characters, same rule as a 422). The status bar shows 120 characters of `completion_reason` (`_COMPLETION_REASON_MAX_CHARS`), so the visible line stops inside the first variable name and ends in `…`. Hover holds the rest, up to 480 characters (`_FAILURE_REASON_TOOLTIP_MAX_CHARS`). 174 plus the `: ` separator plus a 300-character detail is 476, inside that hover bound.
+
+`Settings` resolves the key in this order. Within each name, the `_FILE` form is read first:
+
+1. `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`, else `JUNIPER_CANOPY_RECURRENCE_API_KEY`
+2. `JUNIPER_RECURRENCE_API_KEY_FILE`, else `JUNIPER_RECURRENCE_API_KEY`
+
+The 401 text names the canopy-prefixed pair. The shared pair still applies when the prefixed pair is unset. Settings are read at startup, so restart canopy after changing either.
+
+### A 429 carries Retry-After
+
+A 429 raises `RecurrenceServiceRateLimited`, a subclass of `RecurrenceServiceError`. When the reply sends `Retry-After`, the message carries that value before the `detail`:
+
+`recurrence service error 429 on POST /v1/train — retry after 30 s: Rate limit exceeded. Try again in 30 seconds.`
+
+An all-digit value gets a trailing ` s`. An HTTP-date is shown as sent. A missing or blank header omits the wait clause, and the message stays `recurrence service error 429 on <method> <path>` plus any 4xx `detail`. The header is flattened and cut at 64 characters (`_RETRY_AFTER_MAX_CHARS`). `retry_after` on the exception holds that value and is part of `args`, so pickle and copy keep it. `outbound_error_text` copies the message into `completion_reason`.
+
+The dashboard polls canopy, not the recurrence service, and canopy calls the service rarely. A 429 usually means another client shares the service's key or address. The adapter describes that middleware as enabled at 60 requests a minute by default.
+
+### Restored counts as a model
+
+`GET /v1/training/status` reports `idle`, `trained`, or `restored`. `restored` is a model loaded from the snapshot `restored_from` names. `RecurrenceStatus.model_present` is true for `trained` and `restored` (`MODEL_PRESENT_STATES`).
+
+A restored model is present and predictable. It does not mean a fit canopy asked for landed. The service reports no `final_metrics`, `stopped_reason`, or `events` for that model. The published juniper-recurrence 0.5.0 never sends `restored`. Those replies parse with `restored_from=None`.
+
+No production caller reads `training_status()` yet. The property is the rule for a later status poll. The backend's own `trained` flag belongs to its fit state machine and is never filled from this route.
+
+### The version is whatever the service reports
+
+The recurrence seed in `MODELS` leaves `version` blank. `RecurrenceServiceAdapter.service_version()` reads a non-blank `version` from the `GET /v1/health` body when one is present, otherwise `info.version` from `GET /openapi.json`. juniper-recurrence 0.5.0 answers health with `{"status": "ok"}`, and it mounts no `GET /`, so the OpenAPI document is the path that answers. That route is open under juniper-service-core 0.5.0 and authenticated under 0.7.0. The adapter sends `X-API-Key` on both calls.
+
+`refresh_model_versions` takes `{RECURRENCE_PROVIDER: adapter.service_version}`. It asks each source at most once per refresh and returns frozen specs with the answers baked in. Reading the tuple does not touch the network.
+
+A source that raises, times out, or returns anything but a non-blank string yields `unknown (version lookup failed)` (`SERVICE_VERSION_UNAVAILABLE`) and a WARNING that names the failure. A model whose provider has no source keeps its spec. That is the blank seed when no service is configured. The lookup is HTTP. Call it with `asyncio.to_thread`, off the single-worker event loop.
+
+No surface renders `ModelSpec.version`. The model table, the picker, and `/api/selection` do not read it. Wiring a refreshed registry into one of them is still open.
+
+Canopy imports no `juniper-recurrence-client`. The documented floor is `RECURRENCE_SERVICE_CONTRACT_FLOOR = "0.5.0"` in the adapter. canopy#722 records that floor in `docs/api/API_REFERENCE.md` under Recurrence Service Contract. On `main` that section is absent. The section that exists today is [Upstream Failures](api/API_REFERENCE.md#upstream-failures).
+
+### Tests
+
+The pins land with canopy#722. On `main` the 401 assertions still expect `check recurrence_api_key`, and the tooltip bound is 400.
+
+```bash
+cd src
+pytest tests/unit/test_recurrence_service_adapter.py \
+       tests/unit/test_model_registry.py \
+       tests/unit/backend/test_recurrence_backend.py \
+       tests/unit/frontend/test_completion_reason_status_bar.py -q
+```
+
+### Pitfalls
+
+- The Python field `recurrence_api_key` is not something an operator sets. The message names the environment variables.
+- `state == "trained"` misses a model that was loaded from a snapshot. `model_present` is the check for "is there a model?".
+- `restored` does not mean the fit canopy just started succeeded.
+- The blank seed is not version `0.1.0`. A failed lookup reads `unknown (version lookup failed)`, which is a label, not an exception.
+- `service_version()` raises when neither health nor OpenAPI names a version. `refresh_model_versions` catches that and returns the label above.
+- A 429 with no `Retry-After` still means the window is closed. The message simply has no wait clause.
+
+The 4xx `detail` suffix, the 5xx omission, and the in-sample regression card stay with the W0.5 runbook (canopy docs #703). That page's 400-character tooltip and `check recurrence_api_key` sentence describe the tree before #722.
 
 ## Further Reading
 
