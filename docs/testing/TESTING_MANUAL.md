@@ -1,7 +1,7 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** 2026-09-05  
-**Version:** v0.26.2
+**Last Updated:** 2026-10-05  
+**Version:** v0.26.5
 
 Complete guide to testing the Juniper Canopy application.
 
@@ -171,6 +171,9 @@ pytest tests/unit/frontend/test_metrics_panel_handlers.py -k "validation_overlay
 
 # Metrics replay controls (clientside since F-CANOPY-054; the node-executed tests skip without `node`)
 pytest tests/unit/frontend/test_f054_replay_block_clientside.py tests/unit/frontend/test_f048_replay_cycle.py -v
+
+# Wider-dataset Start alert and Start-fresh modal wording (F1, F2; #681)
+pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
 
 # Documentation link checker regression tests
 pytest tests/unit/test_doc_link_checker.py -v

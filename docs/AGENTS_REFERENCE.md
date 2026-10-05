@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-09-05
+**Last Updated**: 2026-10-05
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -25,6 +25,7 @@ pointer only helps an agent that already knows to look.
 - [Configuration Reference](#configuration-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
+- [Start-fresh refusal (F1, F2)](#start-fresh-refusal-f1-f2)
 - [Further Reading](#further-reading)
 
 ---
@@ -1424,6 +1425,107 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 Design of record (juniper-ml):
 `notes/JUNIPER_2026-09-03_JUNIPER-CANOPY_X7-EVENT-LOOP-BLOCKING-REMEDIATION-DESIGN.md` §5.3 / §5.6.
+
+## Start-fresh refusal (F1, F2)
+
+Operator runbook for a Start that cascor refuses because the staged dataset is wider than the current network. The behaviour is on `main` as `#681` (owner ruling 2026-09-24). This is not the partial-dataset prompt (`[dataset_shortfall_refused]`), and it is not the X7 status-bar class.
+
+A plain **Start** continues the current network. It cannot add inputs or outputs. `equities` (15 features, 2 outputs) and `mnist` (784 features, 10 outputs) are the two refusals the unit test drives against a network the fixture describes as 2 inputs and 2 outputs.
+
+### How canopy recognises it
+
+The literal is `START_FRESH_REQUIRED_MARKER` in `src/frontend/dashboard_manager.py`:
+
+```text
+[start_fresh_required]
+```
+
+`_is_start_fresh_required_refusal` is a substring test. It runs only when the failed command is `start`. The same marker on Stop, Pause, or any other command stays on the generic alert (`"Stop failed."`, auto-dismiss 8000 ms).
+
+The handler reads `detail_full` when that key is present, otherwise `detail`:
+
+| Writer | What lands in the store |
+| --- | --- |
+| Clientside `reportFailure` | `detail` is the first 300 characters. `detail_full` is the first 4000. The handler prefers `detail_full`. |
+| Server-side training-control handler | `detail` only. A structured `error.message` is not cut at 300. The raw-body fallback is 300 characters. |
+
+The marker sits near the front of cascor's sentence, inside that 300-character prefix, so the special alert still opens when only `detail` arrived. The muted shape line is the first sentence after the marker (`split` on `". "`). A truncated `detail` can cut that sentence. The instruction above it does not depend on the cut.
+
+There is **no** fallback sentence. The shortfall marker matches a fixed sentence so an older cascor still opens its prompt. This one does not. A cascor that predates the marker consumed the staged dataset and then refused, so the pending banner was already gone. Pointing the operator at that banner would name a control that is not on screen. Those refusals keep the generic 8-second Start alert.
+
+Renaming the marker on either side drops canopy back to that generic alert. The unit test pins the literal for that reason. cascor's name for the same string is `_PROJECT_API_START_FRESH_REQUIRED_MARKER`.
+
+### What the operator sees
+
+`_start_fresh_required_alert` is a danger alert, dismissable, with **no** `duration`. The generic failure alert auto-dismisses at 8000 ms; this one carries an instruction, so it stays until dismissed or until a later successful command clears every failure alert.
+
+The body says:
+
+- Start was refused because the staged dataset is wider than the current network.
+- Start continues the current network and cannot widen it.
+- Use **Stop & Restart with new dataset**, then turn **Start fresh** on.
+- Nothing was loaded. The dataset is still staged. The results on screen are still the previous run's.
+
+Those two control labels are a contract with the layout. The pending-banner button id is `restart-with-new-dataset-button` and its text is `Stop & Restart with new dataset`. The modal switch id is `restart-start-fresh-toggle` and its label starts with `Start fresh`. Renaming either one leaves the alert pointing at nothing.
+
+The partial-data prompt does not open for this refusal. `_open_dataset_shortfall_prompt_handler` returns `no_update` for all three outputs.
+
+### Restart modal (F2)
+
+The switch defaults to **off** every time the modal opens. Off continues the current model and keeps metrics and history. On rebuilds a vanilla, untrained network from the dataset.
+
+The label and both help texts say the **applied parameters carry over**, including edits made below, and that on-disk snapshots are kept. That replaced "functionally a clean stack launch". A clean launch would reset parameters to the engine defaults. The modal must not contain that phrase.
+
+That carry-over sentence is the service-mode contract: cascor keeps the parameters already applied when it rebuilds (recorded as juniper-cascor#685). A cascor that still resets a start-fresh to engine defaults drops those edits, and the modal text is then wrong.
+
+Demo mode has no `start_fresh` body field. `DemoBackend.start_training` maps `start_fresh` onto `DemoMode.start(reset=True)`, which clears epoch and metrics history. Do not read the modal sentence as a guarantee about the demo engine.
+
+### Confirm order
+
+`_execute_restart_handler` does three steps, and it stops at the first failure:
+
+1. If a dataset field differs from the baseline captured when the modal opened, re-stage with `POST /api/stage_dataset`. A staging failure aborts. The pending banner stays open.
+2. If a parameter field differs, clamp and apply through `/api/set_params` **before** the restart. An apply failure aborts. A re-stage that already succeeded is left in place.
+3. `POST /api/train/restart` with `{"start_fresh": <toggle>, "reset": true}`.
+
+An untouched Confirm skips steps 1 and 2. It does not send `nn_model`. When a re-stage or a parameter apply does run, the body includes the tab's `nn_model` (omitted when no model is selected). Those routes answer 409 when that mirror is not the server's selection, and the restart does not start.
+
+The re-stage payload is the dataset type, the numeric fields the modal shows, and that type's registry seed (`dataset_default_params`). The modal does not render schema-driven generator params, so a custom list applied earlier from the sidebar is not carried. Re-staging `equities` sends the seed's symbols; it does not send a sidebar override. An empty dataset type is refused locally (`"No dataset selected — nothing to re-stage."`) and is not posted as `{}`.
+
+`/api/train/restart` (`main.py`) then:
+
+- If the recorded selection is not the backend that is running (`_selection_inactive_reason`), returns 409 **before** stopping the current run.
+- If a run is active: stop, then wait until it has stopped. The wait timeout is 504 with `retriable: true`. The staged dataset stays, and the outcome says to retry.
+- Idle, completed, and failed runs skip the stop and go straight to start.
+- Start calls `backend.start_training(reset=..., start_fresh=...)`.
+
+On the service path, `start_fresh=true` is a separate POST body, `{"start_fresh": true}`, to cascor `POST /v1/training/start`. The parameters are **not** in that body; they were applied in step 2. The legacy `reset` flag is not forwarded. cascor-client 0.7.0's public `start_training()` cannot carry `start_fresh`, so the adapter posts through the client's own transport (`CascorServiceAdapter.start_training_background`). Collapse that reach-in only when the client's public method grows the field.
+
+Success closes the modal and the pending banner. The outcome reads "a fresh model" when the toggle was on, and "continued the current model" when it was off. A run that has already finished at epoch 0 adds the instant-convergence sentence (`instant_complete` from a bounded status peek). That peek must not turn a successful restart into a failure. A failed restart leaves the banner open (`no_update`).
+
+### Tests
+
+`src/tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py` (unit).
+
+| What it pins | Why |
+| --- | --- |
+| Marker literal `[start_fresh_required]` | A rename on one side silently selects the generic alert |
+| Equities and mnist refusals name both controls, say the dataset is still staged, and quote cascor's shape sentence | The instruction has to match the refusal the operator can see |
+| `duration` is unset; any other Start failure keeps `duration == 8000` | An instruction is not an 8-second toast |
+| The marker on a non-start command is not this alert | Recognition is command-scoped |
+| The shortfall prompt stays closed | A width refusal is not a partial-dataset refusal |
+| Banner button text and toggle label prefix | The alert names controls that exist |
+| "parameters and snapshots kept", "The applied parameters carry over", and the absence of "clean stack launch" | F2 wording |
+
+```bash
+cd src && pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
+```
+
+- Do not add a fallback sentence for a cascor that lacks the marker. The banner it would name is already gone.
+- Do not match this refusal with the shortfall sentence. An outage must not open a prompt that re-sends the request, and a width refusal must not open that prompt either.
+- Do not put the learning rate in the `start_fresh` body. Apply parameters first; the start body is only the flag.
+- Do not describe Start fresh as a clean stack launch. That sentence is what F2 removed.
+- Do not assume a modal re-stage repeats a sidebar generator override. It sends the registry seed for the dataset type.
 
 ## Further Reading
 

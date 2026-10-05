@@ -1,7 +1,7 @@
 # Testing Quick Start Guide
 
-**Last Updated:** September 5, 2026  
-**Version:** v0.25.2
+**Last Updated:** October 5, 2026  
+**Version:** v0.25.4
 
 Get up and running with tests in **5 minutes**.
 
@@ -162,6 +162,7 @@ src/tests/
 | `pytest -v`             | Verbose output          |
 | `pytest --cov=src`      | Run with coverage       |
 | `pytest src/tests/regression/test_x7_status_cache.py -v` | X7 1c status cache (landed with `#578`) |
+| `pytest src/tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v` | Wider-dataset Start alert and Start-fresh modal text (`#681`) |
 | `pytest --lf`           | Run last failed tests   |
 | `pytest --ff`           | Run failures first      |
 

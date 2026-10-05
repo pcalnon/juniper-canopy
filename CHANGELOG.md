@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Operator runbook for a Start refused because the staged dataset is wider than the network (F1, F2).** The behaviour is already on `main` (`#681`). This documents the `[start_fresh_required]` alert, why a cascor that lacks the marker gets no second wording, the restart modal's parameter-carry text, and the confirm order (re-stage, apply parameters, then `POST /api/train/restart`). Canonical section: `docs/AGENTS_REFERENCE.md` § Start-fresh refusal.
 - **The publish path asserts that the image serves, and that it is the version it is tagged**
   (`util/check_image_serves.py`, new; `publish-image.yml`). The existing checks cover what the image
   contains and that `juniper_canopy` imports. Neither can see a stale version. The worker's 0.5.0 and

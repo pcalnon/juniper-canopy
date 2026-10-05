@@ -1,8 +1,8 @@
 # Juniper Canopy User Manual
 
-**Version:** 0.26.2
+**Version:** 0.26.5
 **Status:** ✅ Production Ready
-**Last Updated:** September 5, 2026
+**Last Updated:** October 5, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -217,6 +217,20 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 - **Demo Mode:** Halts simulation thread cleanly
 - **Production Mode:** Sends stop command to CasCor backend
 - **Warning:** State is preserved but training cannot be resumed (use Start to restart)
+
+### A wider dataset needs Start fresh
+
+**Start** continues the network that is already loaded. It cannot grow that network to more features or outputs. Staging a wider dataset — the tests use `equities` (15 features) and `mnist` (784) — and pressing Start is refused before anything is loaded.
+
+When cascor opens that refusal with `[start_fresh_required]`:
+
+1. The alert names the two controls. It stays until you dismiss it. The charts are still the previous run.
+2. The pending-dataset banner stays up, because the dataset is still staged.
+3. Click **Stop & Restart with new dataset**.
+4. Turn **Start fresh** on. It defaults to off. Off would continue the narrow network.
+5. Confirm. Parameter edits in the expanded section are applied first, then the restart. The modal says those parameters carry over and that snapshots are kept. That is the service-mode contract with a current cascor. Demo mode does not send a `start_fresh` field; it resets the demo run's epoch and metrics history.
+
+If the alert is the ordinary "Start failed" toast (it disappears after a few seconds) and it does not name Start fresh, cascor did not send the marker. There is no second set of instructions for that older service.
 
 ### Configuration Parameters
 

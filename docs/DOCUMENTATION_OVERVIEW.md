@@ -2,8 +2,8 @@
 
 ## Complete Navigation Guide to Juniper Canopy Documentation
 
-**Version:** 0.25.6  
-**Last Updated:** September 5, 2026  
+**Version:** 0.25.9  
+**Last Updated:** October 5, 2026  
 **Project:** Juniper Canopy - Real-Time CasCor Monitoring Frontend
 
 ---
@@ -62,6 +62,7 @@
 | **Quick-reference dev tasks** | [DEVELOPER_CHEATSHEET.md](DEVELOPER_CHEATSHEET.md)              | docs/         |
 | **Debug a silent PNG export** | [AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) | docs/ |
 | **Read the cascor status cache (X7 1c)** | [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c) | docs/ |
+| **Start refused on a wider dataset** | [AGENTS_REFERENCE.md § Start-fresh refusal](AGENTS_REFERENCE.md#start-fresh-refusal-f1-f2) | docs/ |
 | **Contribute code**          | [AGENTS.md](../AGENTS.md)                                                 | Root           |
 | **Keep the event loop answerable (X7)** | [AGENTS_REFERENCE.md § Event-loop I/O discipline](AGENTS_REFERENCE.md#event-loop-io-discipline-x7) | docs/ |
 | **Read the topology depth filter** | [AGENTS_REFERENCE.md § Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020) | docs/ |
@@ -1728,8 +1729,8 @@ Relocated verbatim from `AGENTS.md` (P3 of the shared-session-memory plan) so it
 
 ---
 
-**Last Updated:** September 5, 2026  
-**Version:** 0.25.6  
+**Last Updated:** October 5, 2026  
+**Version:** 0.25.9  
 **Maintainer:** Paul Calnon
 
 ---

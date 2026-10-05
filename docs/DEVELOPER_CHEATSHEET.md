@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.4
-**Date**: 2026-09-05
+**Version**: 1.0.7
+**Date**: 2026-10-05
 **Project**: juniper-canopy
 
 ---
@@ -185,6 +185,16 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 > See: [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)
 
+### 7. Answer a wider-dataset Start (F1, F2)
+
+A plain Start continues the current network. Cascor opens a wider-dataset refusal with `[start_fresh_required]` and does not load the dataset. The alert names **Stop & Restart with new dataset** and **Start fresh** (default off). Confirm re-stages, applies parameter edits, then `POST /api/train/restart` with `{"start_fresh": true}`. There is no fallback sentence for a cascor that lacks the marker.
+
+```bash
+cd src && pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
+```
+
+> See: [AGENTS_REFERENCE.md § Start-fresh refusal](AGENTS_REFERENCE.md#start-fresh-refusal-f1-f2)
+
 ---
 
 ## Environment Variables
@@ -295,6 +305,7 @@ Coverage includes:
 | Modebar camera clicks; no PNG, CSP `img-src` in console | `blob:` missing from `img-src` | Keep `img-src 'self' data: blob:`; do not move `blob:` onto `script-src`. See [AGENTS_REFERENCE § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) |
 | Status bar says "Stopped" while cascor is down   | Half-dead 200 has no `error`; UI read the payload (X7 1c) | Confirm `status_class` on `/api/status`; run `test_x7_status_cache.py` (landed with `#578`) |
 | Status bar says "Unreachable" during a skipped poll | Class rendered as UNREACHABLE instead of INDETERMINATE | `"circuit open"` must classify `indeterminate` → "Unknown"; do not share `_cb` with the refresher |
+| Start refuses: dataset wider than the network; previous results still on screen | Plain Start cannot widen. Cascor refused before loading (`[start_fresh_required]`, `#681`) | **Stop & Restart with new dataset**, then **Start fresh**. No fallback sentence if the marker is absent. See [Start-fresh refusal](AGENTS_REFERENCE.md#start-fresh-refusal-f1-f2) |
 
 ---
 
@@ -323,6 +334,6 @@ Coverage includes:
 
 ---
 
-**Last Updated:** 2026-09-05
-**Version:** 1.0.4
+**Last Updated:** 2026-10-05
+**Version:** 1.0.7
 **Maintainer:** Paul Calnon

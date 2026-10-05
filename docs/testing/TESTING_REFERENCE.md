@@ -1,7 +1,7 @@
 # Testing Reference
 
-**Last Updated:** September 5, 2026  
-**Version:** v0.26.3
+**Last Updated:** October 5, 2026  
+**Version:** v0.26.6
 
 Technical reference for the active pytest configuration, markers, fixtures, and CI-equivalent commands.
 
@@ -15,6 +15,7 @@ Technical reference for the active pytest configuration, markers, fixtures, and 
 4. [Environment and Gating Variables](#environment-and-gating-variables)
 5. [Command Reference](#command-reference)
 6. [X7 Status Cache (slice 1c)](#x7-status-cache-slice-1c)
+6. [Start-fresh refusal (F1, F2)](#start-fresh-refusal-f1-f2)
 6. [X7 Event-Loop Discipline](#x7-event-loop-discipline)
 7. [Coverage Reference](#coverage-reference)
 8. [CI Mapping](#ci-mapping)
@@ -297,6 +298,27 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 Do not mark these `slow`. The coverage gate runs `-m "not slow"`. Operator runbook:
 [AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
+
+---
+
+## Start-fresh refusal (F1, F2)
+
+Pins the wider-dataset Start alert and the restart-modal wording (`#681`). The file is
+`src/tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py`.
+
+```bash
+cd src && pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
+```
+
+| What it pins | Why it fails if dropped |
+| --- | --- |
+| Marker literal `[start_fresh_required]` | The alert falls through to the generic 8-second toast |
+| Both named controls, staged-dataset sentence, shape sentence | The instruction points at a control that was renamed, or hides cascor's widths |
+| `duration` unset on this alert only | The instruction auto-dismisses |
+| Non-start command and the shortfall prompt | A width refusal opens the wrong surface |
+| "parameters carry over"; no "clean stack launch" | The modal describes a reset the service no longer does |
+
+Operator runbook: [AGENTS_REFERENCE.md § Start-fresh refusal](../AGENTS_REFERENCE.md#start-fresh-refusal-f1-f2).
 
 ---
 

@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.3
+**Version:** 0.25.6
 **Status:** Active
-**Last Updated:** September 5, 2026
+**Last Updated:** October 5, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -22,6 +22,7 @@
 - [Testing Reference](#testing-reference)
 - [Event-loop I/O discipline (X7)](#event-loop-io-discipline-x7)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
+- [Start-fresh refusal (F1, F2)](#start-fresh-refusal-f1-f2)
 - [CI/CD Reference](#cicd-reference)
 - [CasCor Backend Reference](#cascor-backend-reference)
 - [Demo Mode Reference](#demo-mode-reference)
@@ -222,6 +223,19 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 Distinct from the 1a / 1b off-loop runbook, which landed via the docs
 consolidation `#583` (`#568` was closed superseded).
 
+## Start-fresh refusal (F1, F2)
+
+A plain Start continues the current network. Cascor refuses a wider staged dataset with `[start_fresh_required]` before loading it (`#681`). The alert names **Stop & Restart with new dataset** and **Start fresh**. Confirm re-stages edits, applies parameter edits, then `POST /api/train/restart`.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Start-fresh refusal](AGENTS_REFERENCE.md#start-fresh-refusal-f1-f2) | Marker, alert, modal wording, confirm order, demo vs service |
+| [USER_MANUAL.md § A wider dataset](USER_MANUAL.md#a-wider-dataset-needs-start-fresh) | What to click |
+
+```bash
+cd src && pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
+```
+
 ## CI/CD Reference
 
 Pipeline configuration, hooks, and workflow reference.
@@ -318,6 +332,6 @@ The most commonly used environment variables for juniper-canopy configuration. F
 
 ---
 
-**Last Updated:** September 5, 2026
-**Version:** 0.25.3
+**Last Updated:** October 5, 2026
+**Version:** 0.25.6
 **Maintainer:** Paul Calnon

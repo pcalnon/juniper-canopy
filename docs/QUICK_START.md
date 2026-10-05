@@ -2,9 +2,9 @@
 
 ## Get Juniper Canopy running in 5 minutes
 
-**Version:** 0.25.3
+**Version:** 0.25.6
 **Status:** ✅ Production Ready
-**Last Updated:** September 5, 2026
+**Last Updated:** October 5, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -555,6 +555,22 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 ```
 
 **See:** [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)
+
+### Issue 12: Start Refuses a Wider Dataset
+
+**Symptom:** Start fails. The alert says the staged dataset is wider than the current network. The charts still show the previous run, and the pending-dataset banner is still up.
+
+**Cause:** A plain Start continues the current network. It cannot add features or outputs. Cascor refuses before loading anything and opens the message with `[start_fresh_required]` (`#681`). `equities` (15 features) and `mnist` (784 features) are the cases the unit test drives.
+
+**What to do:** Click **Stop & Restart with new dataset**. Turn **Start fresh** on. Confirm. The toggle defaults to off, which would continue the network that is too narrow. Edits in the modal are applied before the restart. The alert stays up until you dismiss it.
+
+A cascor that does not send the marker will not show this alert. It used to consume the staged dataset before refusing, so the banner this alert names is already gone. Do not invent a second wording for that case.
+
+```bash
+cd src && pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
+```
+
+**See:** [AGENTS_REFERENCE.md § Start-fresh refusal](AGENTS_REFERENCE.md#start-fresh-refusal-f1-f2)
 
 ## Next Steps
 
