@@ -46,6 +46,24 @@ This preserves dashboard contracts across demo and service backends for:
 
 Primary codepaths: `src/backend/cascor_service_adapter.py`, `src/backend/service_backend.py`, `src/backend/state_sync.py`.
 
+### Recurrence Service Contract (Recurrence Mode)
+
+When `backend_type` is `recurrence`, Canopy talks to the juniper-recurrence service over plain HTTP through its own
+adapter. It does not install `juniper-recurrence-client`, so no package pin can hold a version floor. The adapter is
+written against **juniper-recurrence 0.5.0**, its documented contract floor (`RECURRENCE_SERVICE_CONTRACT_FLOOR`).
+
+- `GET /v1/training/status` reports `idle`, `trained` or `restored`. `restored` is a model loaded from the snapshot
+  that `restored_from` names, and it counts as a model being present exactly as `trained` does. It is newer than the
+  0.5.0 release, which never sends it.
+- A refused key (401 or 403) names the two variables that set it, `JUNIPER_CANOPY_RECURRENCE_API_KEY` and
+  `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`. A rate-limited request (429) carries the reply's `Retry-After` wait (see
+  [Upstream Failures](#upstream-failures)).
+- The model version is read from the service, never assumed: the `version` in the `GET /v1/health` body when it has
+  one, else `info.version` from `GET /openapi.json`. The 0.5.0 health body is `{"status": "ok"}`, so the fallback is
+  the path that answers. A failed lookup reads `unknown (version lookup failed)`.
+
+Primary codepaths: `src/backend/recurrence_service_adapter.py`, `src/backend/recurrence_backend.py`, `src/model_registry.py`.
+
 ### Base URL
 
 **Local Development:**
@@ -1578,6 +1596,16 @@ one line and bounded to 300 characters, for example
 A validation-error list is rendered as `loc -> msg` pairs, separated by a semicolon and a space, without the
 `input` each item echoes. A 5xx answer carries no `detail`: there the service relays its own upstream's exception
 text (`data fetch failed: …`), which can quote that service's juniper-data key.
+
+Two refusals say what to do next. A refused key (401 or 403) names the variables that set it:
+
+`recurrence service rejected the request (401 on POST /v1/train) — set JUNIPER_CANOPY_RECURRENCE_API_KEY or JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE to a key the service accepts: Invalid API key.`
+
+A rate-limited request (429) carries the reply's `Retry-After` wait before its `detail`:
+
+`recurrence service error 429 on POST /v1/train — retry after 30 s: Rate limit exceeded. Try again in 30 seconds.`
+
+A `Retry-After` given as an HTTP-date is shown as sent, and a 429 without the header keeps the plain wording.
 
 The transport text of such a failure -- URLs, socket errors, and a header value a client refused to send --
 goes to canopy's logs only.

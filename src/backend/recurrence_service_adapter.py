@@ -11,7 +11,7 @@
 # File Path:     JuniperCanopy/juniper_canopy/src/backend/
 #
 # Date Created:  2026-06-22
-# Last Modified: 2026-10-04
+# Last Modified: 2026-10-05
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -24,7 +24,7 @@
 #     recurrence service exposes a one-shot fit: ``POST /v1/train`` BLOCKS until the LMU
 #     is fitted (a juniper-data fetch + a single ridge/lstsq solve — there are no epochs
 #     to stream), and ``GET /v1/training/status`` returns the terminal state (idle |
-#     trained) instantly. There is no background job and no WebSocket, so — unlike the
+#     trained | restored) instantly. There is no background job and no WebSocket, so — unlike the
 #     cascor adapter — this adapter needs neither an async event loop nor a streaming
 #     relay. A plain ``httpx.Client`` per call is the honest, simplest fit; the backend
 #     wrapper (A1-ii) backgrounds the blocking ``train`` on a worker thread so the Dash
@@ -43,6 +43,11 @@
 #       r2 / loss) — never an ``accuracy`` key. Result objects carry the raw metric dict.
 #     - Scope (A1-i, per the ratified slice cadence): ``train`` + ``training_status``
 #       only. ``/v1/predict`` and ``/v1/crossval`` are deferred (enabler-doc OQ-2).
+#       ``service_version`` (W1.7) reads the version the service reports.
+#     - Contract floor: ``RECURRENCE_SERVICE_CONTRACT_FLOOR`` (W1.7 / F-C8). canopy speaks
+#       the service's REST contract here over raw httpx and imports no recurrence client
+#       package, so no pin in pyproject.toml can carry a floor; the constant and
+#       docs/api/API_REFERENCE.md § Recurrence Service Contract carry it instead.
 #     - A fresh ``httpx.Client`` is built per request (no pooled client held across the
 #       adapter's lifetime) so the adapter has no teardown obligation — appropriate for an
 #       occasional, blocking one-shot call rather than a hot path. Tests inject an
@@ -84,15 +89,36 @@ import httpx
 logger = logging.getLogger("juniper_canopy.backend.recurrence")
 
 __all__ = [
+    "MODEL_PRESENT_STATES",
+    "RECURRENCE_SERVICE_CONTRACT_FLOOR",
     "RecurrenceServiceAdapter",
     "RecurrenceTrainResult",
     "RecurrenceStatus",
     "RecurrenceServiceError",
     "RecurrenceTrainInProgressError",
     "RecurrenceServiceAuthError",
+    "RecurrenceServiceRateLimited",
     "RecurrenceServiceTimeoutError",
     "RecurrenceServiceUnavailableError",
 ]
+
+# The juniper-recurrence release this adapter is written and verified against: its documented contract floor (W1.7 /
+# F-C8). canopy reaches the service through this module over raw httpx and imports no juniper-recurrence-client, so a
+# package pin in pyproject.toml would constrain nothing canopy runs; this constant and docs/api/API_REFERENCE.md
+# § Recurrence Service Contract carry the floor instead. 0.5.0 serves every route and reply shape this module parses
+# except the ``restored`` status state, which is newer (on juniper-recurrence main, unreleased as of 2026-10-05, where
+# ``__version__`` still reads 0.5.0): it is parsed when present, and a 0.5.0 release simply never sends it.
+RECURRENCE_SERVICE_CONTRACT_FLOOR = "0.5.0"
+
+# The ``GET /v1/training/status`` states in which the service holds a model it can predict with (W1.6 / F-C6).
+# ``restored`` is a model loaded from a snapshot -- present and predictable, but never fitted by the service process, so
+# it reports no ``final_metrics`` / ``stopped_reason`` / ``events``. Anything asking "is there a model?" reads
+# :attr:`RecurrenceStatus.model_present`, never ``state == "trained"``.
+MODEL_PRESENT_STATES: frozenset[str] = frozenset({"trained", "restored"})
+
+# The variables that set the key canopy sends as ``X-API-Key`` (``Settings.recurrence_api_key``; the ``_FILE`` form is
+# read first). A 401 / 403 names them (W1.6 / F-C5): the setting's Python name is not something an operator can set.
+_AUTH_REMEDY = "set JUNIPER_CANOPY_RECURRENCE_API_KEY or JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE to a key the service accepts"
 
 # ``POST /v1/train`` blocks through a juniper-data fetch + an lstsq solve, so the read
 # phase must be generous; the connect phase stays short to fail fast on an unreachable
@@ -107,19 +133,25 @@ _DEFAULT_STATUS_TIMEOUT = 10.0
 # not grow it without limit.
 _DETAIL_MAX_CHARS = 300
 
+# The most a 429's ``Retry-After`` value may add to the message (W1.6 / F-C7). juniper-service-core sends delta-seconds;
+# an HTTP-date, which RFC 9110 also allows, is 29 characters. Bounded for the reason the detail is.
+_RETRY_AFTER_MAX_CHARS = 64
+
 
 class RecurrenceServiceError(RuntimeError):
     """Base error for any failed juniper-recurrence service interaction.
 
     ``status_code`` / ``body`` carry the HTTP detail when the failure is a non-2xx
     response (they are ``None`` for transport-level failures — timeout / unreachable).
-    All three values are passed positionally to ``super().__init__`` so the exception
-    round-trips through ``pickle`` / ``copy.copy`` (rebuilt from ``self.args``); ``__str__``
-    keeps the human message clean (just the first arg, not the whole tuple).
+    All three values -- and any a subclass appends after them (``extra``; see
+    :class:`RecurrenceServiceRateLimited`) -- are passed positionally to ``super().__init__``
+    so the exception round-trips through ``pickle`` / ``copy.copy`` (rebuilt from
+    ``self.args``); ``__str__`` keeps the human message clean (just the first arg, not the
+    whole tuple).
     """
 
-    def __init__(self, message: str, status_code: Optional[int] = None, body: Optional[str] = None) -> None:
-        super().__init__(message, status_code, body)
+    def __init__(self, message: str, status_code: Optional[int] = None, body: Optional[str] = None, *extra: Any) -> None:
+        super().__init__(message, status_code, body, *extra)
 
     @property
     def status_code(self) -> Optional[int]:
@@ -140,8 +172,30 @@ class RecurrenceTrainInProgressError(RecurrenceServiceError):
 class RecurrenceServiceAuthError(RecurrenceServiceError):
     """The service rejected the request for auth reasons (HTTP 401 / 403).
 
-    Almost always a missing or wrong outbound ``X-API-Key`` — see ``recurrence_api_key``.
+    Almost always a missing or wrong outbound ``X-API-Key``, which ``JUNIPER_CANOPY_RECURRENCE_API_KEY`` or
+    ``JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`` sets (``Settings.recurrence_api_key``); the message names both.
     """
+
+
+class RecurrenceServiceRateLimited(RecurrenceServiceError):
+    """The service refused the request under its rate limit (HTTP 429).
+
+    juniper-recurrence's ``SecurityMiddleware`` rate-limits per key or client (enabled, 60 requests a minute, by
+    default) and answers a refusal with a ``Retry-After`` header: the seconds until its window resets. When the reply
+    has the header, the message carries the wait (``… — retry after 30 s``), so it reaches the log,
+    ``completion_reason`` and the status bar; :attr:`retry_after` holds the value as sent, or ``None``. canopy's
+    dashboard polls canopy, not the service, and canopy calls the service rarely, so a 429 usually means another
+    client shares the service's key or address.
+    """
+
+    def __init__(self, message: str, status_code: Optional[int] = None, body: Optional[str] = None, retry_after: Optional[str] = None) -> None:
+        # A fourth positional value, so the exception still rebuilds from ``self.args`` (pickle / copy) as the base's does.
+        super().__init__(message, status_code, body, retry_after)
+
+    @property
+    def retry_after(self) -> Optional[str]:
+        """The reply's ``Retry-After`` value (one line, bounded), or ``None`` when it sent none."""
+        return cast(Optional[str], self.args[3])
 
 
 class RecurrenceServiceTimeoutError(RecurrenceServiceError):
@@ -171,15 +225,27 @@ class RecurrenceTrainResult:
 class RecurrenceStatus:
     """Parsed ``GET /v1/training/status`` response (terminal state, never per-epoch).
 
-    ``state`` is ``"idle"`` (no run yet) or ``"trained"``. ``final_metrics`` /
-    ``stopped_reason`` describe the last completed run (``None`` when idle). ``events`` is
-    the ordered training-event buffer recorded during the (already-finished) run.
+    ``state`` is ``"idle"`` (no model), ``"trained"`` (fitted by the service process) or ``"restored"`` (loaded from
+    the snapshot ``restored_from`` names; W1.6 / F-C6). ``final_metrics`` / ``stopped_reason`` describe the last
+    completed run and are ``None`` when idle -- and when restored, because no run produced that model. ``events`` is
+    the ordered training-event buffer recorded during the (already-finished) run. ``restored_from`` is ``None`` unless
+    the state is ``restored``, and always ``None`` from a service that predates the state.
     """
 
     state: str
     final_metrics: Optional[dict[str, float]]
     stopped_reason: Optional[str]
     events: list[dict[str, Any]] = field(default_factory=list)
+    restored_from: Optional[str] = None
+
+    @property
+    def model_present(self) -> bool:
+        """True when the service holds a model it can predict with: ``trained`` or ``restored`` (:data:`MODEL_PRESENT_STATES`).
+
+        A restored model is as present as a trained one. It is not evidence that a fit canopy asked for landed: the
+        service reports ``restored`` for a model it never fitted.
+        """
+        return self.state in MODEL_PRESENT_STATES
 
 
 def _validation_error_text(item: Any) -> str:
@@ -219,6 +285,28 @@ def _service_detail(response: httpx.Response) -> Optional[str]:
         return _render_detail(response.json())
     except Exception:  # noqa: BLE001 -- a describer must not raise: the typed error stands whatever the body holds
         return None
+
+
+def _retry_after(response: httpx.Response) -> Optional[str]:
+    """The reply's ``Retry-After`` value as one bounded line (W1.6 / F-C7), or ``None`` when absent or blank.
+
+    Carried as sent rather than parsed: juniper-service-core sends delta-seconds, but a proxy in front of the service
+    may send an HTTP-date, and either is what the operator needs to read. Whitespace is collapsed and the value is
+    bounded to ``_RETRY_AFTER_MAX_CHARS``, ending in an ellipsis when cut.
+    """
+    collapsed = " ".join(response.headers.get("retry-after", "").split())
+    if not collapsed:
+        return None
+    if len(collapsed) > _RETRY_AFTER_MAX_CHARS:
+        return collapsed[: _RETRY_AFTER_MAX_CHARS - 1].rstrip() + "…"
+    return collapsed
+
+
+def _version_text(value: Any) -> Optional[str]:
+    """``value`` stripped when it is a non-blank string -- a version a surface reported -- else ``None``."""
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
 
 
 def _render_detail(payload: Any) -> Optional[str]:
@@ -344,10 +432,10 @@ class RecurrenceServiceAdapter:
     def training_status(self) -> RecurrenceStatus:
         """Return the last training status via ``GET /v1/training/status`` (instant).
 
-        This is terminal state (idle | trained) plus the recorded event buffer — there is
-        nothing to poll *during* a fit (the fit blocks ``/v1/train``). The backend wrapper
-        (A1-ii) uses this to flip a binary in-progress -> trained after the backgrounded
-        train completes.
+        This is terminal state (idle | trained | restored) plus the recorded event buffer —
+        there is nothing to poll *during* a fit (the fit blocks ``/v1/train``). Whether the
+        service holds a model is :attr:`RecurrenceStatus.model_present`, which counts a
+        restored model exactly as a trained one (W1.6 / F-C6).
         """
         data = self._call("GET", "/v1/training/status", self._status_timeout)
         return RecurrenceStatus(
@@ -355,7 +443,31 @@ class RecurrenceServiceAdapter:
             final_metrics=data.get("final_metrics"),
             stopped_reason=data.get("stopped_reason"),
             events=list(data.get("events") or []),
+            restored_from=data.get("restored_from"),
         )
+
+    def service_version(self) -> str:
+        """The version the recurrence service reports about itself (W1.7 / F-C8), read over the wire.
+
+        ``GET /v1/health`` first: a non-blank ``version`` in its body is the answer. juniper-recurrence 0.5.0's has none
+        -- juniper-service-core's health router answers ``{"status": "ok"}`` -- so the fallback is ``GET /openapi.json``,
+        whose ``info.version`` FastAPI fills from the ``version=__version__`` the service passes to ``create_app``. That
+        route is exempt from auth under juniper-service-core 0.5.0 and authenticated under 0.7.0; this sends the same
+        ``X-API-Key`` as every call, so it reads both. ``GET /`` is no help: the service mounts no root route.
+
+        Raises:
+            RecurrenceServiceAuthError / RecurrenceServiceTimeoutError / RecurrenceServiceUnavailableError /
+            RecurrenceServiceError: as for any call, and ``RecurrenceServiceError`` when neither surface names a
+            version. A caller that wants a label rather than an error uses ``model_registry.refresh_model_versions``.
+        """
+        version = _version_text(self._call("GET", "/v1/health", self._status_timeout).get("version"))
+        if version is not None:
+            return version
+        info = self._call("GET", "/openapi.json", self._status_timeout).get("info")
+        version = _version_text(info.get("version") if isinstance(info, dict) else None)
+        if version is not None:
+            return version
+        raise RecurrenceServiceError("recurrence service reported no version on GET /v1/health or GET /openapi.json")
 
     # ------------------------------------------------------------------ HTTP plumbing
 
@@ -401,6 +513,10 @@ class RecurrenceServiceAdapter:
         as ``Request failed: … in header value: ' <key>'``. A padded juniper-data key on the service would therefore
         reach ``completion_reason`` -- which an anonymous caller can read -- verbatim. That is transport text one hop
         removed, which is what ``outbound_errors`` keeps from callers (#683).
+
+        A 401 / 403 names the variables that set the key (W1.6 / F-C5). A 429 raises
+        :class:`RecurrenceServiceRateLimited`, whose message carries the reply's ``Retry-After`` before the detail
+        (W1.6 / F-C7); without the header its message is the generic 4xx wording, unchanged.
         """
         code = response.status_code
         detail = _service_detail(response) if httpx.codes.is_client_error(code) else None
@@ -408,7 +524,11 @@ class RecurrenceServiceAdapter:
         if code == httpx.codes.CONFLICT:  # 409
             raise RecurrenceTrainInProgressError(f"recurrence training already in progress ({method} {path}){suffix}", status_code=code, body=response.text)
         if code in (httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN):  # 401 / 403
-            raise RecurrenceServiceAuthError(f"recurrence service rejected the request ({code} on {method} {path}) — check recurrence_api_key{suffix}", status_code=code, body=response.text)
+            raise RecurrenceServiceAuthError(f"recurrence service rejected the request ({code} on {method} {path}) — {_AUTH_REMEDY}{suffix}", status_code=code, body=response.text)
+        if code == httpx.codes.TOO_MANY_REQUESTS:  # 429
+            retry_after = _retry_after(response)
+            wait = "" if retry_after is None else f" — retry after {retry_after}{' s' if retry_after.isdigit() else ''}"
+            raise RecurrenceServiceRateLimited(f"recurrence service error {code} on {method} {path}{wait}{suffix}", status_code=code, body=response.text, retry_after=retry_after)
         if code >= httpx.codes.BAD_REQUEST:  # any other 4xx / 5xx
             raise RecurrenceServiceError(f"recurrence service error {code} on {method} {path}{suffix}", status_code=code, body=response.text)
         try:

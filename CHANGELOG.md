@@ -137,6 +137,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A refused recurrence request now says what to do, and a restored model counts as a model (W1.6;
+  plan findings F-C5, F-C6, F-C7).** The plan is juniper-ml's
+  `notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md`
+  (v1.3.0). All three changes are in `src/backend/recurrence_service_adapter.py`.
+  - **401 / 403 (F-C5).** The remedy said `check recurrence_api_key`. That is the setting's Python
+    name, and no operator can set it. The message now reads
+    `… — set JUNIPER_CANOPY_RECURRENCE_API_KEY or JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE to a key the service accepts`,
+    still followed by the service's `detail`. This replaces the remedy the W0.5 entry below says the
+    401 / 403 branches kept.
+  - **`restored` (F-C6).** juniper-recurrence `main` reports a third `GET /v1/training/status` state:
+    a model loaded from a snapshot, with `restored_from` naming the snapshot. `RecurrenceStatus` gains
+    `restored_from` and a `model_present` property, true for `trained` and `restored` alike
+    (`MODEL_PRESENT_STATES`). Nothing else in canopy reads the service's status states. The backend's
+    `trained` belongs to its own fit state machine and is never fed from that route, and no UI mapping
+    reads the enum, so the property is the one place the rule lives, ready for W1.5's status poll. The
+    published 0.5.0 never sends `restored`, and its replies parse with `restored_from=None`.
+  - **429 (F-C7).** A rate-limited request raised the generic `RecurrenceServiceError`. It now raises
+    `RecurrenceServiceRateLimited`, a subclass, whose message carries the reply's `Retry-After` before
+    the detail:
+    `recurrence service error 429 on POST /v1/train — retry after 30 s: Rate limit exceeded. Try again in 30 seconds.`
+    `retry_after` holds the value as sent and survives pickling. To carry it in `args`,
+    `RecurrenceServiceError.__init__` now forwards any values a subclass appends (`*extra`). A plain
+    error still has exactly three.
+    An HTTP-date is shown as sent. The value is flattened and bounded to 64 characters. A 429 without
+    the header keeps the plain wording, so the existing 429 assertions hold unchanged.
+    `outbound_error_text` passes the message to `completion_reason` as is, as it does any answer with
+    a status code, so the backend needs no change.
+  - **The status bar's failure tooltip bound rises from 400 to 480 characters**
+    (`DashboardManager._FAILURE_REASON_TOOLTIP_MAX_CHARS`). The 401 / 403 wording grew from 90 to 174
+    characters, and `test_the_tooltip_holds_every_reason_the_adapter_can_build_uncut` exists to fail
+    exactly when that happens. A new test holds a 429 with its wait to the same bound.
+  - Checked against the real service as well as the mocks.
+    `util/ad-hoc/2026-10-05_recurrence_wire_contract_probe.py` builds juniper-recurrence's app in
+    process and drives canopy's adapter through the service's own middleware. It covers a wrong key, a
+    third request at 2 per minute, and a snapshot restore. Before this change the 429 was a
+    `RecurrenceServiceError` and `restored` had no `restored_from`. After it, the run produces the
+    messages and state above.
+  - Tests: `src/tests/unit/test_recurrence_service_adapter.py` (+22, `TestW16AuthRestoredRateLimit`;
+    two assertions that pinned the old remedy verbatim now pin the new one verbatim),
+    `src/tests/unit/backend/test_recurrence_backend.py` (+2, the real adapter's 401 and 429 reaching
+    `completion_reason`) and `src/tests/unit/frontend/test_completion_reason_status_bar.py` (+3).
+- **The registry no longer claims the recurrence model is version 0.1.0 (W1.7; plan finding F-C8).**
+  `src/model_registry.py` seeded the recurrence model with `version="0.1.0"` while the service it
+  names was 0.5.0. canopy has no package edge to the service that could keep such a constant true,
+  so the seed's version is now blank, and the version comes from the service.
+  - `RecurrenceServiceAdapter.service_version()` reads the `version` in `GET /v1/health`'s body when
+    there is one. The plan expected one there, but juniper-recurrence 0.5.0's body is
+    `{"status": "ok"}`, and the service mounts no `GET /`. So the version comes from `info.version` on
+    `GET /openapi.json`, which FastAPI fills from the `version=__version__` the service passes to
+    `create_app`. That route is open under juniper-service-core 0.5.0 and authenticated under 0.7.0,
+    and the adapter sends its key either way.
+  - `refresh_model_versions(version_sources, *, models=MODELS)` is one registry refresh. It asks each
+    source at most once and returns the specs with the answers baked in, so reading the result never
+    touches the network. It never raises for a version: a source that fails, times out or names no
+    version yields `unknown (version lookup failed)` (`SERVICE_VERSION_UNAVAILABLE`), with a WARNING
+    that names the failure. A model with no source keeps its spec.
+  - **No surface renders a model's version yet.** Nothing read `ModelSpec.version` before this change
+    either: not the model table, not the picker, not `/api/selection`. Wiring a refreshed registry into
+    one of them is the display half the plan leaves open.
+  - **The dependency floor is a documented contract floor, not a pin.** canopy imports no
+    `juniper_recurrence_client`; it speaks the REST contract through its own adapter. A
+    `juniper-recurrence-client` requirement would install a package nothing imports, would constrain
+    nothing canopy runs, and has no `[service]` extra to live in, since canopy has none. The floor is
+    `RECURRENCE_SERVICE_CONTRACT_FLOOR = "0.5.0"` in the adapter, and `docs/api/API_REFERENCE.md`
+    § Recurrence Service Contract (Recurrence Mode), new, names it. A test pins the two together.
+  - Tests: `src/tests/unit/test_recurrence_service_adapter.py` (+15, `TestServiceVersion`) and
+    `src/tests/unit/test_model_registry.py` (+15, `TestRefreshModelVersions`).
+  - `util/ad-hoc/2026-10-05_w16_w17_mutation_check.py` covers both entries. It puts each pre-change
+    behaviour back at one site, one arm at a time, on a copy of the tree. All 16 arms fail the tests
+    they name. The unmutated control passes all 239 tests: the four touched test files plus the
+    harness's import-binding probe.
 - **A failed recurrence fit now says why: the service's 422 `detail` reaches the log,
   `completion_reason` and the status bar (W0.5; plan finding F-C1).** The recurrence service
   answers a bad dataset with HTTP 422 and a JSON body such as

@@ -9,7 +9,8 @@ augmentation (only when completed, only when the reason is present/known).
 
 ``TestFailedRecurrenceFitReason`` and ``TestA422ReachesTheStatusBar`` pin W0.5 / F-C1: a
 failed recurrence fit's reason -- the service's 422 ``detail`` included -- reaches the bar,
-and a reason too long for the bar's label rides whole on a hover tooltip.
+and a reason too long for the bar's label rides whole on a hover tooltip. W1.6 lengthened two
+of those reasons (a 401's key variables, a 429's ``Retry-After``); the tooltip bound holds both.
 """
 
 import time
@@ -20,7 +21,7 @@ import pytest
 from dash import html
 
 from backend.recurrence_backend import RecurrenceBackend
-from backend.recurrence_service_adapter import RecurrenceServiceAdapter, RecurrenceServiceError
+from backend.recurrence_service_adapter import RecurrenceServiceAdapter, RecurrenceServiceError, RecurrenceServiceRateLimited
 from frontend.dashboard_manager import DashboardManager
 from outbound_errors import outbound_error_text
 
@@ -172,6 +173,21 @@ class TestFailedRecurrenceFitReason:
         with pytest.raises(RecurrenceServiceError) as caught:
             RecurrenceServiceAdapter._parse(httpx.Response(code, json={"detail": "d" * 5000}), "POST", "/v1/train")
         reason = outbound_error_text(caught.value)
+        assert len(reason) > DashboardManager._COMPLETION_REASON_MAX_CHARS, "the label must cut this reason"
+        assert DashboardManager._failure_reason_tooltip(reason) == reason, "the tooltip must not"
+
+    @pytest.mark.parametrize("retry_after", ["9" * 64, "9" * 5000, "Wed, 21 Oct 2015 07:28:00 GMT"], ids=["longest-seconds", "cut", "http-date"])
+    def test_the_tooltip_holds_a_rate_limited_reason_with_its_wait_uncut(self, retry_after):
+        """W1.6 / F-C7: a 429 carries its ``Retry-After`` wait before the detail, so the bound must hold that too.
+
+        The test above sends no header, so its 429 builds the plain wording. Here the header is at its bound (64
+        digits, which also earn the ``s``), past it (cut to the bound), and an HTTP-date.
+        """
+        response = httpx.Response(429, json={"detail": "d" * 5000}, headers={"Retry-After": retry_after})
+        with pytest.raises(RecurrenceServiceRateLimited) as caught:
+            RecurrenceServiceAdapter._parse(response, "POST", "/v1/train")
+        reason = outbound_error_text(caught.value)
+        assert "— retry after " in reason
         assert len(reason) > DashboardManager._COMPLETION_REASON_MAX_CHARS, "the label must cut this reason"
         assert DashboardManager._failure_reason_tooltip(reason) == reason, "the tooltip must not"
 
