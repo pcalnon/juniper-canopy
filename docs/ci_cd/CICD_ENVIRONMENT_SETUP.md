@@ -1,7 +1,7 @@
 # CI/CD Environment Setup
 
-**Last Updated:** 2026-08-24
-**Version:** 0.28.0
+**Last Updated:** 2026-10-05
+**Version:** 0.28.2
 **Status:** Current
 
 ## Table of Contents
@@ -66,7 +66,8 @@ Why this matters:
 - Linux installs CPU-only torch from the PyTorch CPU index to avoid CUDA wheels.
 - macOS installs torch from the default PyPI index because the Linux CPU-only index has no macOS ARM wheels.
 - `pip install -e .` ensures imports resolve the current source tree.
-- `conf/requirements_ci.txt` is the CI baseline, not `requirements.txt`; dependency PRs may bump minimum versions there when the CI floor changes.
+- Repo-root `requirements.txt` is a symlink to `conf/requirements_ci.txt`. Dependabot's pip updates (`directory: "/"`) commit floor bumps in that file, and `ci.yml` installs it with `pip install -r conf/requirements_ci.txt`.
+- `requirements.lock` is compiled from `pyproject.toml`. A floor that exists only in `conf/requirements_ci.txt` can change while that package stays out of the lock. Reviewer notes: [Dependabot lockfile automation](CICD_MANUAL.md#runbook-dependabot-lockfile-automation).
 - `conf/requirements_ci.txt` includes `prometheus-client` and `sentry-sdk` used by observability paths.
 
 ## CI Environment Variables
@@ -153,7 +154,7 @@ uv pip compile pyproject.toml \
   -o requirements.lock
 ```
 
-Dependabot branches also trigger `.github/workflows/lockfile-update.yml`, which runs the same extras with `--upgrade` and commits `requirements.lock` only when the resolved pins change.
+Dependabot branches also trigger `.github/workflows/lockfile-update.yml`, which compiles `pyproject.toml` with the same extras and `--upgrade`. It does not compile `conf/requirements_ci.txt`. A green run can commit pin moves for packages the floor bump did not name, and the bumped package stays out of `requirements.lock` when it is not a `pyproject.toml` dependency. An empty `CROSS_REPO_DISPATCH_TOKEN` in the Dependabot secret store skips that regen and still leaves this job green. See [Dependabot lockfile automation](CICD_MANUAL.md#runbook-dependabot-lockfile-automation).
 
 ### `Documentation Links` fails unexpectedly
 

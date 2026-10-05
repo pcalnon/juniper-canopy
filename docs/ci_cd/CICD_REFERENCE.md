@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-08-24
-**Version:** 0.28.0
+**Last Updated:** 2026-10-05
+**Version:** 0.28.2
 **Status:** Current
 
 ## Table of Contents
@@ -180,7 +180,7 @@ lint:
 | `.github/workflows/ci.yml`                  | `push`, `pull_request`, `repository_dispatch`, `workflow_dispatch`   | Full quality pipeline and merge gate                 |
 | `.github/workflows/codeql.yml`              | push `main`/`develop`, PR to `main`, weekly Mon 06:00 UTC            | CodeQL SAST; required check `Analyze (python)`       |
 | `.github/workflows/security-scan.yml`       | weekly cron + manual                                                 | Scheduled Bandit + pip-audit                         |
-| `.github/workflows/lockfile-update.yml`     | Dependabot push branches                                             | Auto-refresh `requirements.lock`                     |
+| `.github/workflows/lockfile-update.yml`     | `push` to `dependabot/pip/**`; `pull_request` paths `pyproject.toml` (skips forks and `release/**`) | `--upgrade` compile of `pyproject.toml` into `requirements.lock` |
 | `.github/workflows/publish.yml`             | release published                                                    | Build + TestPyPI + PyPI publish                      |
 | `.github/workflows/sequence-safety.yml`     | `pull_request` to `main`/`develop`                                   | Compositional-loss screens (standalone job)          |
 | `.github/workflows/main-verify.yml`         | push to `main`                                                       | Post-merge sequence-safety net                       |
@@ -455,14 +455,26 @@ This catches broken internal file and heading links without requiring sibling re
 
 ### `lockfile-update.yml`
 
-- Trigger: push to `dependabot/pip/**`
-- Uses `CROSS_REPO_DISPATCH_TOKEN` for checkout/push
-- Compiles lockfile with:
-  - `--extra juniper-data`
-  - `--extra juniper-cascor`
-  - `--extra observability`
-  - `--upgrade`
-- Commits only when diff exists
+Operator runbook: [Dependabot lockfile automation](CICD_MANUAL.md#runbook-dependabot-lockfile-automation).
+
+- Triggers:
+  - `push` to `dependabot/pip/**`
+  - `pull_request` whose paths include `pyproject.toml`, when the head is in this repo and the head ref does not start with `release/`
+- Token gate on `CROSS_REPO_DISPATCH_TOKEN`. Dependabot runs read the Dependabot secret store. An empty token on `dependabot[bot]` is a green skip. An empty token on any other actor fails the job.
+- On proceed, checkout uses that token and `uv==0.11.8` on Python 3.14, then:
+
+```bash
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  --upgrade \
+  -o requirements.lock
+```
+
+- The compiler input is `pyproject.toml`. Dependabot's pip floor edits land in `conf/requirements_ci.txt` (repo-root `requirements.txt` is a symlink to that file). A package absent from `pyproject.toml` stays out of `requirements.lock`. `--upgrade` can still move other pins in the same commit.
+- Commit, only when `requirements.lock` changed, via `createCommitOnBranch` (`expectedHeadOid` is the checked-out HEAD). Push subjects: `[dependabot skip] Update requirements.lock` on `push`, `chore(deps): auto-regenerate requirements.lock after pyproject change` on `pull_request`.
+- Lockfile Freshness (`ci.yml` job `lockfile-check`) is a separate `--constraint` compile. A skipped regen stays green while the current pins still satisfy `pyproject.toml`.
 
 ### `publish.yml`
 
@@ -715,7 +727,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-08-24
-**Version:** 0.28.0
+**Last Updated:** 2026-10-05
+**Version:** 0.28.2
 **Maintained By:** Development Team
 **Status:** ✅ Current

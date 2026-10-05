@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-08-24
-**Version:** 0.27.0
+**Last Updated:** 2026-10-05
+**Version:** 0.27.2
 **Status:** Current
 
 ## Table of Contents
@@ -710,7 +710,7 @@ python -m pytest \
 
 ### 2. If dependencies changed
 
-Regenerate lockfile exactly as CI expects:
+`uv pip compile` keeps the pins already in the `-o` file unless you pass `--upgrade`. This command preserves those pins:
 
 ```bash
 uv pip compile pyproject.toml \
@@ -719,6 +719,8 @@ uv pip compile pyproject.toml \
   --extra observability \
   -o requirements.lock
 ```
+
+Pass `--upgrade` when the goal is to accept newer wheels. That is the command [Dependabot lockfile automation](#runbook-dependabot-lockfile-automation) runs. The compiler reads `pyproject.toml`. A floor that lives only in `conf/requirements_ci.txt` is a separate edit.
 
 ### 3. If docs changed
 
@@ -737,17 +739,39 @@ python scripts/check_doc_links.py \
 
 ### Runbook: Dependabot lockfile automation
 
-When Dependabot pushes to `dependabot/pip/**`, `lockfile-update.yml`:
+Dependabot's pip updates and `lockfile-update.yml` write different files. Read both diffs.
 
-1. Regenerates `requirements.lock` via `uv pip compile`
-2. Commits `[dependabot skip] Update requirements.lock` if changed
-3. Pushes with `CROSS_REPO_DISPATCH_TOKEN` so downstream CI is triggered
+**CI floor.** `.github/dependabot.yml` sets the pip ecosystem `directory` to `/`. Repo-root `requirements.txt` is a symlink to `conf/requirements_ci.txt` (`requirements.txt` → `conf/requirements.txt` → `conf/requirements_ci.txt`). The committed floor bump is therefore `conf/requirements_ci.txt`, which `ci.yml` installs with `pip install -r conf/requirements_ci.txt`. A mdurl floor change is `mdurl>=0.1` to `mdurl>=0.1.2` in that file.
 
-Operational constraints:
+**Lock compiler.** When the token gate passes, the workflow runs:
 
-- Keep `CROSS_REPO_DISPATCH_TOKEN` valid
-- Keep compile extras aligned with `ci.yml` (`juniper-data`, `juniper-cascor`, `observability`)
-- Keep `requirements.lock` committed in PRs that modify dependency constraints
+```bash
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  --upgrade \
+  -o requirements.lock
+```
+
+`--upgrade` is required. Without it, `uv` treats the existing `-o` file as pins and leaves transitive dependencies where they are. The compiler input is `pyproject.toml`, not `conf/requirements_ci.txt`. mdurl is absent from `pyproject.toml` and from `requirements.lock`, so that floor bump does not add an mdurl pin. The same regen can still move other pins. On the mdurl floor update the lock moved `narwhals` 2.26.0 → 2.27.0 (via plotly), `websockets` 17.1 → 17.2, and `zipp` 4.1.0 → 4.1.1.
+
+**Triggers and commit subjects**
+
+| Event | When it runs | Subject line |
+| --- | --- | --- |
+| `push` | Branch matches `dependabot/pip/**` | `[dependabot skip] Update requirements.lock` |
+| `pull_request` | The PR touches `pyproject.toml`, the head is in this repo, and the head ref does not start with `release/` | `chore(deps): auto-regenerate requirements.lock after pyproject change` |
+
+`[dependabot skip]` keeps Dependabot from rebasing onto the regen commit. `release/**` is excluded so a version-only `pyproject.toml` edit stays a single-purpose release PR.
+
+**Token gate.** Regen steps run only when `CROSS_REPO_DISPATCH_TOKEN` is non-empty. A Dependabot-triggered run reads the Dependabot secret store, not the Actions store. An empty token with actor `dependabot[bot]` logs a notice and finishes green (`proceed=false`) without writing a lock. Register the same PAT under Settings → Secrets → Dependabot to turn regen back on. An empty token for any other actor fails the job.
+
+Lockfile Freshness stays green across a skipped regen whenever the existing lock still satisfies `pyproject.toml`. That job compiles with `--constraint requirements.lock` and compares pin lines. It fails when a floor in `pyproject.toml` has moved past a pin, not when newer wheels exist on PyPI, and not when only `conf/requirements_ci.txt` changed.
+
+**Signed commit.** The lock commit is the GitHub `createCommitOnBranch` mutation, with `expectedHeadOid` set to the checked-out HEAD. The mutation authenticates as `CROSS_REPO_DISPATCH_TOKEN`, so the new commit re-triggers CI. A local `git commit` on the runner is unsigned, and `required_signatures` would leave the PR unmergeable. If the branch moved after checkout, the mutation fails instead of overwriting the new tip. An unchanged `requirements.lock` produces no commit.
+
+**Review.** Confirm the expected floor is in `conf/requirements_ci.txt`. Treat every other pin in the lock diff as an `--upgrade` of `pyproject.toml`. Recompile locally with the three extras and `--upgrade` before changing those pins by hand.
 
 ### Runbook: Scheduled security scan
 
@@ -1700,8 +1724,9 @@ Fix by: 2025-11-12
 
 ### `lockfile-check` fails with diff
 
-- Recompile `requirements.lock` using all three extras.
-- Ensure no manual edits were made to lockfile body.
+- Recompile `requirements.lock` with `--extra juniper-data`, `--extra juniper-cascor`, `--extra observability`, and `--upgrade`.
+- Freshness compares pin lines only. It uses `requirements.lock` as a `--constraint`. It fails when `pyproject.toml` has drifted past those pins.
+- A floor bump that exists only in `conf/requirements_ci.txt` leaves this job green. The lock diff on that PR is the `--upgrade` regen described in [Dependabot lockfile automation](#runbook-dependabot-lockfile-automation).
 
 ### `docs` fails
 

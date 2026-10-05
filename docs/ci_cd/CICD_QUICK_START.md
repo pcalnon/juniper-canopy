@@ -1,8 +1,8 @@
 # CI/CD Quick Start
 
-**Last Updated:** 2026-08-24  
+**Last Updated:** 2026-10-05  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.27.0  
+**Version:** 0.27.2  
 **Status:** Current
 
 ## Prerequisites
@@ -68,7 +68,7 @@ python scripts/check_doc_links.py \
 
 ## 4. If You Changed Dependencies, Refresh the Lockfile
 
-The lockfile freshness gate recompiles with three extras:
+This command preserves pins already recorded in `requirements.lock`. Add `--upgrade` to accept newer wheels (`lockfile-update.yml` always passes `--upgrade`):
 
 ```bash
 uv pip compile pyproject.toml \
@@ -103,8 +103,10 @@ Open the PR checks and confirm these gates complete:
 
 ## Common Pitfalls
 
-- Dependency update PR passes lockfile-update automation but fails `Lockfile Freshness`:
-  Run the lockfile compile command above with `--extra observability`, then commit the result.
+- `Lockfile Freshness` fails after a `pyproject.toml` change:
+  Recompile with the three extras and `--upgrade`, then commit `requirements.lock`. The freshness job itself uses `--constraint` and stays green when newer wheels exist and the current pins still satisfy `pyproject.toml`.
+- A Dependabot `deps:` lock diff names packages the requirements diff did not:
+  The floor edit is `conf/requirements_ci.txt` (repo-root `requirements.txt` symlinks there). The lock commit compiles `pyproject.toml` with `--upgrade`. Review both. [Dependabot lockfile automation](CICD_MANUAL.md#runbook-dependabot-lockfile-automation).
 - Docs-only change fails CI:
   Run `scripts/check_doc_links.py` locally with the same excludes used in CI.
 - Local tests pass but CI fails:
