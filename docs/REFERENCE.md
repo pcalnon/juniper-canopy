@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.3
+**Version:** 0.25.6
 **Status:** Active
-**Last Updated:** September 5, 2026
+**Last Updated:** October 5, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -16,6 +16,7 @@
 - [AGENTS Reference](#agents-reference)
 - [Hierarchy Depth Filter](#hierarchy-depth-filter)
 - [Plotly PNG Export / CSP](#plotly-png-export--csp)
+- [Start-fresh refusal](#start-fresh-refusal)
 - [API Reference](#api-reference)
 - [Configuration Reference](#configuration-reference)
 - [WebSocket Reference](#websocket-reference)
@@ -60,6 +61,18 @@ Reference material relocated **verbatim** out of `AGENTS.md` under the shared-se
 The same cut sent documentation-about-documentation to [DOCUMENTATION_OVERVIEW.md](DOCUMENTATION_OVERVIEW.md) instead, which is the file whose subject that already is.
 
 **Hazards were deliberately not relocated.** Directives whose non-application destroys work stay resident in [`AGENTS.md` § Hazards](../AGENTS.md#hazards-resident--do-not-relocate), because a pointer only helps an agent that already knows to look.
+
+---
+
+## Start-fresh refusal
+
+A **Start** continues the current network. When the staged dataset is wider, cascor refuses before loading and opens the message with `[start_fresh_required]`. The danger alert names **Stop & Restart with new dataset** and the modal's **Start fresh** toggle, and it does not auto-dismiss. **Start fresh** keeps applied parameters and snapshots; it discards the model and its retained metrics and history. Landed in canopy#681.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Start-fresh refusal](AGENTS_REFERENCE.md#start-fresh-refusal) | Marker rule, alert lifetime, restart payload, tests |
+| [USER_MANUAL.md § When Start refuses a wider dataset](USER_MANUAL.md#when-start-refuses-a-wider-dataset) | Operator steps |
+| [DEVELOPER_CHEATSHEET.md § 7](DEVELOPER_CHEATSHEET.md#7-answer-a-wider-dataset-start-refusal) | Short procedure and troubleshooting row |
 
 ---
 
@@ -318,6 +331,6 @@ The most commonly used environment variables for juniper-canopy configuration. F
 
 ---
 
-**Last Updated:** September 5, 2026
-**Version:** 0.25.3
+**Last Updated:** October 5, 2026
+**Version:** 0.25.6
 **Maintainer:** Paul Calnon

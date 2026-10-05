@@ -2,9 +2,9 @@
 
 ## Get Juniper Canopy running in 5 minutes
 
-**Version:** 0.25.3
+**Version:** 0.25.6
 **Status:** ✅ Production Ready
-**Last Updated:** September 5, 2026
+**Last Updated:** October 5, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -556,6 +556,20 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 **See:** [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)
 
+### Issue 12: Start Refuses Because the Dataset Is Wider Than the Network
+
+**Symptom:** Start fails with a red alert that begins "Start refused: the staged dataset is wider than the current network." The charts still show the previous run, and the alert stays up.
+
+**Cause:** Start continues the current network and cannot add features or outputs. Cascor refuses before loading and opens the message with `[start_fresh_required]`. The dataset is still staged, so the pending-dataset banner stays up. Canopy recognises that marker only.
+
+**Solution:** Click **Stop & Restart with new dataset**, then turn **Start fresh** on and confirm. That rebuilds an untrained network from the staged dataset. Applied parameters (including edits in the modal) and on-disk snapshots are kept. The current model and its retained metrics and history are discarded. **Start fresh** defaults to off, which continues the current network and does not rebuild it.
+
+```bash
+cd src && pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
+```
+
+**See:** [AGENTS_REFERENCE.md § Start-fresh refusal](AGENTS_REFERENCE.md#start-fresh-refusal)
+
 ## Next Steps
 
 ### Learn More
@@ -565,6 +579,7 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 - **[AGENTS.md](../AGENTS.md)** - Development guide and conventions
 - **[Event-loop I/O discipline (X7)](AGENTS_REFERENCE.md#event-loop-io-discipline-x7)** - Keep `/v1/health/live` answerable when cascor is down
 - **[Cascor status cache (X7 slice 1c)](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)** - Why `/api/status` publishes a class, not a raw payload
+- **[Start-fresh refusal](AGENTS_REFERENCE.md#start-fresh-refusal)** - What to do when Start says the staged dataset is wider than the network
 - **[CI/CD Guide](ci_cd/CICD_QUICK_START.md)** - Testing and CI/CD workflows
 
 ### Start Developing
@@ -825,8 +840,8 @@ conda list | grep -E "(fastapi|dash|uvicorn)"
 
 ---
 
-**Last Updated:** September 5, 2026  
-**Version:** 0.25.3  
+**Last Updated:** October 5, 2026  
+**Version:** 0.25.6  
 **Status:** ✅ Production Ready
 
 **Last Updated:** 2026-03-15

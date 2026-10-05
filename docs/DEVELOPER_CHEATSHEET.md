@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.4
-**Date**: 2026-09-05
+**Version**: 1.0.7
+**Date**: 2026-10-05
 **Project**: juniper-canopy
 
 ---
@@ -185,6 +185,16 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 > See: [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)
 
+### 7. Answer a wider-dataset Start refusal
+
+A **Start** continues the current network. Cascor refuses a wider staged dataset before loading and opens the message with `[start_fresh_required]`. The danger alert names **Stop & Restart with new dataset** and the modal's **Start fresh** toggle, and it has no `duration`. **Start fresh** keeps applied parameters and snapshots; it discards the model and retained metrics/history. Match the marker only — there is no fallback sentence.
+
+```bash
+cd src && pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
+```
+
+> See: [AGENTS_REFERENCE.md § Start-fresh refusal](AGENTS_REFERENCE.md#start-fresh-refusal)
+
 ---
 
 ## Environment Variables
@@ -295,6 +305,7 @@ Coverage includes:
 | Modebar camera clicks; no PNG, CSP `img-src` in console | `blob:` missing from `img-src` | Keep `img-src 'self' data: blob:`; do not move `blob:` onto `script-src`. See [AGENTS_REFERENCE § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) |
 | Status bar says "Stopped" while cascor is down   | Half-dead 200 has no `error`; UI read the payload (X7 1c) | Confirm `status_class` on `/api/status`; run `test_x7_status_cache.py` (landed with `#578`) |
 | Status bar says "Unreachable" during a skipped poll | Class rendered as UNREACHABLE instead of INDETERMINATE | `"circuit open"` must classify `indeterminate` → "Unknown"; do not share `_cb` with the refresher |
+| Start alert says the staged dataset is wider than the network | Cascor refused before load; message opens with `[start_fresh_required]` (canopy#681) | Use **Stop & Restart with new dataset**, then turn **Start fresh** on. Parameters and snapshots are kept. The alert does not auto-dismiss. See [Start-fresh refusal](AGENTS_REFERENCE.md#start-fresh-refusal) |
 
 ---
 
@@ -323,6 +334,6 @@ Coverage includes:
 
 ---
 
-**Last Updated:** 2026-09-05
-**Version:** 1.0.4
+**Last Updated:** 2026-10-05
+**Version:** 1.0.7
 **Maintainer:** Paul Calnon

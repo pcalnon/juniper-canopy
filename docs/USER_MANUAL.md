@@ -1,8 +1,8 @@
 # Juniper Canopy User Manual
 
-**Version:** 0.26.2
+**Version:** 0.26.5
 **Status:** ✅ Production Ready
-**Last Updated:** September 5, 2026
+**Last Updated:** October 5, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -217,6 +217,26 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 - **Demo Mode:** Halts simulation thread cleanly
 - **Production Mode:** Sends stop command to CasCor backend
 - **Warning:** State is preserved but training cannot be resumed (use Start to restart)
+
+### When Start refuses a wider dataset
+
+**Start** continues the current network. It cannot widen that network to more features or outputs. If the staged dataset is wider, training does not start, nothing is loaded under the charts, and the charts still show the previous run. The dataset stays staged.
+
+The red alert stays until you dismiss it or a later command succeeds. It names two controls:
+
+1. **Stop & Restart with new dataset**, on the banner "Dataset change pending — restart training to apply."
+2. **Start fresh**, inside the confirm modal. Turn it on, then confirm.
+
+**Start fresh** defaults to off.
+
+| Setting | Result |
+|---------|--------|
+| Off | Continue the current model and keep its metrics and history. The network is not rebuilt, so the width mismatch remains. |
+| On | Discard the current model and its retained metrics and history. Rebuild an untrained network from the dataset. Applied parameters, including any you edit in the modal, and on-disk snapshots are kept. |
+
+Confirm stops the current run if one is active, waits for it to settle, and starts on the staged dataset.
+
+Any other Start failure uses the ordinary alert, which closes itself after eight seconds. The wider-dataset alert is the one that names **Start fresh**.
 
 ### Configuration Parameters
 

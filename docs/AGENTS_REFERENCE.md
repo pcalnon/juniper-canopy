@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-09-05
+**Last Updated**: 2026-10-05
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -22,6 +22,7 @@ pointer only helps an agent that already knows to look.
 - [Hierarchy Depth Filter (CAN-020)](#hierarchy-depth-filter-can-020)
 - [Topology Node Selection (F-CANOPY-046)](#topology-node-selection-f-canopy-046)
 - [Plotly PNG Export (F-CANOPY-047)](#plotly-png-export-f-canopy-047)
+- [Start-fresh refusal](#start-fresh-refusal)
 - [Configuration Reference](#configuration-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
@@ -1424,6 +1425,69 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 Design of record (juniper-ml):
 `notes/JUNIPER_2026-09-03_JUNIPER-CANOPY_X7-EVENT-LOOP-BLOCKING-REMEDIATION-DESIGN.md` §5.3 / §5.6.
+
+## Start-fresh refusal
+
+A plain **Start** continues the current network. It cannot widen that network to more features or outputs. When the staged dataset is wider, cascor refuses before loading anything and opens the message with the literal `[start_fresh_required]` (`START_FRESH_REQUIRED_MARKER` in `src/frontend/dashboard_manager.py`). Canopy treats that token as the whole recognition rule. Landed in canopy#681.
+
+### What the alert says
+
+`_surface_training_control_outcome_handler` builds this alert only when `command` is `start` and the marker is in `detail_full`, or in `detail` when `detail_full` is absent.
+
+| Piece | Contract |
+|-------|----------|
+| Lead | "Start refused: the staged dataset is wider than the current network." |
+| Remedy | Names **Stop & Restart with new dataset** (`restart-with-new-dataset-button` on the pending-dataset banner) and **Start fresh** (`restart-start-fresh-toggle` in the restart modal). |
+| Unchanged state | "Nothing was loaded: the dataset is still staged, and the results shown are still the previous run's." |
+| Cascor sentence | The first sentence after the marker (split on `". "`) is appended in muted text. That sentence names both shapes. |
+| Lifetime | `color="danger"`, `dismissable=True`, no `duration`. The generic failure alert uses `duration=8000`. A later action with `success` true clears this alert, as it clears every failure alert. |
+
+The three-way partial-data prompt does not open. That prompt matches `[dataset_shortfall_refused]` or the sentence "could not produce the requested dataset in full".
+
+The pending banner stays available because the refusal happens before the staged dataset is consumed. Its text is "Dataset change pending — restart training to apply."
+
+### Why recognition is the marker only
+
+The shortfall path also matches a fixed sentence, so an older cascor still opens that prompt. This refusal has no second sentence. A cascor that predates the marker consumed the staged dataset and then refused, which drops the pending banner. An alert that named **Stop & Restart with new dataset** would point at a control that is not on screen.
+
+### Which text the handler reads
+
+- The clientside failure path writes `detail` as the first 300 characters and `detail_full` as the first 4000 (`reportFailure` in `dashboard_manager.py`).
+- The server-side button handler writes `detail` from `_extract_training_error_detail` and does not set `detail_full`. A structured `error.message` is kept whole; a raw body is cut at 300 characters before the `HTTP {status}: ` prefix.
+- The marker sits near the front of the message, so a 300-character `detail` still matches. The handler prefers `detail_full` when it is present.
+
+The same marker on pause, stop, resume, or reset stays the generic "`<Command>` failed." alert.
+
+### Start fresh keeps the applied parameters
+
+The toggle defaults to off (`value=False`).
+
+| Toggle | What happens |
+|--------|----------------|
+| Off | Continue the current model. Retained metrics and history stay, for cross-dataset continuity. |
+| On | Discard the current model and its retained metrics and history. Rebuild an untrained network from the dataset. Applied parameters carry over, including edits in the modal. On-disk snapshots are kept. |
+
+The toggle label is "Start fresh — discard the current model and its retained metrics/history (parameters and snapshots kept)". The same keep/discard split is repeated in the modal help text and in the verify/modify **Start fresh ON** / **OFF** lines.
+
+Confirm runs `_execute_restart_handler`: re-stage the dataset if a dataset field changed, apply parameter edits through `/api/set_params` if a parameter field changed, then `POST /api/train/restart` with `{"start_fresh": <bool>, "reset": true}`. An untouched Confirm skips the first two phases. A staging or apply failure aborts before the restart. Success closes the modal and the pending banner and says "a fresh model" or "continued the current model" from the route's `start_fresh` flag.
+
+A start-fresh is not a clean stack launch. A clean launch would reset parameters to the engine defaults. That wording is gone from the modal.
+
+### Tests
+
+```bash
+cd src && pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
+```
+
+The suite pins the marker literal, both control labels, the "still staged" / "previous run" sentences, `duration is None`, the generic 8000 ms alert for every other Start failure, and the absence of "clean stack launch".
+
+### Constraints
+
+- Match `[start_fresh_required]` only. A prose width sentence from an older cascor is a different failure, and the banner is already gone.
+- Leave `duration` unset. The alert is an instruction.
+- Leave the partial-data prompt closed for this marker.
+- Keep the two control labels in lockstep with the alert. The tests fail if either label changes.
+- Say that applied parameters and snapshots are kept. The model and its retained metrics and history are what **Start fresh** discards.
 
 ## Further Reading
 
