@@ -11,7 +11,7 @@
 # File Path:     ${HOME}/Development/python/Juniper/juniper-canopy/src/
 #
 # Date Created:  2026-06-17
-# Last Modified: 2026-06-24
+# Last Modified: 2026-10-05
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -76,6 +76,9 @@
 #       category + tags, §5.2) backing the modal search box.
 #     - G11: GeneratorBound + SEEDED_GENERATOR_BOUNDS — one boundedness classification per seeded
 #       generator, enforced over every seed by TestG11EverySeedIsBounded.
+#     - W1.7 (F-C8): the recurrence seed no longer hard-codes a version (it said 0.1.0 while the
+#       service was 0.5.0); refresh_model_versions() reads each service-served model's version from
+#       its service, once per refresh, and labels a failed lookup instead of raising.
 #
 #####################################################################################################################################################################################################
 """Model + dataset-type registry (single source of truth) for model selection.
@@ -89,7 +92,11 @@ See the module header and the design-of-record note for the full design.
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass, field
+import logging
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field, replace
+
+logger = logging.getLogger("juniper_canopy.model_registry")
 
 
 @dataclass(frozen=True)
@@ -464,7 +471,10 @@ SEEDED_GENERATOR_BOUNDS: dict[str, GeneratorBound] = {
 RECURRENCE_PROVIDER: str = "juniper-recurrence"
 
 # Known models. cascor is the live in-process feed-forward backend; recurrence (LMU) is the
-# live 3-D / irregular-delta-t one-shot model (juniper-recurrence-model 0.1.0). A1-iv-5 flipped
+# live 3-D / irregular-delta-t one-shot model, served by the juniper-recurrence service. Its
+# ``version`` is deliberately blank here: it is whatever that service reports, read by
+# ``refresh_model_versions`` (W1.7 / F-C8) -- this seed said ``0.1.0`` while the service was 0.5.0,
+# and canopy has no package edge to the service that could have kept a constant true. A1-iv-5 flipped
 # it coming_soon → live now that the canopy-routable service is deployed + wired in-stack
 # (juniper-deploy #132 wires JUNIPER_CANOPY_RECURRENCE_SERVICE_URL → http://juniper-recurrence:8210;
 # design §5.7 / §8.4). canopy's D8 Train-gate (model_is_trainable) disables Start for any *non*-live
@@ -488,7 +498,7 @@ MODELS: tuple[ModelSpec, ...] = (
         input_ndim=frozenset({3}),
         supported_task_types=frozenset({"regression"}),
         family="lmu",
-        version="0.1.0",
+        version="",  # service-reported: refresh_model_versions({RECURRENCE_PROVIDER: adapter.service_version}) (W1.7 / F-C8)
         requires_dt=True,
         status="live",  # A1-iv-5: flipped coming_soon → live (service deployed + canopy-wired, juniper-deploy #132)
         execution="one_shot",
@@ -587,6 +597,53 @@ def get_model_spec(key: str, *, models: tuple[ModelSpec, ...] = MODELS) -> Model
         if key == spec.key or key in spec.aliases:
             return spec
     return None
+
+
+# What a service-served model's ``version`` reads when its service could not be asked, or did not say (W1.7 / F-C8).
+# One label for every failure -- unreachable, timed out, refused, or no version in the answer -- because "unreachable"
+# would misdescribe a service that answered; the WARNING the lookup logs names the actual failure.
+SERVICE_VERSION_UNAVAILABLE: str = "unknown (version lookup failed)"
+
+
+def refresh_model_versions(version_sources: Mapping[str, Callable[[], object]], *, models: tuple[ModelSpec, ...] = MODELS) -> tuple[ModelSpec, ...]:
+    """One registry refresh: ``models`` with each service-served model's ``version`` as its service reports it (W1.7).
+
+    ``version_sources`` maps a model ``provider`` to a zero-argument callable returning that service's version -- for
+    the recurrence model, ``{RECURRENCE_PROVIDER: adapter.service_version}``. Each source is asked AT MOST ONCE per
+    refresh, however many models it serves, and the answers are baked into the returned (frozen) specs: the returned
+    tuple is the cache, so reading it never touches the network, and the next refresh asks again. A model whose
+    provider has no source keeps its spec unchanged -- the recurrence seed's blank version when no service is
+    configured, rather than a version nobody reported.
+
+    Never raises for a version: a source that raises, times out or returns anything but a non-blank string yields
+    :data:`SERVICE_VERSION_UNAVAILABLE`, and the failure is logged at WARNING. The lookup is network I/O in production,
+    so call this off the event loop (``asyncio.to_thread``), as any other adapter call. ``models`` is injectable, like
+    every resolver here, and the refreshed tuple can be passed back to them as ``models=``.
+    """
+    reported: dict[str, str] = {}
+    refreshed = []
+    for spec in models:
+        source = version_sources.get(spec.provider)
+        if source is None:
+            refreshed.append(spec)
+            continue
+        if spec.provider not in reported:
+            reported[spec.provider] = _service_reported_version(spec.provider, source)
+        refreshed.append(replace(spec, version=reported[spec.provider]))
+    return tuple(refreshed)
+
+
+def _service_reported_version(provider: str, source: Callable[[], object]) -> str:
+    """Ask ``source`` for ``provider``'s version once: its answer stripped, or :data:`SERVICE_VERSION_UNAVAILABLE`."""
+    try:
+        version = source()
+    except Exception as exc:  # noqa: BLE001 -- a version is a label: the registry never raises for one
+        logger.warning("model registry: the %s version lookup failed (%s: %s)", provider, type(exc).__name__, exc)
+        return SERVICE_VERSION_UNAVAILABLE
+    if isinstance(version, str) and version.strip():
+        return version.strip()
+    logger.warning("model registry: %s reported no version (got %s)", provider, type(version).__name__)
+    return SERVICE_VERSION_UNAVAILABLE
 
 
 # ``backend.backend_type`` of the live backend when the recurrence service backend is the one

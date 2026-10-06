@@ -7,14 +7,19 @@ identical to the previously inlined list) and the registry shape / seeds.
 from __future__ import annotations
 
 import dataclasses
+import logging
 
+import httpx
 import pytest
 
+from backend.recurrence_service_adapter import RecurrenceServiceAdapter
 from model_registry import (
     DATASET_TYPES,
     DEFAULT_DATASET_TYPE,
     DEFAULT_MODEL_KEY,
     MODELS,
+    RECURRENCE_PROVIDER,
+    SERVICE_VERSION_UNAVAILABLE,
     DatasetTypeSpec,
     ModelSpec,
     compatible,
@@ -31,6 +36,7 @@ from model_registry import (
     model_matches_search,
     model_options,
     model_reason,
+    refresh_model_versions,
     temporal_ok,
 )
 
@@ -541,3 +547,98 @@ def test_gated_dataset_options_unknown_model_is_ungated():
     options = gated_dataset_options("nonexistent")
     assert all("disabled" not in option for option in options)
     assert [option["value"] for option in options] == [dataset.value for dataset in DATASET_TYPES]
+
+
+# --- W1.7 / F-C8: the recurrence model's version is what its service reports -----------------
+
+
+def _service(handler):
+    """The production version source: a real adapter's ``service_version``, over an ``httpx.MockTransport``."""
+    return RecurrenceServiceAdapter("http://recurrence.test:8210", "k", transport=httpx.MockTransport(handler)).service_version
+
+
+def _recurrence_version(models):
+    return get_model_spec("recurrence", models=models).version
+
+
+@pytest.mark.unit
+class TestRefreshModelVersions:
+    """W1.7 / F-C8: the registry said ``0.1.0`` while the service was 0.5.0. The version now comes from the service."""
+
+    def test_the_recurrence_seed_hard_codes_no_version(self):
+        assert _recurrence_version(MODELS) == ""
+
+    def test_the_version_is_read_from_a_fake_health_payload(self):
+        def serve(request):
+            assert request.url.path == "/v1/health", "a health body with a version answers in one call"
+            return httpx.Response(200, json={"status": "ok", "version": "0.5.0"})
+
+        refreshed = refresh_model_versions({RECURRENCE_PROVIDER: _service(serve)})
+        assert _recurrence_version(refreshed) == "0.5.0"
+
+    def test_the_live_services_shape_is_read_from_openapi(self):
+        """juniper-recurrence 0.5.0 answers health with ``{"status": "ok"}``; its version is ``info.version`` on ``/openapi.json``."""
+        bodies = {"/v1/health": {"status": "ok"}, "/openapi.json": {"openapi": "3.1.0", "info": {"title": "Juniper Recurrence", "version": "0.5.0"}}}
+        refreshed = refresh_model_versions({RECURRENCE_PROVIDER: _service(lambda request: httpx.Response(200, json=bodies[request.url.path]))})
+        assert _recurrence_version(refreshed) == "0.5.0"
+
+    def test_a_timed_out_lookup_is_labelled_not_raised(self, caplog):
+        def stall(request):
+            raise httpx.ReadTimeout("read timed out", request=request)
+
+        with caplog.at_level(logging.WARNING, logger="juniper_canopy.model_registry"):
+            refreshed = refresh_model_versions({RECURRENCE_PROVIDER: _service(stall)})
+        assert _recurrence_version(refreshed) == SERVICE_VERSION_UNAVAILABLE == "unknown (version lookup failed)"
+        assert any("RecurrenceServiceTimeoutError" in record.getMessage() for record in caplog.records), "the WARNING names the failure"
+
+    def test_an_unreachable_service_is_labelled_not_raised(self):
+        def refuse(request):
+            raise httpx.ConnectError("connection refused", request=request)
+
+        assert _recurrence_version(refresh_model_versions({RECURRENCE_PROVIDER: _service(refuse)})) == SERVICE_VERSION_UNAVAILABLE
+
+    def test_any_raising_source_is_labelled_not_raised(self):
+        def broken():
+            raise RuntimeError("not an adapter error at all")
+
+        assert _recurrence_version(refresh_model_versions({RECURRENCE_PROVIDER: broken})) == SERVICE_VERSION_UNAVAILABLE
+
+    @pytest.mark.parametrize("answer", ["", "   ", None, 0.5, b"0.5.0"], ids=["empty", "blank", "none", "float", "bytes"])
+    def test_an_answer_that_is_not_a_version_is_labelled(self, answer, caplog):
+        with caplog.at_level(logging.WARNING, logger="juniper_canopy.model_registry"):
+            refreshed = refresh_model_versions({RECURRENCE_PROVIDER: lambda: answer})
+        assert _recurrence_version(refreshed) == SERVICE_VERSION_UNAVAILABLE
+        assert any("reported no version" in record.getMessage() for record in caplog.records)
+
+    def test_surrounding_whitespace_is_stripped(self):
+        assert _recurrence_version(refresh_model_versions({RECURRENCE_PROVIDER: lambda: " 0.5.0\n"})) == "0.5.0"
+
+    def test_each_source_is_asked_once_per_refresh(self):
+        """Cached per refresh: one lookup however many models the service serves; the next refresh asks again."""
+        calls = []
+
+        def source():
+            calls.append(None)
+            return "0.5.0"
+
+        twin = dataclasses.replace(get_model_spec("recurrence"), key="recurrence-twin")
+        models = (*MODELS, twin)
+        refreshed = refresh_model_versions({RECURRENCE_PROVIDER: source}, models=models)
+        assert len(calls) == 1
+        assert [spec.version for spec in refreshed if spec.provider == RECURRENCE_PROVIDER] == ["0.5.0", "0.5.0"]
+        # Reading the refreshed registry -- through the resolvers that take ``models=`` -- asks nothing.
+        get_model_spec("recurrence-twin", models=refreshed)
+        model_options(models=refreshed)
+        assert len(calls) == 1
+        refresh_model_versions({RECURRENCE_PROVIDER: source}, models=models)
+        assert len(calls) == 2
+
+    def test_a_model_without_a_source_is_returned_unchanged(self):
+        refreshed = refresh_model_versions({})
+        assert all(new is old for new, old in zip(refreshed, MODELS, strict=True))
+
+    def test_only_the_version_changes_and_the_seed_is_untouched(self):
+        seed = get_model_spec("recurrence")
+        refreshed = get_model_spec("recurrence", models=refresh_model_versions({RECURRENCE_PROVIDER: lambda: "0.6.0"}))
+        assert refreshed == dataclasses.replace(seed, version="0.6.0")
+        assert get_model_spec("recurrence") is seed and seed.version == ""
