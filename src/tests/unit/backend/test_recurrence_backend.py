@@ -259,6 +259,43 @@ class TestA422DetailReachesTheOperator:
 
 
 @pytest.mark.unit
+class TestW16RemediesReachTheOperator:
+    """W1.6: a 429's ``Retry-After`` (F-C7) and a 401's key variables (F-C5) reach ``completion_reason`` and the WARNING.
+
+    Through the real adapter: ``outbound_error_text`` passes a status-bearing error as ``str(exc)``, so nothing in the
+    backend changes -- these pin that the text the adapter now builds is what the operator reads.
+    """
+
+    def test_the_real_adapters_429_wait_reaches_completion_reason(self, caplog):
+        def limited(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, json={"detail": "Rate limit exceeded. Try again in 30 seconds."}, headers={"Retry-After": "30"})
+
+        backend = RecurrenceBackend(RecurrenceServiceAdapter("http://rec.test:8210", transport=httpx.MockTransport(limited)))
+        with caplog.at_level(logging.WARNING, logger=_BACKEND_LOGGER):
+            backend.start_training(generator="equities_seq")
+            assert _wait_until(lambda: bool(_fit_warnings(caplog)))
+        expected = "recurrence service error 429 on POST /v1/train — retry after 30 s: Rate limit exceeded. Try again in 30 seconds."
+        status = backend.get_status()
+        assert status["failed"] is True
+        assert status["completion_reason"] == expected
+        (warning,) = _fit_warnings(caplog)
+        assert warning.getMessage() == f"recurrence fit failed (status=429): {expected}"
+
+    def test_the_real_adapters_401_remedy_reaches_completion_reason(self, caplog):
+        def refuse(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(401, json={"detail": "Invalid API key."})
+
+        backend = RecurrenceBackend(RecurrenceServiceAdapter("http://rec.test:8210", "wrong-key", transport=httpx.MockTransport(refuse)))
+        with caplog.at_level(logging.WARNING, logger=_BACKEND_LOGGER):
+            backend.start_training(generator="equities_seq")
+            assert _wait_until(lambda: bool(_fit_warnings(caplog)))
+        reason = backend.get_status()["completion_reason"]
+        assert "JUNIPER_CANOPY_RECURRENCE_API_KEY or JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE" in reason
+        assert reason.endswith(": Invalid API key.")
+        assert "wrong-key" not in reason
+
+
+@pytest.mark.unit
 class TestUnsupportedControls:
     def test_stop_pause_resume_fail_closed(self):
         backend = RecurrenceBackend(_FakeAdapter())

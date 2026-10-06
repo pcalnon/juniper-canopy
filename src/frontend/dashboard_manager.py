@@ -7341,10 +7341,11 @@ class DashboardManager:
 
     # The longest a FAILED run's reason may occupy in the status bar's hover tooltip (W0.5 /
     # F-C1). The bar keeps the short bound above; the tooltip carries the reason whole. The
-    # recurrence adapter bounds the service's ``detail`` at 300 characters behind at most 92 of
-    # its own (the 401/403 wording on ``POST /v1/train``), so 400 holds every recurrence failure
-    # reason uncut. The bound exists because the field is free text from any producer.
-    _FAILURE_REASON_TOOLTIP_MAX_CHARS = 400
+    # recurrence adapter bounds the service's ``detail`` at 300 characters behind at most 176 of
+    # its own (the 401/403 wording on ``POST /v1/train``, which names both key variables since
+    # W1.6 / F-C5; it was 92 before), so 480 holds every recurrence failure reason uncut. The
+    # bound exists because the field is free text from any producer.
+    _FAILURE_REASON_TOOLTIP_MAX_CHARS = 480
 
     @staticmethod
     def _completion_reason_label(reason):

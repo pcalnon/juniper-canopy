@@ -6,7 +6,7 @@
 # Author:        Paul Calnon
 # Version:       0.1.0
 # Date:          2026-06-22
-# Last Modified: 2026-06-22
+# Last Modified: 2026-10-05
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-2026 Paul Calnon
 # Description:   Unit tests for RecurrenceServiceAdapter (A1-i, D3) — the
@@ -16,32 +16,47 @@
 #####################################################################
 """Unit tests for ``backend.recurrence_service_adapter`` (A1-i of the model-selection
 A1 enabler). Exercises request shaping, the outbound ``X-API-Key`` header, the generous
-train timeout, JSON parsing, and the typed error mapping (409 / 401 / 403 / other-HTTP /
+train timeout, JSON parsing, and the typed error mapping (409 / 401 / 403 / 429 / other-HTTP /
 timeout / unreachable / non-JSON) — all against an injected ``httpx.MockTransport``.
 
 ``TestServiceDetailInTheMessage`` pins W0.5 / F-C1: on a 4xx the service's ``{"detail": …}``
 -- the only place it says *why* it refused -- rides on the exception message, bounded, while
 ``body`` keeps the raw response text. A 5xx detail never does: there the service relays its
 own upstream's exception text, which can quote a key.
+
+``TestW16AuthRestoredRateLimit`` pins W1.6 (F-C5, F-C6, F-C7): a 401 names the key variables, a
+``restored`` status reads as model-present, and a 429 carries its ``Retry-After``.
+``TestServiceVersion`` pins W1.7 (F-C8): the version is read from the service, never assumed.
 """
 
+import copy
 import json
+import pickle
+import re
+from pathlib import Path
 
 import httpx
 import pytest
 
 from backend.recurrence_service_adapter import (
+    MODEL_PRESENT_STATES,
+    RECURRENCE_SERVICE_CONTRACT_FLOOR,
     RecurrenceServiceAdapter,
     RecurrenceServiceAuthError,
     RecurrenceServiceError,
+    RecurrenceServiceRateLimited,
     RecurrenceServiceTimeoutError,
     RecurrenceServiceUnavailableError,
     RecurrenceStatus,
     RecurrenceTrainInProgressError,
     RecurrenceTrainResult,
 )
+from outbound_errors import outbound_error_text
 
 _BASE = "http://recurrence.test:8210"
+
+# W1.6 / F-C5: the 401 / 403 remedy names the variables an operator sets, not the setting's Python name.
+_AUTH_REMEDY = "set JUNIPER_CANOPY_RECURRENCE_API_KEY or JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE to a key the service accepts"
 
 # A representative successful ``POST /v1/train`` body (regression metrics — never accuracy).
 _TRAIN_OK = {
@@ -326,7 +341,7 @@ class TestServiceDetailInTheMessage:
     @pytest.mark.parametrize(
         "status_code, error_type, message",
         [
-            (401, RecurrenceServiceAuthError, "recurrence service rejected the request (401 on POST /v1/train) — check recurrence_api_key"),
+            (401, RecurrenceServiceAuthError, f"recurrence service rejected the request (401 on POST /v1/train) — {_AUTH_REMEDY}"),
             (409, RecurrenceTrainInProgressError, "recurrence training already in progress (POST /v1/train)"),
             (422, RecurrenceServiceError, "recurrence service error 422 on POST /v1/train"),
         ],
@@ -359,7 +374,7 @@ class TestServiceDetailInTheMessage:
         raw = json.dumps({"detail": "Invalid or missing API key"})
         error = _train_error(_raw_responder(code, raw))
         assert isinstance(error, RecurrenceServiceAuthError)
-        assert str(error) == f"recurrence service rejected the request ({code} on POST /v1/train) — check recurrence_api_key: Invalid or missing API key"
+        assert str(error) == f"recurrence service rejected the request ({code} on POST /v1/train) — {_AUTH_REMEDY}: Invalid or missing API key"
         assert error.body == raw
 
     def test_the_status_route_carries_the_detail_too(self):
@@ -422,3 +437,206 @@ class TestTrainingStatus:
         assert sink[0].method == "GET"
         assert sink[0].url.path == "/v1/training/status"
         assert sink[0].headers["X-API-Key"] == "k"
+
+
+# What juniper-service-core's rate limiter sends with a 429 (``security.py``: the detail, and ``Retry-After`` among its headers).
+_RATE_LIMITED_DETAIL = "Rate limit exceeded. Try again in 30 seconds."
+
+
+def _rate_limited(retry_after=None, payload=None):
+    """A MockTransport handler answering 429, with ``Retry-After: <retry_after>`` when given and ``payload`` as the JSON body."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        headers = {} if retry_after is None else {"Retry-After": retry_after}
+        if payload is None:
+            return httpx.Response(429, headers=headers)
+        return httpx.Response(429, json=payload, headers=headers)
+
+    return handler
+
+
+@pytest.mark.unit
+class TestW16AuthRestoredRateLimit:
+    """W1.6: a 401 names the key variables (F-C5); ``restored`` reads as model-present (F-C6); a 429 carries ``Retry-After`` (F-C7).
+
+    The first three tests are the plan's three adapter tests; the rest pin the edges around each.
+    """
+
+    def test_a_401_remedy_names_both_key_variables(self):
+        """F-C5: the remedy said ``check recurrence_api_key`` -- the setting's Python name, which no operator can set."""
+        error = _train_error(_responder({"detail": "Invalid API key."}, status_code=401))
+        assert type(error) is RecurrenceServiceAuthError
+        named = set(re.findall(r"\bJUNIPER_[A-Z_]+\b", str(error)))
+        assert named == {"JUNIPER_CANOPY_RECURRENCE_API_KEY", "JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE"}
+        assert "recurrence_api_key" not in str(error)
+        assert str(error) == f"recurrence service rejected the request (401 on POST /v1/train) — {_AUTH_REMEDY}: Invalid API key."
+
+    def test_a_restored_status_parses_and_reads_as_model_present(self):
+        """F-C6: the service's third state -- a model loaded from a snapshot -- is a model, exactly as ``trained`` is."""
+        payload = {"state": "restored", "final_metrics": None, "stopped_reason": None, "events": [], "restored_from": "snap-20261004-0001"}
+        status = _adapter(_responder(payload)).training_status()
+        assert status.state == "restored"
+        assert status.restored_from == "snap-20261004-0001"
+        assert status.model_present is True
+        assert status.final_metrics is None and status.stopped_reason is None and status.events == []
+
+    def test_a_429_with_retry_after_raises_rate_limited_carrying_the_wait(self):
+        """F-C7: the reply juniper-service-core's limiter sends -- the header and its detail -- reaches the message."""
+        error = _train_error(_rate_limited("30", {"detail": _RATE_LIMITED_DETAIL}))
+        assert type(error) is RecurrenceServiceRateLimited
+        assert isinstance(error, RecurrenceServiceError)
+        assert error.status_code == 429
+        assert error.retry_after == "30"
+        assert "retry after 30 s" in str(error)
+        assert str(error) == f"recurrence service error 429 on POST /v1/train — retry after 30 s: {_RATE_LIMITED_DETAIL}"
+
+    def test_a_403_names_both_key_variables_too(self):
+        error = _train_error(_raw_responder(403, "", "text/plain"))
+        assert type(error) is RecurrenceServiceAuthError
+        assert str(error) == f"recurrence service rejected the request (403 on POST /v1/train) — {_AUTH_REMEDY}"
+
+    @pytest.mark.parametrize("state, present", [("idle", False), ("trained", True), ("restored", True), ("fitting", False), ("", False)])
+    def test_model_present_is_trained_or_restored_and_nothing_else(self, state, present):
+        assert RecurrenceStatus(state=state, final_metrics=None, stopped_reason=None).model_present is present
+
+    def test_the_model_present_states_are_exactly_trained_and_restored(self):
+        assert MODEL_PRESENT_STATES == frozenset({"trained", "restored"})
+
+    def test_a_status_from_a_service_predating_restored_has_no_restored_from(self):
+        """juniper-recurrence 0.5.0 -- the contract floor -- sends no ``restored_from`` key at all."""
+        payload = {"state": "trained", "final_metrics": {"r2": 0.9}, "stopped_reason": "converged", "events": []}
+        status = _adapter(_responder(payload)).training_status()
+        assert status.restored_from is None
+        assert status.model_present is True
+
+    def test_the_wait_alone_reaches_the_message_when_the_reply_has_no_detail(self):
+        """The ``30`` comes from the header here: there is no detail to carry it."""
+        error = _train_error(_rate_limited("30"))
+        assert type(error) is RecurrenceServiceRateLimited
+        assert str(error) == "recurrence service error 429 on POST /v1/train — retry after 30 s"
+
+    def test_a_429_without_retry_after_is_rate_limited_with_the_generic_wording(self):
+        error = _train_error(_rate_limited(None, {"detail": "Rate limit exceeded"}))
+        assert type(error) is RecurrenceServiceRateLimited
+        assert error.retry_after is None
+        assert str(error) == "recurrence service error 429 on POST /v1/train: Rate limit exceeded"
+
+    def test_an_http_date_retry_after_is_carried_as_sent(self):
+        """RFC 9110 allows an HTTP-date; a proxy in front of the service may send one. It is not seconds, so no ``s``."""
+        when = "Wed, 21 Oct 2015 07:28:00 GMT"
+        error = _train_error(_rate_limited(when))
+        assert error.retry_after == when
+        assert str(error) == f"recurrence service error 429 on POST /v1/train — retry after {when}"
+
+    @pytest.mark.parametrize("value", ["", "   ", "\t"])
+    def test_a_blank_retry_after_counts_as_absent(self, value):
+        error = _train_error(_rate_limited(value))
+        assert error.retry_after is None
+        assert str(error) == "recurrence service error 429 on POST /v1/train"
+
+    def test_a_long_retry_after_is_flattened_and_bounded(self):
+        error = _train_error(_rate_limited("in  a\twhile " + "x" * 500))
+        assert error.retry_after.startswith("in a while x")
+        assert len(error.retry_after) == 64
+        assert error.retry_after.endswith("…"), "a cut value must show that it was cut"
+
+    def test_the_status_route_is_rate_limited_too(self):
+        """``_parse`` is shared, so ``GET /v1/training/status`` raises the same type with the same wait."""
+        with pytest.raises(RecurrenceServiceRateLimited) as caught:
+            _adapter(_rate_limited("7", {"detail": "Rate limit exceeded. Try again in 7 seconds."})).training_status()
+        assert str(caught.value) == "recurrence service error 429 on GET /v1/training/status — retry after 7 s: Rate limit exceeded. Try again in 7 seconds."
+
+    def test_rate_limited_round_trips_through_pickle_and_copy(self):
+        """The base rebuilds from ``self.args``; the fourth value must survive the same way."""
+        error = RecurrenceServiceRateLimited("limited", status_code=429, body="{}", retry_after="30")
+        for clone in (pickle.loads(pickle.dumps(error)), copy.copy(error)):
+            assert type(clone) is RecurrenceServiceRateLimited
+            assert (str(clone), clone.status_code, clone.body, clone.retry_after) == ("limited", 429, "{}", "30")
+
+    def test_the_base_error_still_round_trips_with_its_three_values(self):
+        """The base now forwards any values a subclass appends (``*extra``); a plain error keeps exactly three."""
+        error = RecurrenceServiceError("refused", status_code=422, body="{}")
+        assert error.args == ("refused", 422, "{}")
+        for clone in (pickle.loads(pickle.dumps(error)), copy.copy(error)):
+            assert type(clone) is RecurrenceServiceError
+            assert (str(clone), clone.status_code, clone.body, clone.args) == ("refused", 422, "{}", ("refused", 422, "{}"))
+
+    def test_outbound_error_text_passes_the_wait_through(self):
+        """The backend writes ``outbound_error_text(exc)`` into ``completion_reason``. A 429 is the service's answer, so it passes whole."""
+        error = _train_error(_rate_limited("30", {"detail": _RATE_LIMITED_DETAIL}))
+        assert outbound_error_text(error) == str(error)
+
+
+_OPENAPI = {"openapi": "3.1.0", "info": {"title": "Juniper Recurrence", "version": "0.5.0"}, "paths": {}}
+
+
+def _routed(routes, sink=None):
+    """A MockTransport handler answering by path: ``routes`` maps a path to ``(status_code, json_payload)``; 404 otherwise."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if sink is not None:
+            sink.append(request)
+        status_code, payload = routes.get(request.url.path, (404, {"detail": "Not Found"}))
+        return httpx.Response(status_code, json=payload)
+
+    return handler
+
+
+@pytest.mark.unit
+class TestServiceVersion:
+    """W1.7 / F-C8: the version is read from the service -- ``/v1/health``'s ``version``, else ``/openapi.json``'s ``info.version``."""
+
+    def test_a_version_in_the_health_body_is_the_answer(self):
+        sink = []
+        adapter = _adapter(_routed({"/v1/health": (200, {"status": "ok", "version": "0.6.0"})}, sink=sink))
+        assert adapter.service_version() == "0.6.0"
+        assert [request.url.path for request in sink] == ["/v1/health"], "a health version needs no second call"
+
+    def test_without_one_the_openapi_info_version_is_read(self):
+        """juniper-recurrence 0.5.0's health body is ``{"status": "ok"}``, measured against the app in process."""
+        sink = []
+        adapter = _adapter(_routed({"/v1/health": (200, {"status": "ok"}), "/openapi.json": (200, _OPENAPI)}, sink=sink), api_key="k")
+        assert adapter.service_version() == "0.5.0"
+        assert [(request.method, request.url.path) for request in sink] == [("GET", "/v1/health"), ("GET", "/openapi.json")]
+        assert sink[1].headers["X-API-Key"] == "k", "/openapi.json is authenticated under juniper-service-core 0.7.0"
+
+    @pytest.mark.parametrize("health_version", ["", "   ", None, 6], ids=["empty", "blank", "null", "number"])
+    def test_a_health_version_that_is_not_one_falls_through_to_openapi(self, health_version):
+        adapter = _adapter(_routed({"/v1/health": (200, {"status": "ok", "version": health_version}), "/openapi.json": (200, _OPENAPI)}))
+        assert adapter.service_version() == "0.5.0"
+
+    def test_surrounding_whitespace_is_stripped(self):
+        adapter = _adapter(_routed({"/v1/health": (200, {"status": "ok", "version": " 0.6.0\n"})}))
+        assert adapter.service_version() == "0.6.0"
+
+    @pytest.mark.parametrize(
+        "openapi",
+        [{}, {"info": "0.5.0"}, {"info": {}}, {"info": {"version": ""}}, {"info": {"version": 5}}],
+        ids=["no-info", "info-not-an-object", "no-version", "blank-version", "number-version"],
+    )
+    def test_no_version_on_either_surface_raises(self, openapi):
+        adapter = _adapter(_routed({"/v1/health": (200, {"status": "ok"}), "/openapi.json": (200, openapi)}))
+        with pytest.raises(RecurrenceServiceError) as caught:
+            adapter.service_version()
+        assert type(caught.value) is RecurrenceServiceError
+        assert caught.value.status_code is None
+        assert str(caught.value) == "recurrence service reported no version on GET /v1/health or GET /openapi.json"
+
+    def test_a_refused_key_on_openapi_is_an_auth_error(self):
+        adapter = _adapter(_routed({"/v1/health": (200, {"status": "ok"}), "/openapi.json": (401, {"detail": "Invalid API key."})}))
+        with pytest.raises(RecurrenceServiceAuthError) as caught:
+            adapter.service_version()
+        assert str(caught.value) == f"recurrence service rejected the request (401 on GET /openapi.json) — {_AUTH_REMEDY}: Invalid API key."
+
+    def test_a_timeout_maps(self):
+        def handler(request):
+            raise httpx.ReadTimeout("read timed out", request=request)
+
+        with pytest.raises(RecurrenceServiceTimeoutError):
+            _adapter(handler).service_version()
+
+    def test_the_contract_floor_is_0_5_0_and_the_docs_name_it(self):
+        """The floor lives in two places -- the constant and the API reference -- so they are pinned together."""
+        assert RECURRENCE_SERVICE_CONTRACT_FLOOR == "0.5.0"
+        reference = (Path(__file__).resolve().parents[3] / "docs" / "api" / "API_REFERENCE.md").read_text(encoding="utf-8")
+        assert f"juniper-recurrence {RECURRENCE_SERVICE_CONTRACT_FLOOR}" in reference
