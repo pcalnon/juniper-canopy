@@ -22,6 +22,7 @@ pointer only helps an agent that already knows to look.
 - [Hierarchy Depth Filter (CAN-020)](#hierarchy-depth-filter-can-020)
 - [Topology Node Selection (F-CANOPY-046)](#topology-node-selection-f-canopy-046)
 - [Plotly PNG Export (F-CANOPY-047)](#plotly-png-export-f-canopy-047)
+- [Sidebar model liveness (X11)](#sidebar-model-liveness-x11)
 - [Configuration Reference](#configuration-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
@@ -1424,6 +1425,72 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 Design of record (juniper-ml):
 `notes/JUNIPER_2026-09-03_JUNIPER-CANOPY_X7-EVENT-LOOP-BLOCKING-REMEDIATION-DESIGN.md` §5.3 / §5.6.
+
+## Sidebar model liveness (X11)
+
+The sidebar **Model:** line (`nn-model-summary`) is the only at-rest indicator of which
+model is selected. The dropdown that used to show the current value is gone; **▸ change**
+opens the selection modal. "Active" on that line is a claim that the running backend
+serves the selection. It is not the header dot (🟢 **Active** means the server is idle).
+
+The predicate is `model_registry.selection_is_live`, shared by
+`DashboardManager._model_summary_text`, the Start / Apply Dataset gate
+(`_update_button_appearance_handler`), and the server's start refusals. Landed with
+canopy#680. Wording constant: `DashboardManager.UNKNOWN_LIVENESS_NOTE`
+(`"backend status unknown"`).
+
+`selection_is_live(model_key, backend_type)` is provider agreement. A
+recurrence-provider model is live only when `backend_type` is `"recurrence"`. A
+cascor-family model is live when the backend is anything else (`"service"` and `"demo"`
+both serve cascor; there is no `"cascor"` backend type). `swapped` from
+`POST /api/model/select` is the wrong test: it is also false when the operator
+re-selects the model that is already running.
+
+| Answer | When | Sidebar line |
+| --- | --- | --- |
+| `True` | Payload carries `backend`, and the provider agrees | `Active: <label>` |
+| `False` | Payload carries `backend`, and the provider disagrees | `Selected: <label> · NOT ACTIVE — the <backend> backend is running` |
+| `None` | No `backend`, or no model key | `Selected: <label> · backend status unknown` |
+
+A non-`live` lifecycle status is inserted before the liveness note. Recurrence with
+`status: coming_soon` and no backend reads
+`Selected: Recurrence (LMU) · coming soon · backend status unknown`. The default seed,
+which has never round-tripped, reads
+`Selected: CasCor (Cascade-Correlation) · backend status unknown`. That string is what
+the layout ships, not only what the helper returns.
+
+Unknown is not disagreement. The line names no backend, the train-gate notice stays
+hidden, and Start / Apply Dataset are not disabled by this answer alone. Those controls
+still follow the other gates: a non-trainable model, an unset model or dataset axis, and
+a real `False` (disagreement). Disagreement uses the same remedy as the server 409:
+select the model again once its service is configured (Recurrence:
+`JUNIPER_CANOPY_RECURRENCE_SERVICE_URL`), or select the model the running backend serves.
+
+`GET /api/selection` on mount replaces the seed when the body names a model. A transport
+error, a non-OK status, or a 200 that names no model writes the seed again: the default
+model key, the unknown summary, and a dataset block
+`{"value": None, "source": "unknown", "generator": None}` with no model fields. Leaving
+the summary at `no_update` on that path used to keep "Active: CasCor" after the read
+that had just failed.
+
+### Tests
+
+`TestX11UnknownLivenessIsNotActive` in
+`src/tests/regression/test_selection_reachability_guardrails.py`.
+
+```bash
+cd src && pytest tests/regression/test_selection_reachability_guardrails.py -k X11 -v
+```
+
+### Pitfalls
+
+- Do not render `Active:` when the payload has no `backend`. Nothing has asked.
+- Do not render `NOT ACTIVE` for that same gap. That sentence names a backend that was
+  not observed.
+- Do not disable Start merely because liveness is `None`. Unknown is not a refusal.
+- Do not use `swapped` as the liveness predicate. A correct re-select is `swapped: false`.
+- The summary, the Start gate, and `main._selection_inactive_reason` must keep calling
+  `selection_is_live`. canopy#592 fixed the label and left the run misattributed.
 
 ## Further Reading
 

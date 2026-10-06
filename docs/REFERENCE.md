@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.3
+**Version:** 0.25.8
 **Status:** Active
-**Last Updated:** September 5, 2026
+**Last Updated:** October 6, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -16,6 +16,7 @@
 - [AGENTS Reference](#agents-reference)
 - [Hierarchy Depth Filter](#hierarchy-depth-filter)
 - [Plotly PNG Export / CSP](#plotly-png-export--csp)
+- [Sidebar model liveness (X11)](#sidebar-model-liveness-x11)
 - [API Reference](#api-reference)
 - [Configuration Reference](#configuration-reference)
 - [WebSocket Reference](#websocket-reference)
@@ -95,6 +96,25 @@ string is `SecurityConstants.DEFAULT_CSP_POLICY`, aliased as
 cd src
 pytest tests/regression/test_csp_plotly_image_export.py \
        tests/regression/test_csp_bootstrap_cdn.py -v
+```
+
+## Sidebar model liveness (X11)
+
+The sidebar **Model:** line says `Active:` only when the running backend serves the
+selection. First paint, and a failed `GET /api/selection`, read
+`Selected: CasCor (Cascade-Correlation) · backend status unknown`. That is not the
+header's green idle dot, and it is not `NOT ACTIVE` (which names a backend and disables
+Start). Predicate: `model_registry.selection_is_live`. Landed with canopy#680.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Sidebar model liveness](AGENTS_REFERENCE.md#sidebar-model-liveness-x11) | Three answers, the Start gate, and the failed-read write |
+| [USER_MANUAL.md § Model summary](USER_MANUAL.md#model-summary) | What the operator sees under **Model:** |
+| [`test_selection_reachability_guardrails.py`](../src/tests/regression/test_selection_reachability_guardrails.py) | `TestX11UnknownLivenessIsNotActive` |
+
+```bash
+cd src
+pytest tests/regression/test_selection_reachability_guardrails.py -k X11 -v
 ```
 
 ## API Reference
@@ -318,6 +338,6 @@ The most commonly used environment variables for juniper-canopy configuration. F
 
 ---
 
-**Last Updated:** September 5, 2026
-**Version:** 0.25.3
+**Last Updated:** October 6, 2026
+**Version:** 0.25.8
 **Maintainer:** Paul Calnon

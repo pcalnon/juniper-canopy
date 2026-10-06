@@ -1,8 +1,8 @@
 # Juniper Canopy User Manual
 
-**Version:** 0.26.2
+**Version:** 0.26.7
 **Status:** ✅ Production Ready
-**Last Updated:** September 5, 2026
+**Last Updated:** October 6, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -217,6 +217,28 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 - **Demo Mode:** Halts simulation thread cleanly
 - **Production Mode:** Sends stop command to CasCor backend
 - **Warning:** State is preserved but training cannot be resumed (use Start to restart)
+
+### Model summary
+
+Under **Model:** the sidebar shows one line and a **▸ change** button. That line is not
+the header status dot. 🟢 **Active** in the header means the server is idle. **Active:**
+on the model line means the running backend serves the selected model.
+
+Until `GET /api/selection` returns a model, and again if that read fails, the line is
+`Selected: CasCor (Cascade-Correlation) · backend status unknown`. The backend has not
+answered. Start is not disabled for that reason alone.
+
+After a successful read:
+
+- `Active: CasCor (Cascade-Correlation)` — the service or demo backend is the one running.
+- `Selected: … · NOT ACTIVE — the <backend> backend is running` — the selection and the
+  running backend disagree. Start and Apply Dataset are disabled. Select the model again
+  once its service is configured (Recurrence: `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL`),
+  or select the model the running backend serves.
+
+A model that is not trainable yet keeps its lifecycle note on the same line
+(`coming soon`, and the rest). See
+[AGENTS_REFERENCE.md § Sidebar model liveness](AGENTS_REFERENCE.md#sidebar-model-liveness-x11).
 
 ### Configuration Parameters
 
@@ -1198,6 +1220,24 @@ pytest tests/regression/test_csp_plotly_image_export.py \
 Do not "fix" this by adding `blob:` to `script-src` or by replacing
 `data:` (Bootstrap icons need `data:`). Developer contract:
 [AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047).
+
+#### 7. Sidebar says "backend status unknown"
+
+**Symptoms:**
+
+- The **Model:** line reads `Selected: CasCor (Cascade-Correlation) · backend status unknown`
+- It does not say `Active:`, and it does not say `NOT ACTIVE`
+
+**Cause:** Nothing has round-tripped `GET /api/selection` yet, or that read failed. "Active"
+on this line is a claim about the backend. The header's green **Active** dot is a different
+indicator (server idle).
+
+**What to do:** Wait for the page to finish loading. If the line stays unknown, the
+selection read failed and the sidebar kept the default model rather than inventing
+"Active". A line that names `NOT ACTIVE` and a backend is a different state: the selection
+and the running backend disagree, and Start is disabled.
+
+**See:** [AGENTS_REFERENCE.md § Sidebar model liveness](AGENTS_REFERENCE.md#sidebar-model-liveness-x11)
 
 ### Diagnostic Commands
 

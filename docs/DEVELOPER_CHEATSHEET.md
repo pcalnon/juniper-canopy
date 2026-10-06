@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.4
-**Date**: 2026-09-05
+**Version**: 1.0.9
+**Date**: 2026-10-06
 **Project**: juniper-canopy
 
 ---
@@ -294,6 +294,7 @@ Coverage includes:
 | Topology panel says "click elsewhere" but empty-canvas clicks do nothing | Plotly emits `plotly_click` only on a point hit; the callback never runs | Click the selected node again to toggle off, or use the **Clear selection** button canopy#573 added. See [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046) |
 | Modebar camera clicks; no PNG, CSP `img-src` in console | `blob:` missing from `img-src` | Keep `img-src 'self' data: blob:`; do not move `blob:` onto `script-src`. See [AGENTS_REFERENCE § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) |
 | Status bar says "Stopped" while cascor is down   | Half-dead 200 has no `error`; UI read the payload (X7 1c) | Confirm `status_class` on `/api/status`; run `test_x7_status_cache.py` (landed with `#578`) |
+| Sidebar **Model:** line says `backend status unknown` | No `backend` has round-tripped (X11). First paint and a failed `GET /api/selection` | Not a refusal. `Active:` needs a payload whose backend serves the model. `NOT ACTIVE` is the disagreement line and disables Start. See [Sidebar model liveness](AGENTS_REFERENCE.md#sidebar-model-liveness-x11) |
 | Status bar says "Unreachable" during a skipped poll | Class rendered as UNREACHABLE instead of INDETERMINATE | `"circuit open"` must classify `indeterminate` → "Unknown"; do not share `_cb` with the refresher |
 
 ---
@@ -323,6 +324,6 @@ Coverage includes:
 
 ---
 
-**Last Updated:** 2026-09-05
-**Version:** 1.0.4
+**Last Updated:** 2026-10-06
+**Version:** 1.0.9
 **Maintainer:** Paul Calnon
