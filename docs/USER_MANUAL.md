@@ -1,8 +1,8 @@
 # Juniper Canopy User Manual
 
-**Version:** 0.26.2
+**Version:** 0.26.7
 **Status:** ✅ Production Ready
-**Last Updated:** September 5, 2026
+**Last Updated:** October 6, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -217,6 +217,19 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 - **Demo Mode:** Halts simulation thread cleanly
 - **Production Mode:** Sends stop command to CasCor backend
 - **Warning:** State is preserved but training cannot be resumed (use Start to restart)
+
+### Model summary
+
+The line under **Model:** (`nn-model-summary`) is one of three sentences. **Active** means a round-trip named a backend that serves the selection. **NOT ACTIVE** means the named backend does not, and Start stays disabled until you select a model that backend serves. `backend status unknown` means the page has not confirmed a backend yet.
+
+| What you see | What it means | What to do |
+| --- | --- | --- |
+| `Selected: CasCor (Cascade-Correlation) · backend status unknown` | First paint, or `GET /api/selection` failed. This is not a claim that training is down. | Reload. If it stays, the mount read failed. The log says `Selection hydration read failed`. |
+| `Active: CasCor (Cascade-Correlation)` or `Active: Recurrence (LMU)` | The live backend serves that model (`service` or `demo` for CasCor, `recurrence` for the LMU). | Nothing, for this line. |
+| `Selected: … · NOT ACTIVE — the <backend> backend is running` | The selection and the running backend disagree. Start and **Apply Dataset** are disabled. | Select the model that backend serves, or configure `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL` and select Recurrence again. |
+| `No model selected — all datasets shown; choose one to train` | The model was cleared. This is not the unknown sentence. | Choose a model. |
+
+A lifecycle note such as `· coming soon` can sit in front of the liveness clause. Both shipped models are live, so the ordinary CasCor line has none. Developer contract: [AGENTS_REFERENCE.md § Sidebar model summary](AGENTS_REFERENCE.md#sidebar-model-summary-x11).
 
 ### Configuration Parameters
 

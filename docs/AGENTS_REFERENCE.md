@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-09-05
+**Last Updated**: 2026-10-06
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -22,6 +22,7 @@ pointer only helps an agent that already knows to look.
 - [Hierarchy Depth Filter (CAN-020)](#hierarchy-depth-filter-can-020)
 - [Topology Node Selection (F-CANOPY-046)](#topology-node-selection-f-canopy-046)
 - [Plotly PNG Export (F-CANOPY-047)](#plotly-png-export-f-canopy-047)
+- [Sidebar model summary (X11)](#sidebar-model-summary-x11)
 - [Configuration Reference](#configuration-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
@@ -614,6 +615,52 @@ pytest tests/regression/test_csp_plotly_image_export.py \
   plotly export works — that file does not pin `blob:`.
 - Do not introduce a CSP env override without teaching both tests
   to read the value that actually ships on the response.
+
+## Sidebar model summary (X11)
+
+The sidebar line under **Model:** is `nn-model-summary`. It is the only at-rest indicator of which model is selected. Landed in canopy#680. The three wordings are the owner's ruling of 2026-09-24.
+
+`DashboardManager._model_summary_text` prints `model_registry.selection_is_live(nn_model, backend)`. A recurrence-provider model (`juniper-recurrence`) is live only when `backend` is `recurrence`. Every other known model, including CasCor (`in-process`), is live when `backend` is `service` or `demo`. A key the registry does not know is treated as not needing recurrence. `swapped` is not the test: re-selecting the model that is already running also leaves `swapped` false.
+
+| Answer | When | Sidebar text |
+| --- | --- | --- |
+| `True` | The payload's `backend` serves the selection | `Active: <label>` |
+| `False` | The payload names a backend that does not serve the selection | `Selected: <label> · NOT ACTIVE — the <backend> backend is running` |
+| `None` | No model key, or no `backend` | `Selected: <label> · backend status unknown` |
+
+`UNKNOWN_LIVENESS_NOTE` is the literal `backend status unknown`. When `status` is not `live`, a lifecycle note is inserted first (`coming_soon` renders `· coming soon`). Both shipped models are `live`, so the first-paint seed has no lifecycle clause:
+
+`Selected: CasCor (Cascade-Correlation) · backend status unknown`
+
+Unknown is not disagreement. It names no backend, it does not disable Start, and `_train_gate_notice_handler` stays hidden. `False` does both: Start and **Apply Dataset** disable, and the warning repeats `INACTIVE_SELECTION_REMEDY`. Other gates still disable Start on their own (no dataset selected, a model that is not trainable).
+
+Clearing the model is a different sentence, written by the clear path: `No model selected — all datasets shown; choose one to train` (`CLEARED_MODEL_SUMMARY`).
+
+### When the unknown sentence is written
+
+The layout seeds `nn-model-summary` from `_initial_model_summary()`, which calls the helper with the default model (`cascor`) and no `backend`. Nothing has asked the backend. That seed used to read `Active: CasCor`.
+
+`params-init-interval` runs `_hydrate_selection_handler`, which `GET`s `/api/selection`. A 200 that includes `nn_model` replaces the summary with the helper applied to that body. The body carries `backend` (`service`, `demo`, or `recurrence`), so a healthy mount leaves **Active** or **NOT ACTIVE**.
+
+The unknown sentence is written again when that read fails: a transport error, a non-OK status, or a 200 whose `nn_model` is missing. The handler logs `Selection hydration read failed (...); keeping the seeded selection`, returns `DEFAULT_MODEL_KEY`, the unknown summary, and a payload of only `{"dataset": {"value": None, "source": "unknown", "generator": None}}`. Leaving the summary at `no_update` was the defect: the seed's **Active** claim survived the read that had just failed.
+
+`GET /api/selection` still returns model fields when `backend.get_status` fails. That path degrades `dataset` and keeps `backend`, so a 200 the dashboard receives does not show this sentence.
+
+### What not to do
+
+- Do not render `None` as **Active**. **Active** requires a round-tripped `backend` that serves the model.
+- Do not render `None` as **NOT ACTIVE**. That sentence names a backend, and it disables Start.
+- Do not gate the summary on `swapped`.
+- Do not leave the summary at `no_update` when the mount read fails. It has to follow the key store's fallback.
+
+### Tests
+
+`TestX11UnknownLivenessIsNotActive` in `src/tests/regression/test_selection_reachability_guardrails.py`. The shipped layout seed is also pinned in `src/tests/regression/test_model_table.py`.
+
+```bash
+cd src
+pytest tests/regression/test_selection_reachability_guardrails.py -k X11 -v
+```
 
 ## Configuration Reference
 

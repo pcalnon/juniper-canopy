@@ -2,9 +2,9 @@
 
 ## Get Juniper Canopy running in 5 minutes
 
-**Version:** 0.25.3
+**Version:** 0.25.8
 **Status:** ✅ Production Ready
-**Last Updated:** September 5, 2026
+**Last Updated:** October 6, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -537,6 +537,22 @@ pytest tests/regression/test_csp_plotly_image_export.py \
 
 **See:** [AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047)
 
+### Issue 10: Sidebar Says "backend status unknown"
+
+**Symptom:** Under **Model:** the sidebar reads `Selected: CasCor (Cascade-Correlation) · backend status unknown` at first paint, or it stays there after the page loads.
+
+**Cause:** **Active** is only used after a round-trip includes a `backend` that serves the selection. The layout seed has no `backend`. The same sentence is written when `GET /api/selection` fails (connection error, non-OK status, or a 200 with no `nn_model`). It is not the **NOT ACTIVE** sentence, which names the backend that is running and disables Start. Unknown does not disable Start by itself. A missing dataset still does.
+
+**Check:** Reload. A healthy body includes `backend` (`service`, `demo`, or `recurrence`) and the line becomes **Active** or **NOT ACTIVE**. A stuck unknown line means the mount read failed. The log says `Selection hydration read failed`.
+
+```bash
+curl -s http://127.0.0.1:8050/api/selection | python -m json.tool
+
+cd src && pytest tests/regression/test_selection_reachability_guardrails.py -k X11 -v
+```
+
+**See:** [AGENTS_REFERENCE.md § Sidebar model summary](AGENTS_REFERENCE.md#sidebar-model-summary-x11)
+
 ### Issue 9: Status Bar Says "Stopped" While CasCor Is Down
 
 **Symptom:** Service-mode dashboard shows **Stopped** (or a healthy idle) when cascor is
@@ -826,7 +842,7 @@ conda list | grep -E "(fastapi|dash|uvicorn)"
 ---
 
 **Last Updated:** September 5, 2026  
-**Version:** 0.25.3  
+**Version:** 0.25.8  
 **Status:** ✅ Production Ready
 
 **Last Updated:** 2026-03-15

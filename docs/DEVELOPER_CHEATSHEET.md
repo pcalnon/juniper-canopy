@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.4
-**Date**: 2026-09-05
+**Version**: 1.0.9
+**Date**: 2026-10-06
 **Project**: juniper-canopy
 
 ---
@@ -175,6 +175,16 @@ pytest tests/regression/test_csp_plotly_image_export.py \
 
 > See: [AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047)
 
+### 8. Read the sidebar model summary (X11)
+
+`nn-model-summary` says **Active** only after a round-trip includes a `backend` that serves the model. First paint, and a failed `GET /api/selection`, read `Selected: CasCor (Cascade-Correlation) · backend status unknown`. **NOT ACTIVE** names the running backend and disables Start. Unknown does neither. A missing dataset can still disable Start.
+
+```bash
+cd src && pytest tests/regression/test_selection_reachability_guardrails.py -k X11 -v
+```
+
+> See: [AGENTS_REFERENCE.md § Sidebar model summary](AGENTS_REFERENCE.md#sidebar-model-summary-x11)
+
 ### 6. Read the Cascor Status Cache (X7 slice 1c)
 
 Service-mode `/api/status` is served from a 1 Hz cache. The body carries `status_class`
@@ -278,6 +288,7 @@ Coverage includes:
 | Symptom                                          | Cause                      | Fix                                                                                                             |
 |--------------------------------------------------|----------------------------|-----------------------------------------------------------------------------------------------------------------|
 | `ModuleNotFoundError: No module named 'uvicorn'` | Wrong Python env           | `conda activate JuniperCanopy1`                                                                            |
+| Sidebar stays on "backend status unknown"       | Mount `GET /api/selection` failed, or nothing has round-tripped (X11) | A healthy body includes `backend` and the line becomes Active or NOT ACTIVE. Unknown does not disable Start. See [Sidebar model summary](AGENTS_REFERENCE.md#sidebar-model-summary-x11) |
 | Env var not taking effect                        | Missing `JUNIPER_CANOPY_` prefix or nested delimiter | Use `JUNIPER_CANOPY_TRAINING__EPOCHS__DEFAULT=300`, not `TRAINING_EPOCHS=300`                         |
 | YAML config not loading                          | Syntax error               | `python -c "import yaml; yaml.safe_load(open('conf/app_config.yaml'))"`                                         |
 | Demo mode not starting                           | Demo mode env not set      | Run via `./demo` or `export JUNIPER_CANOPY_DEMO_MODE=1` first                                                   |
@@ -323,6 +334,6 @@ Coverage includes:
 
 ---
 
-**Last Updated:** 2026-09-05
-**Version:** 1.0.4
+**Last Updated:** 2026-10-06
+**Version:** 1.0.9
 **Maintainer:** Paul Calnon
