@@ -1,7 +1,7 @@
 # CI/CD Environment Setup
 
-**Last Updated:** 2026-08-24
-**Version:** 0.28.0
+**Last Updated:** 2026-10-08
+**Version:** 0.28.1
 **Status:** Current
 
 ## Table of Contents
@@ -23,6 +23,7 @@ The workflow definitions are:
 - `.github/workflows/security-scan.yml`
 - `.github/workflows/publish.yml`
 - `.github/workflows/lockfile-update.yml`
+- `.github/workflows/claude.yml` (optional assistant; not a merge gate)
 
 ## Runner and Python Strategy
 
@@ -47,26 +48,27 @@ strategy:
 
 ### CI jobs (`ci.yml`)
 
-Core install pattern:
+Core install pattern (the `unit-tests` job; the other jobs install their own extras sets):
 
 ```bash
-python -m pip install --upgrade pip
+python -m pip install --upgrade "pip>=26.1.1"
 if [ "$RUNNER_OS" = "macOS" ]; then
   pip install torch
 else
   pip install torch --index-url https://download.pytorch.org/whl/cpu
 fi
-pip install -r conf/requirements_ci.txt
-pip install -e .
+pip install -e ".[test,juniper-cascor,observability]"
+pip install "h5py>=3.0"
 ```
 
 Why this matters:
 
-- `torch` is installed before `conf/requirements_ci.txt` because wheel resolution differs by runner OS.
+- `torch` is installed before the project extras because wheel resolution differs by runner OS.
 - Linux installs CPU-only torch from the PyTorch CPU index to avoid CUDA wheels.
 - macOS installs torch from the default PyPI index because the Linux CPU-only index has no macOS ARM wheels.
-- `pip install -e .` ensures imports resolve the current source tree.
-- `conf/requirements_ci.txt` is the CI baseline, not `requirements.txt`; dependency PRs may bump minimum versions there when the CI floor changes.
+- The editable install (`-e`) ensures imports resolve the current source tree.
+- Repo-root `requirements.txt` resolves to `conf/requirements_ci.txt` (`requirements.txt` → `conf/requirements.txt` → `conf/requirements_ci.txt`). Dependabot's pip updates (`directory: "/"`) commit floor bumps in that file. No `ci.yml` job installs it: since canopy#650 it is `juniper-generate-dep-docs` output, and every lane installs `pyproject.toml` extras instead.
+- `requirements.lock` is compiled from `pyproject.toml`. A floor that exists only in `conf/requirements_ci.txt` can change while that package stays out of the lock. Reviewer notes: [Dependabot lockfile automation](CICD_MANUAL.md#runbook-dependabot-lockfile-automation).
 - `conf/requirements_ci.txt` includes `prometheus-client` and `sentry-sdk` used by observability paths.
 
 ## CI Environment Variables
@@ -97,6 +99,8 @@ pip install -e .
 
 - `CROSS_REPO_DISPATCH_TOKEN`:
   Used by `lockfile-update.yml` to push lockfile updates in Dependabot branches with CI retriggering behavior.
+- `ANTHROPIC_API_KEY`:
+  Read by `claude.yml` as the only auth input (`anthropic_api_key`). The workflow header says this is an org secret and that the repo must be able to read it. Bedrock, Vertex, Foundry, and workload-identity inputs are not set.
 
 ### Workflow permissions
 
@@ -104,6 +108,7 @@ pip install -e .
 - `codeql.yml`: `actions: read`, `contents: read`, `security-events: write` for CodeQL analyze
 - `publish.yml`: `id-token: write` for OIDC trusted publishing
 - `lockfile-update.yml`: `contents: write` for bot lockfile commits
+- `claude.yml`: `contents: write`, `pull-requests: write`, `issues: write`, `id-token: write`, `actions: read`. Not a required check. `id-token: write` is granted even though the workload-identity inputs are unset.
 
 ## Quality Gates That Depend on Environment
 
@@ -153,7 +158,11 @@ uv pip compile pyproject.toml \
   -o requirements.lock
 ```
 
-Dependabot branches also trigger `.github/workflows/lockfile-update.yml`, which runs the same extras with `--upgrade` and commits `requirements.lock` only when the resolved pins change.
+Dependabot branches also trigger `.github/workflows/lockfile-update.yml`, which compiles `pyproject.toml` with the same extras and `--upgrade`.
+It does not compile `conf/requirements_ci.txt`. A green run can commit pin moves for packages the floor bump did not name,
+and the bumped package stays out of `requirements.lock` when it is not a `pyproject.toml` dependency.
+An empty `CROSS_REPO_DISPATCH_TOKEN` in the Dependabot secret store skips that regen and still leaves this job green.
+See [Dependabot lockfile automation](CICD_MANUAL.md#runbook-dependabot-lockfile-automation).
 
 ### `Documentation Links` fails unexpectedly
 
@@ -166,6 +175,15 @@ Reproduce with that interpreter locally and run the same marker filters used in 
 ### `Analyze (python)` is red after a GitHub Actions bump
 
 Confirm `.github/workflows/codeql.yml` and the `ci.yml` `upload-sarif` step share the same `github/codeql-action` SHA comment. Dependabot groups those uses; splitting the pins is the usual review mistake.
+
+### `@claude` did not call the model
+
+The job in `.github/workflows/claude.yml` starts only for `@claude` on a new comment, a submitted review body, or an issue being opened or assigned (title or body).
+GitHub's `contains()` ignores case, so `@Claude` starts it too. A pull-request description does not match.
+If the job starts and the step logs `No trigger found, skipping remaining steps`, the action's own check did not find `@claude` as a separate word.
+Assigning an issue always ends this way, because `assignee_trigger` is unset and the action does not re-read the title or body on `assigned`.
+A bot that does match fails the step; `allowed_bots` is empty. Then confirm `ANTHROPIC_API_KEY` is visible to the repo.
+Full contract: [Claude Code workflow](CICD_REFERENCE.md#claude-code-workflow).
 
 ## References
 

@@ -22,9 +22,14 @@ pointer only helps an agent that already knows to look.
 - [Hierarchy Depth Filter (CAN-020)](#hierarchy-depth-filter-can-020)
 - [Topology Node Selection (F-CANOPY-046)](#topology-node-selection-f-canopy-046)
 - [Plotly PNG Export (F-CANOPY-047)](#plotly-png-export-f-canopy-047)
+- [Sidebar model summary (X11)](#sidebar-model-summary-x11)
 - [Configuration Reference](#configuration-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
+- [Replay index contract](#replay-index-contract)
+- [Recurrence fit refusal and in-sample scores](#recurrence-fit-refusal-and-in-sample-scores)
+- [Recurrence key, restored model, and service version](#recurrence-key-restored-model-and-service-version)
+- [Start-fresh refusal (F1, F2)](#start-fresh-refusal-f1-f2)
 - [Further Reading](#further-reading)
 
 ---
@@ -614,6 +619,58 @@ pytest tests/regression/test_csp_plotly_image_export.py \
   plotly export works — that file does not pin `blob:`.
 - Do not introduce a CSP env override without teaching both tests
   to read the value that actually ships on the response.
+
+## Sidebar model summary (X11)
+
+The sidebar line under **Model:** is `nn-model-summary`. It is the only at-rest indicator of which model is selected:
+the dropdown that used to show the current value is gone, and **▸ change** (`nn-model-change-button`) opens the selection modal.
+Landed in canopy#680. The unknown wording is the owner's ruling of 2026-09-24; the **NOT ACTIVE** sentence dates from canopy#592 (X1).
+
+`DashboardManager._model_summary_text` renders the answer of `model_registry.selection_is_live(nn_model, backend)`.
+A recurrence-provider model (`juniper-recurrence`) is live only when `backend` is `recurrence`. Every other known model, including CasCor (`in-process`), is live when `backend` is `service` or `demo`; there is no `cascor` backend type. A key the registry does not know is treated as not needing recurrence. `swapped` is not the test: re-selecting the model that is already running also leaves `swapped` false.
+
+The same predicate (canopy#601, N5) gates Start and **Apply Dataset** (`_update_button_appearance_handler`) and the server's start refusals (`main._selection_inactive_reason`), so the label, the control, and the run cannot answer differently. canopy#592 fixed the label alone and left the run misattributed.
+
+| Answer | When | Sidebar text |
+| --- | --- | --- |
+| `True` | The payload's `backend` serves the selection | `Active: <label>` |
+| `False` | The payload names a backend that does not serve the selection | `Selected: <label> · NOT ACTIVE — the <backend> backend is running` |
+| `None` | No model key, or no `backend` | `Selected: <label> · backend status unknown` |
+
+`UNKNOWN_LIVENESS_NOTE` is the literal `backend status unknown`. When `status` is not `live`, a lifecycle note is inserted first (`coming_soon` renders `· coming soon`), so Recurrence at `coming_soon` with no `backend` would read `Selected: Recurrence (LMU) · coming soon · backend status unknown`. Both shipped models are `live`, so the first-paint seed has no lifecycle clause:
+
+`Selected: CasCor (Cascade-Correlation) · backend status unknown`
+
+Unknown is not disagreement. It names no backend, it does not disable Start, and `_train_gate_notice_handler` stays hidden. `False` does both: Start and **Apply Dataset** disable, and the warning repeats `INACTIVE_SELECTION_REMEDY`, the same sentence the server's 409 carries. Other gates still disable Start on their own (no dataset selected, a model that is not trainable).
+
+Clearing the model is a different sentence, written by the clear path: `No model selected — all datasets shown; choose one to train` (`CLEARED_MODEL_SUMMARY`).
+
+### When the unknown sentence is written
+
+The layout seeds `nn-model-summary` from `_initial_model_summary()`, which calls the helper with the default model (`cascor`) and no `backend`. Nothing has asked the backend. That seed used to read `Active: CasCor`.
+
+`params-init-interval` fires once, about a second after mount, and runs `_hydrate_selection_handler`, which `GET`s `/api/selection`. A 200 that includes `nn_model` replaces the summary with the helper applied to that body. The body carries `backend` (`service`, `demo`, or `recurrence`), so a healthy mount leaves **Active** or **NOT ACTIVE**. A model selection writes the summary the same way, from the `POST /api/model/select` response (`_select_model_handler`), which also carries `backend`.
+
+The unknown sentence is written again when that read fails: a transport error, a non-OK status, or a 200 whose `nn_model` is missing. The handler logs `Selection hydration read failed (...); keeping the seeded selection`, returns `DEFAULT_MODEL_KEY`, the unknown summary, and a payload of only `{"dataset": {"value": None, "source": "unknown", "generator": None}}`. Leaving the summary at `no_update` was the defect: the seed's **Active** claim survived the read that had just failed.
+
+`GET /api/selection` still returns model fields when `backend.get_status` fails. That path degrades `dataset` and keeps `backend`, so a 200 the dashboard receives does not show this sentence.
+
+### What not to do
+
+- Do not render `None` as **Active**. **Active** requires a round-tripped `backend` that serves the model.
+- Do not render `None` as **NOT ACTIVE**. That sentence names a backend, and it disables Start.
+- Do not gate the summary on `swapped`.
+- Do not leave the summary at `no_update` when the mount read fails. It has to follow the key store's fallback.
+- Do not give the summary, the Start gate, or `main._selection_inactive_reason` a predicate of its own. All three call `selection_is_live`.
+
+### Tests
+
+`TestX11UnknownLivenessIsNotActive` in `src/tests/regression/test_selection_reachability_guardrails.py`. Its `test_the_first_paint_seed_is_the_unknown_state` reads the seed off the shipped layout, not only off the helper. `test_initial_model_summary_seeds_the_default_model` in `src/tests/regression/test_model_table.py` also pins the helper's seed text.
+
+```bash
+cd src
+pytest tests/regression/test_selection_reachability_guardrails.py -k X11 -v
+```
 
 ## Configuration Reference
 
@@ -1424,6 +1481,407 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 Design of record (juniper-ml):
 `notes/JUNIPER_2026-09-03_JUNIPER-CANOPY_X7-EVENT-LOOP-BLOCKING-REMEDIATION-DESIGN.md` §5.3 / §5.6.
+
+---
+
+## Replay index contract
+
+Operator runbook for the Snapshots **Replay** tab (`ReplayPlayerPanel` in
+`src/frontend/components/replay_player_panel.py`). This is not the metrics-panel replay
+bar; that path is [CASCOR_BACKEND_MANUAL § Metrics Panel Handler Contract](cascor/CASCOR_BACKEND_MANUAL.md#metrics-panel-handler-contract-service-mode).
+
+F-CANOPY-059 (canopy#694) made `render_session` accept cascor's dict `range`.
+F-CANOPY-056 (canopy#696) made a control result land on the session and made Stop clear
+it. Those two fixes also made a third bug reachable: every session paint re-enters
+`queue_control`. canopy#697 is the index arithmetic and the echo guard below. A tree
+before it (`3cc4fdb`, #697's parent) behaves as the "Before #697" column.
+
+### Two ends
+
+A measured cascor session of 12 frames uses indexes `0..11`.
+
+| Field | Meaning | Full-history example |
+| --- | --- | --- |
+| `session.range` dict | Exclusive `[start, end)` from cascor `set_range` / `state_summary()` | `{"start": 0, "end": 12}` plays every frame |
+| `time_index.snapshot_window.end_epoch` | History **length** (`_compute_snapshot_window` on cascor) | `12` → last index `11` |
+| Scrubber and range slider | Inclusive | min `0`, max `11`, full range `[0, 11]` |
+| Legacy `range` list or tuple | Canopy's own inclusive pair. Do not subtract 1 | `[4, 8]` stays `[4, 8]` |
+| Legacy `window.end_epoch` | Already the last index (`length - 1`). Do not subtract 1 | |
+
+`_session_window` returns the inclusive `(first, last)` pair the sliders use.
+
+- No session: `(0, 1)`.
+- A present `time_index.snapshot_window`: `last = end_epoch - 1`, then `max(first, last)`. A window with `end_epoch == 0` stays `(0, 0)`. A unified window that omits `end_epoch` defaults it to `start + 1` before that subtraction, so the last index equals `start`.
+- Legacy `window` only (no unified window): `end_epoch` is already the last index, falling back to `length - 1`. An `end` below `start` is clamped up to `start`.
+
+`_session_range(raw, start, end)` returns an inclusive `[lo, hi]` clamped into that window.
+
+- Dict with both `start` and `end`: `hi = int(end) - 1`.
+- Length-2 list or tuple: both ends are already inclusive.
+- Anything else, or a non-numeric value: the full window.
+
+`queue_control` sends a user range as `{"action": "range", "params": {"start": lo, "end": hi + 1}}`. Frames 3 through 8 go out as `end: 9`. The last frame (11 of 12) goes out as `end: 12`, which equals the length and is inside what cascor accepts.
+
+The local fallback in `_merge_session` (no usable `result` in the response) stores that outbound pair in cascor's dict shape, `{"start", "end"}` with the exclusive end, on the nested summary when the session has one. The next render subtracts 1 once, so the slider shows the range the user chose. Storing those outbound numbers as a list would show the upper end one past the frame the user chose, because a list is read as already inclusive and skips the subtraction.
+
+Worked round trip, 12 frames:
+
+| User slider | Outbound `params` | Cascor echo | Slider after render |
+| --- | --- | --- | --- |
+| `[3, 8]` | `{"start": 3, "end": 9}` | `{"start": 3, "end": 9}` | `[3, 8]` |
+| `[3, 11]` | `{"start": 3, "end": 12}` | `{"start": 3, "end": 12}` | `[3, 11]` |
+| `[0, 11]` | `{"start": 0, "end": 12}` | `{"start": 0, "end": 12}` | `[0, 11]` |
+
+### Render echoes queue nothing
+
+`render_session` writes the scrubber, speed, and range values whenever the session store changes. Those three properties are Inputs of `queue_control`. The session store is State, not Input. So a paint fires `queue_control` with the values just written.
+
+`queue_control` returns `dash.no_update` when that value already matches the session:
+
+| Input | Treat as an echo when |
+| --- | --- |
+| Scrubber | `int(value)` equals `_session_current_index`: `time_index.current` on the stored block when `time_index` is a dict, otherwise top-level `current_epoch` |
+| Speed | `float(value)` equals the summary `speed`. A missing speed is `SPEED_DEFAULT` (`1.0`) |
+| Range | Inclusive `[lo, hi]` equals `_session_range` of the summary's `range` over the current window |
+
+Compare inclusive values to inclusive values. Do not compare the slider to the outbound exclusive end.
+
+A real change still queues. Scrubber `3` seeks `{"action": "seek", "params": {"time_index": 3}}`. Speed `4.0` sends `{"action": "speed", "params": {"value": 4.0}}`. Play, pause, and stop still key off `n_clicks`.
+
+The callback-graph cycle stays. `src/tests/unit/frontend/test_f048_replay_cycle.py` exempts it as `can015-replay-player-control-loop`: session store → scrubber / range / speed values → `queue_control` → control trigger → `dispatch_control` → session store (`allow_duplicate`). The exemption names the graph. It does not stop the POST. The equality guard does. The exemption's comment still marks the chain unmeasured live; #697 pinned the Python callbacks and left the exemption in place.
+
+### Before and since canopy#697
+
+| | Before #697 (`3cc4fdb`) | Since #697 |
+| --- | --- | --- |
+| Dict `range.end` | Shown and sent as the inclusive hi, so the last chosen frame sat outside `[start, end)` | Shown as `end - 1`; sent as `hi + 1` |
+| `snapshot_window.end_epoch` | Used as the last index, so both sliders offered one position cascor clamps away | Last index is `end_epoch - 1` |
+| Scrubber, speed, or range painted by `render_session` | `queue_control` POSTed again; the result wrote the session again | `dash.no_update` when the value matches the session |
+| Local range fallback | List `[start, end]` of the outbound numbers | Dict `{"start", "end"}` with the exclusive end |
+
+Before #697, `_session_range` already accepted the dict (the #694 fix) but copied `end` through unchanged, and its docstring named the list shape as what `_merge_session` stored. #697 made it subtract 1 from the dict `end` and changed that store to the dict.
+
+### Tests
+
+`src/tests/unit/frontend/test_replay_range_end_and_echo.py` landed with #697 (13 tests). Nine fail on its parent `3cc4fdb`. Four pass there on purpose: the round trip (the parent is wrong in both directions, so the two errors agree), the zero-length window, and the two tests that a real scrubber or speed change still queues. Per-class pins: [TESTING_REFERENCE.md § Replay index contract](testing/TESTING_REFERENCE.md#replay-index-contract).
+
+The same PR retargeted fixtures that encoded the old off-by-one: `test_f059_replay_range_dict.py`, `test_f056_replay_control_envelope.py`, `test_replay_player_panel.py`, `test_replay_player_panel_gate_coverage.py` (the outbound end), and `test_p2_wave_batch_a.py` (a window whose `end_epoch` disagreed with its `length`).
+
+```bash
+cd src && pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v
+```
+
+### Pitfalls
+
+- Do not send the slider's inclusive hi as cascor's `end`. Frame `hi` is then outside `[start, end)`.
+- Do not subtract 1 from a legacy list range or from legacy `window.end_epoch`. Only the dict `end` and the unified `snapshot_window.end_epoch` are exclusive counts.
+- Do not drop the equality guard. The slider values are Inputs of `queue_control`. Without it, every session write POSTs, and the result writes the session again.
+- Do not compare the slider to the outbound exclusive end. The guard compares inclusive to inclusive.
+- Do not store the fallback range as a list of the outbound numbers. The reader treats a list as already inclusive.
+- A missing session is `(0, 1)`. A present window with `end_epoch == 0` is `(0, 0)`. The `max(first, last)` clamp is what keeps `0 - 1` from becoming a negative index.
+- The scrubber echo compares the block's `time_index.current`, not the inner summary's `time_index` (on a measured cascor payload that inner value is an int).
+
+---
+
+## Recurrence fit refusal and in-sample scores
+
+How a refused recurrence fit reaches the operator, and what the one-shot regression card's numbers are. Landed with canopy#702 (W0.5 / F-C1, W0.7).
+The 401/403 and 429 wording and the 480-character hover bound came with canopy#722: see [Recurrence key, restored model, and service version](#recurrence-key-restored-model-and-service-version).
+canopy 0.8.1 and earlier predate both, and canopy#651 as well: a failed fit there shows a bare `Failed`, its message carries no `detail`, and the card is titled `Recurrence (LMU) — final regression metrics`.
+
+Recurrence does not use the [cascor status cache](#cascor-status-cache-x7-slice-1c). `/api/status` serves `RecurrenceBackend.get_status()` directly.
+
+### The message
+
+`RecurrenceServiceAdapter._parse` (`src/backend/recurrence_service_adapter.py`) raises a typed error whose message names the status code, method, and path. On a 4xx it appends the reply's `detail` after a colon and a space. That covers every 4xx branch: the 409 (`recurrence training already in progress (<method> <path>)`), the 401/403 (the key remedy), the 429 (after its `Retry-After` wait), and the generic one. `body` stays the raw response text.
+
+| Body | What is appended |
+| --- | --- |
+| `{"detail": "<text>"}` | that text, with whitespace runs collapsed to single spaces |
+| `{"detail": [{"loc", "msg", ...}, ...]}` | `loc -> msg` pairs, separated by a semicolon and a space. A list `loc` is dotted (`body.dataset.params.symbols.0`). `input` is left out |
+| any other `detail` | `str(detail)` |
+| non-JSON, a non-object, or a missing, null, or blank `detail` | nothing; the message keeps the branch's own wording |
+
+The rendered detail is at most 300 characters (`_DETAIL_MAX_CHARS`). A cut ends with `…`. A detail of exactly 300 is kept whole. Reading the body never raises and never changes which typed error `_parse` raises, including a body deep enough that `response.json()` raises `RecursionError`.
+
+The gate is `httpx.codes.is_client_error` (400–499). The same `_parse` answers every adapter call (`GET /v1/training/status`, `GET /v1/health` and `GET /openapi.json` too). The fit the status bar shows is `POST /v1/train`.
+
+A non-finite training matrix from the service looks like this, and it fits in the 120-character label (104 characters):
+
+```text
+recurrence service error 422 on POST /v1/train: invalid dataset: X_train has non-finite values (NaN/Inf)
+```
+
+### A 5xx `detail` stays off the operator surfaces
+
+A 5xx message stays `recurrence service error <code> on <method> <path>`. The service's `detail` is not appended.
+
+On this service a 5xx `detail` can relay the recurrence process's own upstream exception.
+juniper-recurrence `map_data_error` answers a juniper-data client failure with
+`502 data fetch failed: {exc}`, and juniper-data-client 0.5.0 can include a refused
+header value in that text. `completion_reason` is what an anonymous `GET /api/status`
+returns. Leaving the 5xx `detail` off the message keeps that header value off the
+status field and off the WARNING. The raw body remains on the exception object and is
+not copied into either.
+
+`RecurrenceBackend._run_fit` (`src/backend/recurrence_backend.py`) stores `outbound_error_text(exc)` (`src/outbound_errors.py`) as `completion_reason` and logs `recurrence fit failed (status=<code>): <message>`.
+A status-bearing error passes as `str(exc)`, which includes a 4xx `detail`. A transport failure has no integer `status_code`, so `completion_reason` is the exception type name (`RecurrenceServiceUnavailableError` or `RecurrenceServiceTimeoutError`) and the WARNING logs `status=None`. The log line can still carry the transport text.
+
+### Status bar
+
+Visible text is `Failed — <label>`. The label is the reason on one line, cut at 120 characters with `…` (`DashboardManager._COMPLETION_REASON_MAX_CHARS`).
+
+When that cut drops the tail, `top-status-display` renders an `html.Span` whose `title`
+is the same reason, flattened the same way and cut at 480 characters
+(`_FAILURE_REASON_TOOLTIP_MAX_CHARS`). Hover shows it. The tooltip is the reason alone,
+without the leading `Failed —`. A reason the label already holds stays a plain string.
+`Completed` and `Running` never get this tooltip, including a long free-text
+`completion_reason` on a completed run. The `· partial data` mark stays on the visible
+children. The tooltip is still the reason.
+
+The bound is sized from the adapter's longest wording: the 401/403 remedy on `POST /v1/train`, 174 characters before its `detail` (arithmetic in [A refused key names the variables](#a-refused-key-names-the-variables)). `test_the_tooltip_holds_every_reason_the_adapter_can_build_uncut` builds the longest reason through the real `_parse` for 400, 401, 403, 404, 409, 422, and 429, and `test_the_tooltip_holds_a_rate_limited_reason_with_its_wait_uncut` does the same for a 429 that carries its wait.
+
+The Span is the children of the existing status Output. The callback's output list is unchanged, so a later status does not keep a stale title.
+
+### In-sample regression card
+
+The card title is `Recurrence (LMU) — in-sample (train split) regression metrics`, over the caption `Computed on the training split the fit saw; not a held-out score.` R², RMSE, MSE, MAE, and Loss are the `final_metrics` fields from `POST /v1/train`, which scores the training split the fit saw. Each is shown to four decimals, or `--` when absent. The waiting state is the spinner text `Awaiting recurrence (LMU) fit result…` and claims no scope.
+
+`RecurrenceTrainResult` copies `final_metrics`, `n_epochs`, `stopped_reason`, and `dataset` only. An extra `metrics_scope` key on the train JSON is ignored. The card does not read that key; the title is fixed in `MetricsPanel._build_oneshot_result` (`src/frontend/components/metrics_panel.py`). There is no held-out score.
+
+API callers get the same 4xx/5xx rule from [`docs/api/API_REFERENCE.md` § Upstream Failures](api/API_REFERENCE.md#upstream-failures).
+
+### Read a failed fit
+
+```bash
+curl -s http://127.0.0.1:8050/api/status | python -m json.tool
+# completion_reason on a failed recurrence fit
+```
+
+A 4xx `detail` is on that field and at the end of the status-bar label; hover when the label ends in `…`. A 5xx field has no `detail`: read the recurrence service's own log for why.
+
+### Tests
+
+| File | What it pins |
+| --- | --- |
+| `src/tests/unit/test_recurrence_service_adapter.py` | `TestServiceDetailInTheMessage`; `test_train_tolerates_a_response_key_it_does_not_know` |
+| `src/tests/unit/backend/test_recurrence_backend.py` | `TestA422DetailReachesTheOperator` |
+| `src/tests/unit/frontend/test_completion_reason_status_bar.py` | `TestFailedRecurrenceFitReason`, `TestA422ReachesTheStatusBar` |
+| `src/tests/unit/test_recurrence_oneshot_result.py` | `TestTheCardSaysInSample` |
+| `src/tests/unit/test_outbound_errors.py` | a 4xx detail passes through; a 5xx detail that relays a refused header value does not |
+
+```bash
+cd src && pytest tests/unit/test_recurrence_service_adapter.py \
+  tests/unit/backend/test_recurrence_backend.py \
+  tests/unit/frontend/test_completion_reason_status_bar.py \
+  tests/unit/test_recurrence_oneshot_result.py \
+  tests/unit/test_outbound_errors.py -q
+```
+
+### Pitfalls
+
+- Leave a 5xx `detail` off the message. Appending it puts the service's upstream exception text, which can quote a header value, onto `completion_reason`.
+- Leave a validation item's `input` out of the rendered detail. It echoes the request onto a status line `GET /api/status` returns.
+- Read the regression card as a training-split score. The title change did not add a held-out number.
+- Keep the tooltip as the Span's `title`. A new Output would have to be cleared on every other return path or a failure tooltip would survive into the next run.
+- A 4xx body with no usable `detail` keeps the branch's own wording: the status code, method, and path, plus the key remedy on a 401/403 and the wait on a 429. That is the message when the body has nothing to show.
+
+---
+
+## Recurrence key, restored model, and service version
+
+Landed with canopy#722 (W1.6 / W1.7, plan findings F-C5 through F-C8). canopy 0.8.1 and earlier say `check recurrence_api_key` on a 401/403, raise a plain `RecurrenceServiceError` on a 429, know no `restored` state, and seed the recurrence model with `version="0.1.0"`.
+
+Primary code: `src/backend/recurrence_service_adapter.py`, `src/model_registry.py`, `src/settings.py` (`_check_recurrence_api_key`), `src/frontend/dashboard_manager.py` (status-bar bounds), `src/backend/recurrence_backend.py` (`completion_reason` via `outbound_error_text`).
+
+### A refused key names the variables
+
+A 401 or 403 raises `RecurrenceServiceAuthError`. The message names the variables that set the outbound `X-API-Key`:
+
+`recurrence service rejected the request (401 on POST /v1/train) — set JUNIPER_CANOPY_RECURRENCE_API_KEY or JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE to a key the service accepts`
+
+That prefix is 174 characters. A 4xx `detail` is still appended after a colon and a space (300 characters, same rule as a 422). The status bar shows 120 characters of `completion_reason` (`_COMPLETION_REASON_MAX_CHARS`), so the visible line shows the first variable whole and stops inside the second (`… or JUNIPER_CANO…`). Hover holds the rest, up to 480 characters (`_FAILURE_REASON_TOOLTIP_MAX_CHARS`). 174 plus the two-character separator plus a 300-character detail is 476, inside that hover bound.
+
+`Settings` resolves the key in this order. Within each name, the `_FILE` form is read first:
+
+1. `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`, else `JUNIPER_CANOPY_RECURRENCE_API_KEY`
+2. `JUNIPER_RECURRENCE_API_KEY_FILE`, else `JUNIPER_RECURRENCE_API_KEY`
+
+The 401 text names the canopy-prefixed pair. The shared pair still applies when the prefixed pair is unset. Settings are read at startup, so restart canopy after changing either.
+
+### A 429 carries Retry-After
+
+A 429 raises `RecurrenceServiceRateLimited`, a subclass of `RecurrenceServiceError`. When the reply sends `Retry-After`, the message carries that value before the `detail`:
+
+`recurrence service error 429 on POST /v1/train — retry after 30 s: Rate limit exceeded. Try again in 30 seconds.`
+
+An all-digit value is followed by a space and `s`, as above. An HTTP-date is shown as sent. A missing or blank header omits the wait clause, and the message stays `recurrence service error 429 on <method> <path>` plus any 4xx `detail`. The header is flattened and cut at 64 characters (`_RETRY_AFTER_MAX_CHARS`). `retry_after` on the exception holds that value and is part of `args`, so pickle and copy keep it. `outbound_error_text` copies the message into `completion_reason`.
+
+The dashboard polls canopy, not the recurrence service, and canopy calls the service rarely. A 429 usually means another client shares the service's key or address. The adapter describes that middleware as enabled at 60 requests a minute by default.
+
+### Restored counts as a model
+
+`GET /v1/training/status` reports `idle`, `trained`, or `restored`. `restored` is a model loaded from the snapshot `restored_from` names. `RecurrenceStatus.model_present` is true for `trained` and `restored` (`MODEL_PRESENT_STATES`).
+
+A restored model is present and predictable. It does not mean a fit canopy asked for landed. The service reports no `final_metrics`, `stopped_reason`, or `events` for that model. The published juniper-recurrence 0.5.0 never sends `restored`. Those replies parse with `restored_from=None`.
+
+No production caller reads `training_status()` yet. The property is the rule for a later status poll. The backend's own `trained` flag belongs to its fit state machine and is never filled from this route.
+
+### The version is whatever the service reports
+
+The recurrence seed in `MODELS` leaves `version` blank. `RecurrenceServiceAdapter.service_version()` reads a non-blank `version` from the `GET /v1/health` body when one is present, otherwise `info.version` from `GET /openapi.json`. juniper-recurrence 0.5.0 answers health with `{"status": "ok"}`, and it mounts no `GET /`, so the OpenAPI document is the path that answers. That route is open under juniper-service-core 0.5.0 and authenticated under 0.7.0. The adapter sends `X-API-Key` on both calls.
+
+`refresh_model_versions` takes `{RECURRENCE_PROVIDER: adapter.service_version}`. It asks each source at most once per refresh and returns frozen specs with the answers baked in. Reading the tuple does not touch the network.
+
+A source that raises, times out, or returns anything but a non-blank string yields `unknown (version lookup failed)` (`SERVICE_VERSION_UNAVAILABLE`) and a WARNING that names the failure. A model whose provider has no source keeps its spec. That is the blank seed when no service is configured. The lookup is HTTP. Call it with `asyncio.to_thread`, off the single-worker event loop.
+
+No surface renders `ModelSpec.version`. The model table, the picker, and `/api/selection` do not read it. Wiring a refreshed registry into one of them is still open.
+
+Canopy imports no `juniper-recurrence-client`. The documented floor is `RECURRENCE_SERVICE_CONTRACT_FLOOR = "0.5.0"` in the adapter, and [`docs/api/API_REFERENCE.md` § Recurrence Service Contract (Recurrence Mode)](api/API_REFERENCE.md#recurrence-service-contract-recurrence-mode) names it.
+
+### Tests
+
+| File | What it pins |
+| --- | --- |
+| `src/tests/unit/test_recurrence_service_adapter.py` | `TestW16AuthRestoredRateLimit`, `TestServiceVersion` |
+| `src/tests/unit/test_model_registry.py` | `TestRefreshModelVersions` |
+| `src/tests/unit/backend/test_recurrence_backend.py` | `TestW16RemediesReachTheOperator` (the real adapter's 401 and 429 reaching `completion_reason`) |
+| `src/tests/unit/frontend/test_completion_reason_status_bar.py` | the 480-character bound, and a 429 with its wait held uncut |
+
+```bash
+cd src
+pytest tests/unit/test_recurrence_service_adapter.py \
+       tests/unit/test_model_registry.py \
+       tests/unit/backend/test_recurrence_backend.py \
+       tests/unit/frontend/test_completion_reason_status_bar.py -q
+```
+
+### Pitfalls
+
+- The Python field `recurrence_api_key` is not something an operator sets. The message names the environment variables.
+- `state == "trained"` misses a model that was loaded from a snapshot. `model_present` is the check for "is there a model?".
+- `restored` does not mean the fit canopy just started succeeded.
+- The blank seed is not version `0.1.0`. A failed lookup reads `unknown (version lookup failed)`, which is a label, not an exception.
+- `service_version()` raises when neither health nor OpenAPI names a version. `refresh_model_versions` catches that and returns the label above.
+- A 429 with no `Retry-After` still means the window is closed. The message simply has no wait clause.
+
+The 4xx `detail` suffix, the 5xx omission, the status-bar hover, and the in-sample regression card are in [Recurrence fit refusal and in-sample scores](#recurrence-fit-refusal-and-in-sample-scores).
+
+---
+
+## Start-fresh refusal (F1, F2)
+
+Operator runbook for a Start that cascor refuses because the staged dataset is wider than the current network. The behaviour is on `main` as `#681` (owner ruling 2026-09-24). This is not the partial-dataset prompt (`[dataset_shortfall_refused]`), and it is not the X7 status-bar class.
+
+A plain **Start** continues the current network. It cannot add inputs or outputs. `equities` (15 features, 2 outputs) and `mnist` (784 features, 10 outputs) are the two refusals the unit test drives, against the 2-input, 2-output network named in the test's copy of cascor's sentence.
+
+### How canopy recognises it
+
+The literal is `START_FRESH_REQUIRED_MARKER` in `src/frontend/dashboard_manager.py`:
+
+```text
+[start_fresh_required]
+```
+
+`_is_start_fresh_required_refusal` is a substring test. It runs only when the failed command is `start`. The same marker on Stop, Pause, or any other command stays on the generic alert (`"Stop failed."`, auto-dismiss 8000 ms).
+
+The handler reads `detail_full` when that key is present and non-empty, otherwise `detail`:
+
+| Writer | What lands in the store |
+| --- | --- |
+| Clientside `reportFailure` | `detail` is the first 300 characters. `detail_full` is the first 4000. The handler prefers `detail_full`. |
+| Server-side training-control handler | `detail` only. A structured `error.message` is not cut at 300. The raw-body fallback is 300 characters. |
+
+The marker opens cascor's sentence. Only the HTTP status and two short prefixes come before it (the test's message starts `HTTP 409: Training could not be started: Training cannot be started:` and then the marker), so it sits inside that 300-character prefix and the special alert still opens when only `detail` arrived. The muted shape line is the first sentence after the marker (`split` on `". "`). A truncated `detail` can cut that sentence. The instruction above it does not depend on the cut.
+
+There is **no** fallback sentence. The shortfall marker matches a fixed sentence so an older cascor still opens its prompt. This one does not. A cascor that predates the marker consumed the staged dataset and then refused, so the pending banner was already gone. Pointing the operator at that banner would name a control that is not on screen. Those refusals keep the generic 8-second Start alert.
+
+Renaming the marker on either side drops canopy back to that generic alert. The unit test pins the literal for that reason. cascor's name for the same string is `_PROJECT_API_START_FRESH_REQUIRED_MARKER`.
+
+### What the operator sees
+
+`_start_fresh_required_alert` is a danger alert, dismissable, with **no** `duration`. The generic failure alert auto-dismisses at 8000 ms; this one carries an instruction, so it stays until dismissed or until a later successful command clears every failure alert.
+
+The body reads, in order:
+
+- **"Start refused: the staged dataset is wider than the current network."** (the bold lead).
+- "Start continues the current network, and Start cannot widen a network to more features or outputs."
+- "To train on this dataset, use **Stop & Restart with new dataset** and turn on **Start fresh**."
+- "Nothing was loaded: the dataset is still staged, and the results shown are still the previous run's."
+- cascor's first sentence after the marker, in muted text. It names both shapes.
+
+Those two control labels are a contract with the layout. The pending-banner button id is `restart-with-new-dataset-button` and its text is `Stop & Restart with new dataset`, on the banner that reads "Dataset change pending — restart training to apply."
+The modal switch id is `restart-start-fresh-toggle` and its label starts with `Start fresh`. The full label is "Start fresh — discard the current model and its retained metrics/history (parameters and snapshots kept)". Renaming either control leaves the alert pointing at nothing.
+
+The partial-data prompt does not open for this refusal. `_open_dataset_shortfall_prompt_handler` returns `no_update` for all three outputs.
+
+### Restart modal (F2)
+
+The switch defaults to **off** (`value=False`), and the modal resets it to off every time it opens.
+
+| Toggle | What happens |
+| --- | --- |
+| Off | Continue the current model. Retained metrics and history stay, for cross-dataset continuity. |
+| On | Discard the current model and its retained metrics and history. Rebuild a vanilla, untrained network from the dataset. Applied parameters carry over, including edits in the modal. On-disk snapshots are kept. |
+
+The label and both help texts say the **applied parameters carry over**, including edits made below, and that on-disk snapshots are kept. That replaced "functionally a clean stack launch". A clean launch would reset parameters to the engine defaults. The modal must not contain that phrase.
+
+That carry-over sentence is the service-mode contract: cascor keeps the parameters already applied when it rebuilds (recorded as juniper-cascor#685). A cascor that still resets a start-fresh to engine defaults drops those edits, and the modal text is then wrong.
+
+Demo mode has no `start_fresh` body field. `DemoBackend.start_training` calls `DemoMode.start(reset=bool(reset or start_fresh))`, and a reset clears the epoch and the metrics history. The restart route always passes `reset: true` (the modal sends it, and it is the body default), so a demo restart resets the run whichever way the toggle is set. Do not read the modal sentence as a guarantee about the demo engine.
+
+### Confirm order
+
+`_execute_restart_handler` does three steps, and it stops at the first failure:
+
+1. If a dataset field differs from the baseline captured when the modal opened, re-stage with `POST /api/stage_dataset`. A staging failure aborts. The pending banner stays open.
+2. If a parameter field differs, clamp and apply through `/api/set_params` **before** the restart. An apply failure aborts. A re-stage that already succeeded is left in place.
+3. `POST /api/train/restart` with `{"start_fresh": <toggle>, "reset": true}`.
+
+An untouched Confirm skips steps 1 and 2. It does not send `nn_model`. When a re-stage or a parameter apply does run, the body includes the tab's `nn_model` (omitted when no model is selected). Those routes answer 409 when that mirror is not the server's selection, and the restart does not start.
+
+The re-stage payload is the dataset type, the numeric fields the modal shows, and that type's registry seed (`dataset_default_params`). The modal does not render schema-driven generator params, so a custom list applied earlier from the sidebar is not carried. Re-staging `equities` sends the seed's symbols; it does not send a sidebar override. An empty dataset type is refused locally (`"No dataset selected — nothing to re-stage."`) and is not posted as `{}`.
+
+`/api/train/restart` (`main.py`) then:
+
+- If the recorded selection is not the backend that is running (`_selection_inactive_reason`), returns 409 **before** stopping the current run.
+- If a run is active: stop, then wait until it has stopped. The wait timeout is 504 with `retriable: true`. The staged dataset stays, and the outcome says to retry.
+- Idle, completed, and failed runs skip the stop and go straight to start.
+- Start calls `backend.start_training(reset=..., start_fresh=...)`.
+
+On the service path, `start_fresh=true` is a separate POST body, `{"start_fresh": true}`, to cascor `POST /v1/training/start`. The parameters are **not** in that body; they were applied in step 2. The legacy `reset` flag is not forwarded.
+The cascor-client public `start_training()` cannot carry `start_fresh`. That is still true of 0.8.0, the version canopy pins (`>=0.8.0,<0.9.0`). So the adapter posts through the client's own transport (`CascorServiceAdapter.start_training_background`). Collapse that reach-in only when the client's public method grows the field.
+
+Success closes the modal and the pending banner. The outcome reads "a fresh model" when the toggle was on, and "continued the current model" when it was off. When a bounded status peek finds the new run already completed or failed (`instant_complete`), the outcome adds the instant-convergence sentence ("converged immediately (epoch 0)"). That peek must not turn a successful restart into a failure. A failed restart leaves the banner open (`no_update`).
+
+### Tests
+
+`src/tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py` (unit).
+
+| What it pins | Why |
+| --- | --- |
+| Marker literal `[start_fresh_required]` | A rename on one side silently selects the generic alert |
+| Equities and mnist refusals name both controls, say the dataset is still staged, and quote cascor's shape sentence | The instruction has to match the refusal the operator can see |
+| A 300-character `detail` alone still opens this alert | The REST path may carry only `detail` |
+| `duration` is unset; a Start failure without the marker keeps `duration == 8000` | An instruction is not an 8-second toast |
+| The marker on a non-start command is not this alert | Recognition is command-scoped |
+| The shortfall prompt stays closed | A width refusal is not a partial-dataset refusal |
+| Banner button text and toggle label prefix | The alert names controls that exist |
+| "parameters and snapshots kept", "The applied parameters carry over", and the absence of "clean stack launch" | F2 wording |
+
+```bash
+cd src && pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
+```
+
+### Constraints
+
+- Do not add a fallback sentence for a cascor that lacks the marker. The banner it would name is already gone.
+- Leave `duration` unset. The alert is an instruction.
+- Keep the two control labels in lockstep with the alert. The tests fail if either label changes.
+- Do not match this refusal with the shortfall sentence. An outage must not open a prompt that re-sends the request, and a width refusal must not open that prompt either.
+- Do not put the learning rate in the `start_fresh` body. Apply parameters first; the start body is only the flag.
+- Do not describe Start fresh as a clean stack launch. That sentence is what F2 removed.
+- Do not assume a modal re-stage repeats a sidebar generator override. It sends the registry seed for the dataset type.
 
 ## Further Reading
 

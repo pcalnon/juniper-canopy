@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.3
+**Version:** 0.25.4
 **Status:** Active
-**Last Updated:** September 5, 2026
+**Last Updated:** October 8, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -16,12 +16,17 @@
 - [AGENTS Reference](#agents-reference)
 - [Hierarchy Depth Filter](#hierarchy-depth-filter)
 - [Plotly PNG Export / CSP](#plotly-png-export--csp)
+- [Sidebar model summary (X11)](#sidebar-model-summary-x11)
 - [API Reference](#api-reference)
 - [Configuration Reference](#configuration-reference)
 - [WebSocket Reference](#websocket-reference)
 - [Testing Reference](#testing-reference)
 - [Event-loop I/O discipline (X7)](#event-loop-io-discipline-x7)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
+- [Replay index contract](#replay-index-contract)
+- [Recurrence fit refusal and in-sample scores](#recurrence-fit-refusal-and-in-sample-scores)
+- [Recurrence key, restored model, and service version](#recurrence-key-restored-model-and-service-version)
+- [Start-fresh refusal (F1, F2)](#start-fresh-refusal-f1-f2)
 - [CI/CD Reference](#cicd-reference)
 - [CasCor Backend Reference](#cascor-backend-reference)
 - [Demo Mode Reference](#demo-mode-reference)
@@ -95,6 +100,21 @@ string is `SecurityConstants.DEFAULT_CSP_POLICY`, aliased as
 cd src
 pytest tests/regression/test_csp_plotly_image_export.py \
        tests/regression/test_csp_bootstrap_cdn.py -v
+```
+
+## Sidebar model summary (X11)
+
+The sidebar line `nn-model-summary` says **Active** only after a round-trip includes a `backend` that serves the selected model. First paint, and a failed `GET /api/selection`, read `Selected: CasCor (Cascade-Correlation) · backend status unknown`. **NOT ACTIVE** is the other sentence: it names the backend that is running and disables Start. Unknown does neither. Predicate: `model_registry.selection_is_live`. Landed in canopy#680.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Sidebar model summary](AGENTS_REFERENCE.md#sidebar-model-summary-x11) | The three answers of `selection_is_live`, the failed-mount write, and what must not be collapsed |
+| [USER_MANUAL.md § Model summary](USER_MANUAL.md#model-summary) | What the operator should do with each sentence |
+| [`test_selection_reachability_guardrails.py`](../src/tests/regression/test_selection_reachability_guardrails.py) | `TestX11UnknownLivenessIsNotActive` |
+
+```bash
+cd src
+pytest tests/regression/test_selection_reachability_guardrails.py -k X11 -v
 ```
 
 ## API Reference
@@ -222,6 +242,85 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 Distinct from the 1a / 1b off-loop runbook, which landed via the docs
 consolidation `#583` (`#568` was closed superseded).
 
+---
+
+## Replay index contract
+
+Snapshots Replay tab index space. Cascor's range `end` is exclusive and
+`snapshot_window.end_epoch` is a history length; the scrubber and range slider are
+inclusive. `render_session` writes those slider values, and they are Inputs of
+`queue_control`, so a paint would re-queue a control without the equality guard that
+canopy#697 added; the guard returns `dash.no_update`. The player's earlier fixes are #694
+(dict `range`) and #696 (control results and Stop).
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Replay index contract](AGENTS_REFERENCE.md#replay-index-contract) | Ends, echo guard, before and since #697, pitfalls |
+| [USER_MANUAL.md § Replay Tab](USER_MANUAL.md#replay-tab) | What the scrubber and time-range control do |
+
+```bash
+cd src && pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v
+```
+
+Distinct from the metrics-panel replay bar
+([CASCOR_BACKEND_MANUAL](cascor/CASCOR_BACKEND_MANUAL.md#metrics-panel-handler-contract-service-mode)).
+
+---
+
+## Recurrence fit refusal and in-sample scores
+
+Landed with canopy#702 (W0.5 / W0.7). A refused recurrence fit's `completion_reason` is the status code, method, and path, followed by a 4xx `detail` (300 characters; a validation `input` is omitted). A 5xx `detail` is never appended. The status bar cuts the reason at 120 characters, and a hover holds it up to 480 (the bound canopy#722 raised from 400). The one-shot card is titled `Recurrence (LMU) — in-sample (train split) regression metrics`, because `POST /v1/train` scores the training split.
+
+| Surface | Purpose |
+| --- | --- |
+| [AGENTS_REFERENCE.md § Recurrence fit refusal and in-sample scores](AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores) | Operator runbook: 4xx suffix, 5xx omission, status-bar tooltip, in-sample card |
+| `src/backend/recurrence_service_adapter.py` | `_parse` / `_service_detail` |
+| `src/backend/recurrence_backend.py` | `_run_fit` log and `completion_reason` |
+| `src/frontend/dashboard_manager.py` | 120-character label; 480-character hover when the label cuts |
+| `src/frontend/components/metrics_panel.py` | `_build_oneshot_result` |
+
+```bash
+curl -s http://127.0.0.1:8050/api/status | python -m json.tool
+```
+
+Distinct from the cascor status cache. Recurrence does not use it.
+
+---
+
+## Recurrence key, restored model, and service version
+
+Landed with canopy#722 (W1.6 / W1.7). A refused recurrence key names `JUNIPER_CANOPY_RECURRENCE_API_KEY` and `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`, a 429 carries `Retry-After`, `restored` counts as a model, and the model version is read from the service rather than seeded.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Recurrence key, restored model, and service version](AGENTS_REFERENCE.md#recurrence-key-restored-model-and-service-version) | 401 variable names, 429 `Retry-After`, `restored` as a model, version read from the service |
+| [API_REFERENCE.md § Recurrence Service Contract (Recurrence Mode)](api/API_REFERENCE.md#recurrence-service-contract-recurrence-mode) | The contract floor (`RECURRENCE_SERVICE_CONTRACT_FLOOR`, juniper-recurrence 0.5.0) and the status states |
+| [API_REFERENCE.md § Upstream Failures](api/API_REFERENCE.md#upstream-failures) | What a caller reads when an upstream HTTP call fails |
+
+```bash
+cd src
+pytest tests/unit/test_recurrence_service_adapter.py \
+       tests/unit/test_model_registry.py \
+       tests/unit/frontend/test_completion_reason_status_bar.py -q
+```
+
+---
+
+## Start-fresh refusal (F1, F2)
+
+A plain Start continues the current network. Cascor refuses a wider staged dataset with `[start_fresh_required]` before loading it (juniper-cascor#687). Since canopy#681 the alert names **Stop & Restart with new dataset** and **Start fresh**. Confirm re-stages edits, applies parameter edits, then `POST /api/train/restart`.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Start-fresh refusal](AGENTS_REFERENCE.md#start-fresh-refusal-f1-f2) | Marker, alert, modal wording, confirm order, demo vs service |
+| [USER_MANUAL.md § A wider dataset](USER_MANUAL.md#a-wider-dataset-needs-start-fresh) | What to click |
+
+```bash
+cd src && pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
+```
+
+---
+
 ## CI/CD Reference
 
 Pipeline configuration, hooks, and workflow reference.
@@ -315,9 +414,12 @@ The most commonly used environment variables for juniper-canopy configuration. F
 | `JUNIPER_CANOPY_LOG_FORMAT` | `text` | Set `json` for structured JSON logging |
 | `JUNIPER_CANOPY_SENTRY_DSN` | unset | Sentry error tracking DSN |
 | `JUNIPER_CANOPY_METRICS_ENABLED` | `false` | Enable Prometheus metrics (`juniper_canopy_*`) |
+| `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL` | unset | juniper-recurrence base URL. Shared fallback: `RECURRENCE_SERVICE_URL` |
+| `JUNIPER_CANOPY_RECURRENCE_API_KEY` | unset | Outbound `X-API-Key`. A 401 names this variable and the `_FILE` form (canopy#722) |
+| `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE` | unset | File whose contents are the recurrence key. Read before the direct variable |
 
 ---
 
-**Last Updated:** September 5, 2026
-**Version:** 0.25.3
+**Last Updated:** October 8, 2026
+**Version:** 0.25.4
 **Maintainer:** Paul Calnon

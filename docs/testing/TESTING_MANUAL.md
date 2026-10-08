@@ -119,10 +119,25 @@ pytest -k "demo_mode and advanced"
 # X7 slice 1c — classifier, status-bar class routing, breaker isolation, staleness
 # Landed with #578.
 pytest src/tests/regression/test_x7_status_cache.py -v
+
+# Replay index contract — exclusive range end, window length, render echoes.
+# Landed with canopy#697.
+pytest src/tests/unit/frontend/test_replay_range_end_and_echo.py -v
+
+# Recurrence 4xx detail, 5xx omission, and in-sample card (landed with #702)
+pytest src/tests/unit/test_recurrence_service_adapter.py \
+  src/tests/unit/backend/test_recurrence_backend.py \
+  src/tests/unit/frontend/test_completion_reason_status_bar.py \
+  src/tests/unit/test_recurrence_oneshot_result.py \
+  src/tests/unit/test_outbound_errors.py -q
 ```
 
 See [TESTING_REFERENCE.md — X7 Status Cache](TESTING_REFERENCE.md#x7-status-cache-slice-1c)
+and [TESTING_REFERENCE.md — Recurrence fit refusal](TESTING_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores)
 and [AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
+Replay index pins:
+[TESTING_REFERENCE.md — Replay index contract](TESTING_REFERENCE.md#replay-index-contract)
+and [AGENTS_REFERENCE.md — Replay index contract](../AGENTS_REFERENCE.md#replay-index-contract).
 
 ### Running with Coverage
 
@@ -171,6 +186,9 @@ pytest tests/unit/frontend/test_metrics_panel_handlers.py -k "validation_overlay
 
 # Metrics replay controls (clientside since F-CANOPY-054; the node-executed tests skip without `node`)
 pytest tests/unit/frontend/test_f054_replay_block_clientside.py tests/unit/frontend/test_f048_replay_cycle.py -v
+
+# Wider-dataset Start alert and Start-fresh modal wording (F1, F2; #681)
+pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
 
 # Documentation link checker regression tests
 pytest tests/unit/test_doc_link_checker.py -v

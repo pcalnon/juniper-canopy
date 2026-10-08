@@ -74,6 +74,35 @@ def _wait_until(predicate, timeout=2.0):
     return predicate()
 
 
+# The name ``RecurrenceBackend.start_training`` gives its fit thread (``src/backend/recurrence_backend.py``).
+_FIT_THREAD_NAME = "recurrence-fit"
+
+# One bound for every join after a test, not one per thread. It matches the fake adapter's gate timeout and
+# ``RecurrenceBackend.shutdown``'s join. Every gated test here releases its gate, so on a passing run each join returns
+# as soon as the thread's last log call does. A gate left closed can only follow a test that already failed before
+# its ``gate.set()``, and that thread is then held to this bound rather than left running into the next test.
+_FIT_THREAD_JOIN_SECONDS = 5.0
+
+
+@pytest.fixture(autouse=True)
+def _join_recurrence_fit_threads():
+    """After each test, join every live fit thread, so its log records cannot land in the NEXT test's ``caplog``.
+
+    A failing fit flips ``_state`` to ``failed`` under the lock and logs its WARNING after releasing it, outside the
+    lock (``RecurrenceBackend._run_fit``); a fit that succeeds logs its INFO line the same way. A test that waits only
+    for ``is_training_active()`` to clear can therefore end while its thread is still about to log. On a slow runner
+    the record then arrives during the next test's call phase, in that test's ``caplog``:
+    ``TestA422DetailReachesTheOperator`` read ``TestFailureHandling``'s 503 WARNING and failed with
+    ``ValueError: too many values to unpack`` or a wrong message, on canopy ``main``'s macOS leg at #702, #708 and #711.
+    Joining here keeps every record in the teardown of the test that started the fit.
+    """
+    yield
+    deadline = time.monotonic() + _FIT_THREAD_JOIN_SECONDS
+    for thread in threading.enumerate():
+        if thread.name == _FIT_THREAD_NAME:
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+
+
 @pytest.mark.unit
 class TestIdentityAndConformance:
     def test_backend_type(self):

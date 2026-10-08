@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-08-24
-**Version:** 0.28.0
+**Last Updated:** 2026-10-08
+**Version:** 0.28.1
 **Status:** Current
 
 ## Table of Contents
@@ -180,14 +180,15 @@ lint:
 | `.github/workflows/ci.yml`                  | `push`, `pull_request`, `repository_dispatch`, `workflow_dispatch`   | Full quality pipeline and merge gate                 |
 | `.github/workflows/codeql.yml`              | push `main`/`develop`, PR to `main`, weekly Mon 06:00 UTC            | CodeQL SAST; required check `Analyze (python)`       |
 | `.github/workflows/security-scan.yml`       | weekly cron + manual                                                 | Scheduled Bandit + pip-audit                         |
-| `.github/workflows/lockfile-update.yml`     | Dependabot push branches                                             | Auto-refresh `requirements.lock`                     |
+| `.github/workflows/lockfile-update.yml`     | `push` to `dependabot/pip/**`; `pull_request` paths `pyproject.toml` (skips forks and `release/**`) | `--upgrade` compile of `pyproject.toml` into `requirements.lock` |
 | `.github/workflows/publish.yml`             | release published                                                    | Build + TestPyPI + PyPI publish                      |
+| `.github/workflows/publish-image.yml`       | release `v*`, path-filtered PR, manual dispatch                     | GHCR multi-arch image; serve-and-version gate        |
 | `.github/workflows/sequence-safety.yml`     | `pull_request` to `main`/`develop`                                   | Compositional-loss screens (standalone job)          |
 | `.github/workflows/main-verify.yml`         | push to `main`                                                       | Post-merge sequence-safety net                       |
 | `.github/workflows/pr-base-branch-guard.yml` | `pull_request` + `merge_group`                                       | Fail if PR base is not the default branch            |
 | `.github/workflows/scheduled-tests.yml`     | daily cron + manual                                                  | Slow / integration tests                             |
 | `.github/workflows/agents-md-touch-up.yml`  | PR paths `AGENTS.md`                                                 | Verify `Last Updated` date (does not rewrite)        |
-| `.github/workflows/claude.yml`              | issue/PR comments containing `@claude`                               | Optional Claude Code assistant                       |
+| `.github/workflows/claude.yml`              | comment, submitted review, or new/assigned issue with `@claude`      | Optional assistant; not a merge gate. See [Claude Code workflow](#claude-code-workflow) |
 
 ## Main CI Workflow (`ci.yml`)
 
@@ -455,14 +456,26 @@ This catches broken internal file and heading links without requiring sibling re
 
 ### `lockfile-update.yml`
 
-- Trigger: push to `dependabot/pip/**`
-- Uses `CROSS_REPO_DISPATCH_TOKEN` for checkout/push
-- Compiles lockfile with:
-  - `--extra juniper-data`
-  - `--extra juniper-cascor`
-  - `--extra observability`
-  - `--upgrade`
-- Commits only when diff exists
+Operator runbook: [Dependabot lockfile automation](CICD_MANUAL.md#runbook-dependabot-lockfile-automation).
+
+- Triggers:
+  - `push` to `dependabot/pip/**`
+  - `pull_request` whose paths include `pyproject.toml`, when the head is in this repo and the head ref does not start with `release/`
+- Token gate on `CROSS_REPO_DISPATCH_TOKEN`. Dependabot runs read the Dependabot secret store. An empty token on `dependabot[bot]` is a green skip. An empty token on any other actor fails the job.
+- On proceed, checkout uses that token and `uv==0.11.8` on Python 3.14, then:
+
+```bash
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  --upgrade \
+  -o requirements.lock
+```
+
+- The compiler input is `pyproject.toml`. Dependabot's pip floor edits land in `conf/requirements_ci.txt` (repo-root `requirements.txt` resolves to that file through the `conf/requirements.txt` symlink). A package absent from `pyproject.toml` stays out of `requirements.lock`. `--upgrade` can still move other pins in the same commit.
+- Commit, only when `requirements.lock` changed, via `createCommitOnBranch` (`expectedHeadOid` is the checked-out HEAD). Push subjects: `[dependabot skip] Update requirements.lock` on `push`, `chore(deps): auto-regenerate requirements.lock after pyproject change` on `pull_request`.
+- Lockfile Freshness (`ci.yml` job `lockfile-check`) is a separate `--constraint` compile. A skipped regen stays green while the current pins still satisfy `pyproject.toml`.
 
 ### `publish.yml`
 
@@ -473,16 +486,99 @@ This catches broken internal file and heading links without requiring sibling re
   2. Publish to TestPyPI + install verification
   3. Publish to PyPI
 
+### Container image (`publish-image.yml`)
+
+Publishes `ghcr.io/pcalnon/juniper-canopy` as one manifest for `linux/amd64` and `linux/arm64`. Each arch builds on a native runner. This workflow is separate from `ci.yml`. A pull request runs it only when one of its `paths` changes: `Dockerfile`, `requirements.lock`, `pyproject.toml`, `src/**`, `juniper_canopy/**`, `conf/app_config.yaml`, `conf/logging_config.yaml`, `conf/layouts/**`, `util/check_image_cpu_only.py`, `util/check_image_no_secrets.py`, `util/check_image_serves.py`, or the workflow file itself.
+
+| Event | What runs |
+| --- | --- |
+| Pull request (path filter matches) | Build only. Image tag on the runner is `canopy-smoke:<arch>`. Nothing is pushed. |
+| `workflow_dispatch` with `push: false` (the default) | Same build-only path. |
+| `release` published, tag starts with `v` | Push each arch by digest, then the serve-and-version check, then the `merge` job writes tags. |
+| `workflow_dispatch` with `push: true` | Same publish path. The merge tag is `dispatch-<sha>`. |
+
+A release whose tag does not start with `v` skips the build job. `strategy.fail-fast` is `false`, so one arch's failure still leaves the other arch's result visible. The `merge` job is the only job that writes a tag (`X.Y.Z`, `X.Y`, and `latest` on a release). It runs only after `build` succeeds.
+
+#### Serve and version gate
+
+`util/check_image_serves.py` starts the image with its own `CMD` (`python src/main.py`) and checks the process from inside the container. The image binds `127.0.0.1:8050` (`JUNIPER_CANOPY_SERVER__HOST` in the Dockerfile), so the probe is `docker exec` to that address. A host port mapping does not reach the process.
+
+On the build-only arm the call is:
+
+```bash
+python3 util/check_image_serves.py \
+  --image 'canopy-smoke:amd64' \
+  --dist juniper-canopy \
+  --module juniper_canopy \
+  --port 8050 \
+  --expect-version "<pyproject.toml project.version>"
+```
+
+`--expect-version` on that arm is the `app_version` output of the provenance step, which reads `project.version` from `pyproject.toml`. On a publish the `--image` is `ghcr.io/pcalnon/juniper-canopy@<digest>` of the arch just pushed. On a release, `--expect-version` is the tag with one leading `v` removed. If that string differs from `project.version`, the step exits 1 before the script runs, with the message that the image would be tagged one version and report another.
+
+These three values must all equal `--expect-version`:
+
+1. Installed metadata for the `juniper-canopy` distribution.
+2. `juniper_canopy.__version__`. A missing `__version__` is a failure.
+3. `GET /v1/health` returns 200 and its `version` field matches the metadata.
+
+The script default `--health-path` is `/v1/health`, which is the path this workflow uses. That body includes `version` (`main.py` `health_check`). The workflow leaves `--health-version` at `required` and passes no `--enveloped-path`.
+
+The image sets `JUNIPER_CANOPY_DEMO_MODE=false` and `CASCOR_SERVICE_URL=http://juniper-cascor:8200`. Startup probes that URL. When CasCor does not answer, `main.py` shuts the service backend down and continues in demo mode, so `/v1/health` can still return 200 in a container that has no CasCor beside it. The gate checks status and `version`. It does not read `demo_mode`.
+
+Readiness stays off this gate. `/v1/health/ready` probes JuniperData and CasCor, which a standalone container does not have. `/v1/health/live` returns `{"status": "alive"}` and has no `version` field, so it is the wrong path for a version check.
+
+Exit codes from the script: `0` every check passed, `1` a check failed or the container exited before liveness, `2` usage or environment (no `docker`, the image cannot run Python, or `--expect-version` is not semver). The default wait is 120 seconds, polling every 3 seconds. The container is removed when the script finishes.
+
+Export of the digest runs only after this step succeeds. A failing arch therefore never reaches `merge`, and no tag is written for that publish.
+
+The same build and publish arms also run `util/check_image_cpu_only.py` (the image's `ARG TORCH_VERSION` plus `+cpu`, and no CUDA stack) and `util/check_image_no_secrets.py`. Those are separate scripts.
+
+### Claude Code workflow
+
+Live file: `.github/workflows/claude.yml`. The header says this copy is the fleet template, that `juniper-ml/.github/workflows/claude.yml` is the source of truth, and that the action invocation stays generic. The workflow name is `Claude Code`. It is not a required status check.
+
+The job `claude` runs only when its `if` sees the substring `@claude`. GitHub's `contains()` ignores case, so `@Claude` matches as well:
+
+| Event | Types | Text that must contain `@claude` |
+| --- | --- | --- |
+| `issue_comment` | `created` | `github.event.comment.body` |
+| `pull_request_review_comment` | `created` | `github.event.comment.body` |
+| `pull_request_review` | `submitted` | `github.event.review.body` |
+| `issues` | `opened`, `assigned` | `github.event.issue.body` or `github.event.issue.title` |
+
+Opening or editing a pull request does not subscribe. `@claude` in a pull-request title or body never schedules the job. Editing an issue or a submitted review does not either.
+
+Job permissions: `contents: write`, `pull-requests: write`, `issues: write`, `id-token: write`, `actions: read`.
+
+Steps:
+
+- Checkout is SHA-pinned with `fetch-depth: 1`. That pin is a separate `uses:` line.
+- `anthropics/claude-code-action` is SHA-pinned. The version record is the `# vX.Y.Z` comment on that line. Do not copy the SHA into this reference. The only `with:` input is `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}`.
+
+The `github-actions` updates in `.github/dependabot.yml` group only `github/codeql-action*`. A Claude action bump is one line in `claude.yml`. It does not move the checkout pin, `codeql.yml`, or `ci.yml`. Review the bump by confirming `with:` is still only `anthropic_api_key`.
+
+The job `if` is not the last gate. The pinned action then applies its own checks before it calls the model:
+
+- No `prompt` input is set, so the action selects tag mode only when its own trigger check matches; otherwise it falls back to agent mode, which does nothing without a prompt.
+  `trigger_phrase` is unset and defaults to `@claude`. That check is case-insensitive and requires the phrase as its own token: start of text or whitespace, then `@claude`, then whitespace, one of `.,!?;:`, or the end of the text.
+  `@Claude` therefore schedules the job and passes the check. A substring such as `foo@claude` or `@claudefoo` can schedule the job and then miss this token check.
+- When the token check fails, the step logs `No trigger found, skipping remaining steps` and returns without failing. Assigning an issue is this case. The workflow `if` matches `@claude` already present in the title or body, but `assignee_trigger` is unset, so the action does not treat the assignee as a trigger and it does not re-read the title or body on `assigned`.
+- A matching human with write access continues. `allowed_bots` is unset; the default empty string allows no bots. A bot whose text matches the token fails the step (non-human actor) instead of running. `allowed_non_write_users` is unset, so an actor without write access fails the step (`Actor does not have write permissions to the repository`) before the trigger check.
+- Bedrock, Vertex, Foundry, and the workload-identity inputs are unset. `id-token: write` is still granted. The workflow header says `ANTHROPIC_API_KEY` is an org secret and that this repo must be able to read it. No other auth input is passed. The action installs its own Claude Code CLI; that version is inside the action pin, not a canopy setting.
+
 ## Tooling and Configuration Sources
 
 | Concern                     | Source of Truth                                |
 |-----------------------------|------------------------------------------------|
 | Pytest markers and defaults | `pyproject.toml` (`[tool.pytest.ini_options]`) |
 | Coverage thresholds         | `pyproject.toml` and `ci.yml` job args         |
-| CI dependencies             | `conf/requirements_ci.txt`                     |
+| CI dependencies             | `pyproject.toml` extras, per `ci.yml` job (not `conf/requirements_ci.txt`, which is `juniper-generate-dep-docs` output) |
+| Image serve-and-version     | `util/check_image_serves.py`, `publish-image.yml` |
 | Security scan excludes      | `.bandit.yml` + workflow commands              |
 | CodeQL action pins          | SHA comments on `codeql.yml` + `ci.yml` `upload-sarif` |
-| Dependabot action groups    | `.github/dependabot.yml` (`codeql-action`)     |
+| Claude action pin           | `# vX.Y.Z` comment on the `claude.yml` `uses:` line (ungrouped) |
+| Dependabot action groups    | `.github/dependabot.yml` (`codeql-action` only) |
 | Doc-link validation rules   | `scripts/check_doc_links.py`                   |
 
 ## Documentation Link Validation
@@ -715,7 +811,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-08-24
-**Version:** 0.28.0
+**Last Updated:** 2026-10-08
+**Version:** 0.28.1
 **Maintained By:** Development Team
 **Status:** ✅ Current

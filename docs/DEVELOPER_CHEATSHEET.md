@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.4
-**Date**: 2026-09-05
+**Version**: 1.0.5
+**Date**: 2026-10-08
 **Project**: juniper-canopy
 
 ---
@@ -29,6 +29,7 @@
 | Run all tests               | `cd src && pytest tests/ -v`                                                                         |
 | Run unit tests only         | `cd src && pytest -m "unit and not slow" -v`                                                         |
 | X7 status cache (1c)        | `cd src && pytest tests/regression/test_x7_status_cache.py -v`                                       |
+| Replay index space          | `cd src && pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v`                           |
 | Run integration tests       | `cd src && pytest tests/integration/ -v`                                                             |
 | Run with coverage           | `cd src && pytest tests/ --cov=. --cov-report=html --cov-report=term-missing`                        |
 | Coverage threshold check    | `cd src && pytest tests/ --cov=. --cov-fail-under=80`                                                |
@@ -185,6 +186,61 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 > See: [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)
 
+### 7. Keep the replay index contract
+
+Cascor's replay range `end` is exclusive and `snapshot_window.end_epoch` is a length. The Replay tab sliders are inclusive: show `end - 1`, send `hi + 1`, and stop the scrubber at `end_epoch - 1`. `queue_control` must return `no_update` when the scrubber, speed, or range already matches the session, because `render_session` writes those Inputs. Landed with canopy#697.
+
+```bash
+cd src && pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v
+```
+
+> See: [AGENTS_REFERENCE.md § Replay index contract](AGENTS_REFERENCE.md#replay-index-contract)
+
+### 8. Read a Failed Recurrence Fit
+
+`/api/status` `completion_reason` on a failed fit is the status code, method, and path, followed by a 4xx `detail` (300 characters; validation `input` omitted). A 5xx `detail` is never appended. Hover the status bar when the 120-character label ends in `…`; the tooltip holds up to 480 characters. The regression card's numbers are the training split, and its title says in-sample. Landed with canopy#702.
+
+```bash
+curl -s http://127.0.0.1:8050/api/status | python -m json.tool
+```
+
+> See: [AGENTS_REFERENCE.md § Recurrence fit refusal](AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores)
+
+### 9. Read a recurrence 401, 429, restore, or version (W1.6, W1.7)
+
+A refused key names `JUNIPER_CANOPY_RECURRENCE_API_KEY` or `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`. The shared `JUNIPER_RECURRENCE_API_KEY` pair still applies when the prefixed pair is unset. A 429 copies `Retry-After` into the message (`retry after 30 s` for a numeric wait).
+
+`restored` on `GET /v1/training/status` counts as a model (`model_present`), with `restored_from` naming the snapshot. The model version comes from the service (`GET /v1/health`, else `GET /openapi.json`), and the seed version is blank. No UI renders that version yet. Landed with canopy#722.
+
+```bash
+cd src
+pytest tests/unit/test_recurrence_service_adapter.py \
+       tests/unit/test_model_registry.py -q
+```
+
+> See: [AGENTS_REFERENCE.md § Recurrence key, restored model, and service version](AGENTS_REFERENCE.md#recurrence-key-restored-model-and-service-version)
+
+### 10. Answer a wider-dataset Start (F1, F2)
+
+A plain Start continues the current network. Cascor opens a wider-dataset refusal with `[start_fresh_required]` and does not load the dataset. The alert names **Stop & Restart with new dataset** and **Start fresh** (default off), and it has no `duration`. **Start fresh** keeps applied parameters and snapshots; it discards the model and retained metrics/history.
+Confirm re-stages if a dataset field changed, applies parameter edits if any, then posts `/api/train/restart` with `{"start_fresh": <toggle>, "reset": true}`. There is no fallback sentence for a cascor that lacks the marker.
+
+```bash
+cd src && pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
+```
+
+> See: [AGENTS_REFERENCE.md § Start-fresh refusal](AGENTS_REFERENCE.md#start-fresh-refusal-f1-f2)
+
+### 11. Read the sidebar model summary (X11)
+
+`nn-model-summary` says **Active** only after a round-trip includes a `backend` that serves the model. First paint, and a failed `GET /api/selection`, read `Selected: CasCor (Cascade-Correlation) · backend status unknown`. **NOT ACTIVE** names the running backend and disables Start. Unknown does neither. A missing dataset can still disable Start.
+
+```bash
+cd src && pytest tests/regression/test_selection_reachability_guardrails.py -k X11 -v
+```
+
+> See: [AGENTS_REFERENCE.md § Sidebar model summary](AGENTS_REFERENCE.md#sidebar-model-summary-x11)
+
 ---
 
 ## Environment Variables
@@ -212,6 +268,9 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 | `JUNIPER_CANOPY_LOG_FORMAT`                 | text                | Set `json` for structured JSON logging                                                                            |
 | `JUNIPER_CANOPY_SENTRY_DSN`                 | unset               | Sentry error tracking DSN                                                                                         |
 | `JUNIPER_CANOPY_METRICS_ENABLED`            | `false`             | Enable Prometheus metrics (`juniper_canopy_*`)                                                                    |
+| `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL`     | unset               | juniper-recurrence base URL. Shared fallback: `RECURRENCE_SERVICE_URL`                                            |
+| `JUNIPER_CANOPY_RECURRENCE_API_KEY`         | unset               | Outbound recurrence `X-API-Key`. A 401 names this variable (canopy#722)                                           |
+| `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`    | unset               | File form of the recurrence key. Read before the direct variable                                                  |
 
 > See: [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) | [REFERENCE.md -- Configuration Reference](REFERENCE.md#configuration-reference)
 
@@ -295,6 +354,14 @@ Coverage includes:
 | Modebar camera clicks; no PNG, CSP `img-src` in console | `blob:` missing from `img-src` | Keep `img-src 'self' data: blob:`; do not move `blob:` onto `script-src`. See [AGENTS_REFERENCE § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) |
 | Status bar says "Stopped" while cascor is down   | Half-dead 200 has no `error`; UI read the payload (X7 1c) | Confirm `status_class` on `/api/status`; run `test_x7_status_cache.py` (landed with `#578`) |
 | Status bar says "Unreachable" during a skipped poll | Class rendered as UNREACHABLE instead of INDETERMINATE | `"circuit open"` must classify `indeterminate` → "Unknown"; do not share `_cb` with the refresher |
+| Replay range skips its last frame, or the scrubber offers one index past the history | Dict `end` and `snapshot_window.end_epoch` were read as inclusive indexes | `end` is exclusive; `end_epoch` is a length. See [Replay index contract](AGENTS_REFERENCE.md#replay-index-contract) |
+| Replay scrubber, speed, or range re-sends itself after a paint | Those values are Inputs of `queue_control` | Return `no_update` when the value already matches the session (canopy#697) |
+| Recurrence fit fails and the bar shows only the status code, method, and path | A 5xx (its `detail` is never appended), a 4xx body with no usable `detail`, or a canopy older than canopy#702 | Read the recurrence service's log for a 5xx. On a 4xx, read `completion_reason` and hover if the label ends in `…`. See [Recurrence fit refusal](AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores) |
+| A recurrence fit's reason says `check recurrence_api_key` | canopy 0.8.1 or earlier (it predates canopy#722), and the key is missing or wrong | Set `JUNIPER_CANOPY_RECURRENCE_API_KEY` or `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`, then restart canopy. From canopy#722 on, the message names both. See [Recurrence key, restored model, and service version](AGENTS_REFERENCE.md#recurrence-key-restored-model-and-service-version) |
+| Recurrence fit says `retry after 30 s` | The service returned 429 with `Retry-After` | Wait out that window. Another client is usually sharing the key or address. A 429 with no header has no wait clause. |
+| Recurrence `ModelSpec.version` is `0.1.0` or blank | `0.1.0` is the seed in canopy 0.8.1 and earlier; canopy#722 blanked it | The version is `service_version()` (`/v1/health`, else `/openapi.json`). A failed lookup reads `unknown (version lookup failed)`. Nothing in the UI renders it yet. |
+| Start refuses: dataset wider than the network; previous results still on screen | Plain Start cannot widen. Cascor refused before loading (`[start_fresh_required]`, juniper-cascor#687; the alert since canopy#681) | **Stop & Restart with new dataset**, then **Start fresh**. No fallback sentence if the marker is absent. See [Start-fresh refusal](AGENTS_REFERENCE.md#start-fresh-refusal-f1-f2) |
+| Sidebar stays on "backend status unknown"       | Mount `GET /api/selection` failed, or nothing has round-tripped (X11) | A healthy body includes `backend` and the line becomes Active or NOT ACTIVE. Unknown does not disable Start. See [Sidebar model summary](AGENTS_REFERENCE.md#sidebar-model-summary-x11) |
 
 ---
 
@@ -323,6 +390,6 @@ Coverage includes:
 
 ---
 
-**Last Updated:** 2026-09-05
-**Version:** 1.0.4
+**Last Updated:** 2026-10-08
+**Version:** 1.0.5
 **Maintainer:** Paul Calnon

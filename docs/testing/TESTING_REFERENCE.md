@@ -16,6 +16,9 @@ Technical reference for the active pytest configuration, markers, fixtures, and 
 5. [Command Reference](#command-reference)
 6. [X7 Status Cache (slice 1c)](#x7-status-cache-slice-1c)
 6. [X7 Event-Loop Discipline](#x7-event-loop-discipline)
+6. [Replay index contract](#replay-index-contract)
+6. [Recurrence fit refusal and in-sample scores](#recurrence-fit-refusal-and-in-sample-scores)
+6. [Start-fresh refusal (F1, F2)](#start-fresh-refusal-f1-f2)
 7. [Coverage Reference](#coverage-reference)
 8. [CI Mapping](#ci-mapping)
 9. [Troubleshooting Reference](#troubleshooting-reference)
@@ -297,6 +300,82 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 Do not mark these `slow`. The coverage gate runs `-m "not slow"`. Operator runbook:
 [AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
+
+---
+
+## Replay index contract
+
+Landed with canopy#697. Pins the Snapshots Replay tab's index space and the render-echo
+guard. The file is `src/tests/unit/frontend/test_replay_range_end_and_echo.py` (13
+tests). Nine fail on #697's parent `3cc4fdb`. Four pass there on purpose: the round trip
+(both directions of the off-by-one agree with each other), the zero-length window, and a
+real scrubber or speed change still queueing.
+
+```bash
+cd src && pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v
+```
+
+| Class | What it pins |
+| --- | --- |
+| `TestRangeEndIsExclusive` | Inclusive `[3, 8]` is sent as `{start: 3, end: 9}` and rendered back as `[3, 8]`; the last frame sends `end == length` |
+| `TestWindowEndIsALength` | 12 frames (`end_epoch` 12) stop both sliders at index 11; `end_epoch` 0 stays `(0, 0)` |
+| `TestRenderEchoesQueueNothing` | A rendered scrubber, speed, or range returns `dash.no_update`, including the echo after one seek |
+| `TestUserChangesStillQueue` | A different scrubber value seeks; a different speed is sent |
+
+Related fixtures retargeted in the same PR: `test_f059_replay_range_dict.py`,
+`test_f056_replay_control_envelope.py`, `test_replay_player_panel.py`,
+`test_replay_player_panel_gate_coverage.py`, `test_p2_wave_batch_a.py`. The graph
+exemption `can015-replay-player-control-loop` in `test_f048_replay_cycle.py` stays;
+it names the callback cycle, and the equality guard is what stops the POST.
+
+Operator runbook:
+[AGENTS_REFERENCE.md — Replay index contract](../AGENTS_REFERENCE.md#replay-index-contract).
+
+---
+
+## Recurrence fit refusal and in-sample scores
+
+Landed with canopy#702. These files pin the `detail` suffix, the 5xx omission, the status-bar tooltip, and the in-sample card title.
+
+| File | What it pins |
+| --- | --- |
+| `src/tests/unit/test_recurrence_service_adapter.py` | `TestServiceDetailInTheMessage`; extra `metrics_scope` is ignored |
+| `src/tests/unit/backend/test_recurrence_backend.py` | `TestA422DetailReachesTheOperator` |
+| `src/tests/unit/frontend/test_completion_reason_status_bar.py` | `TestFailedRecurrenceFitReason`, `TestA422ReachesTheStatusBar` |
+| `src/tests/unit/test_recurrence_oneshot_result.py` | `TestTheCardSaysInSample` |
+| `src/tests/unit/test_outbound_errors.py` | a 4xx detail passes through; a 5xx detail that relays a refused header value does not |
+
+```bash
+cd src && pytest tests/unit/test_recurrence_service_adapter.py \
+  tests/unit/backend/test_recurrence_backend.py \
+  tests/unit/frontend/test_completion_reason_status_bar.py \
+  tests/unit/test_recurrence_oneshot_result.py \
+  tests/unit/test_outbound_errors.py -q
+```
+
+Operator runbook:
+[AGENTS_REFERENCE.md § Recurrence fit refusal and in-sample scores](../AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores).
+
+---
+
+## Start-fresh refusal (F1, F2)
+
+Pins the wider-dataset Start alert and the restart-modal wording (`#681`). The file is
+`src/tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py`.
+
+```bash
+cd src && pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
+```
+
+| What it pins | Why it fails if dropped |
+| --- | --- |
+| Marker literal `[start_fresh_required]` | The alert falls through to the generic 8-second toast |
+| Both named controls, staged-dataset sentence, shape sentence | The instruction points at a control that was renamed, or hides cascor's widths |
+| `duration` unset on this alert only | The instruction auto-dismisses |
+| Non-start command and the shortfall prompt | A width refusal opens the wrong surface |
+| "parameters carry over"; no "clean stack launch" | The modal describes a reset the service no longer does |
+
+Operator runbook: [AGENTS_REFERENCE.md § Start-fresh refusal](../AGENTS_REFERENCE.md#start-fresh-refusal-f1-f2).
 
 ---
 

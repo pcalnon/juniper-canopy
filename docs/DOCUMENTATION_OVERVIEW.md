@@ -2,8 +2,8 @@
 
 ## Complete Navigation Guide to Juniper Canopy Documentation
 
-**Version:** 0.25.6  
-**Last Updated:** September 5, 2026  
+**Version:** 1.0.1  
+**Last Updated:** October 8, 2026  
 **Project:** Juniper Canopy - Real-Time CasCor Monitoring Frontend
 
 ---
@@ -62,10 +62,15 @@
 | **Quick-reference dev tasks** | [DEVELOPER_CHEATSHEET.md](DEVELOPER_CHEATSHEET.md)              | docs/         |
 | **Debug a silent PNG export** | [AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) | docs/ |
 | **Read the cascor status cache (X7 1c)** | [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c) | docs/ |
+| **Read the replay index contract** | [AGENTS_REFERENCE.md § Replay index contract](AGENTS_REFERENCE.md#replay-index-contract) | docs/ |
+| **Read a refused recurrence fit** | [AGENTS_REFERENCE.md § Recurrence fit refusal](AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores) | docs/ |
+| **Read a recurrence 401, 429, restore, or version** | [AGENTS_REFERENCE.md § Recurrence key, restored model, and service version](AGENTS_REFERENCE.md#recurrence-key-restored-model-and-service-version) | docs/ |
+| **Start refused on a wider dataset** | [AGENTS_REFERENCE.md § Start-fresh refusal](AGENTS_REFERENCE.md#start-fresh-refusal-f1-f2) | docs/ |
 | **Contribute code**          | [AGENTS.md](../AGENTS.md)                                                 | Root           |
 | **Keep the event loop answerable (X7)** | [AGENTS_REFERENCE.md § Event-loop I/O discipline](AGENTS_REFERENCE.md#event-loop-io-discipline-x7) | docs/ |
 | **Read the topology depth filter** | [AGENTS_REFERENCE.md § Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020) | docs/ |
 | **Understand topology node selection** | [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046) | docs/ |
+| **Read the sidebar model summary (X11)** | [AGENTS_REFERENCE.md § Sidebar model summary](AGENTS_REFERENCE.md#sidebar-model-summary-x11) | docs/ |
 
 ---
 
@@ -502,8 +507,8 @@ Contains archived documentation - see [Historical Documentation](#historical-doc
 ```markdown
 # Document Title
 
-**Version:** 0.4.0  
-**Last Updated:** November 7, 2025  
+**Version:** 1.0.1  
+**Last Updated:** October 8, 2026  
 **Author:** Paul Calnon
 
 ## Table of Contents
@@ -957,8 +962,8 @@ All documentation should include metadata:
 
 #### Document Title Status, Version, and Last-Updated Stamps
 
-**Last Updated:** 2025-11-05  
-**Version:** 1.0.0  
+**Last Updated:** 2026-10-08  
+**Version:** 1.0.1  
 **Status:** Current | Archived | Draft
 
 **Update rules:**
@@ -1665,8 +1670,8 @@ In replacement documentation, add note at top:
 ```markdown
 # Testing Quick Start
 
-**Last Updated:** 2025-11-04
-**Version:** 1.0.0
+**Last Updated:** 2026-10-08
+**Version:** 1.0.1
 
 > **Note:** This document is part of the split testing documentation, replacing the consolidated guide
 > [Testing Guide](../docs/history/TESTING_GUIDE_CONSOLIDATED_2025-11-04.md) archived on 2025-11-04.
@@ -1728,8 +1733,8 @@ Relocated verbatim from `AGENTS.md` (P3 of the shared-session-memory plan) so it
 
 ---
 
-**Last Updated:** September 5, 2026  
-**Version:** 0.25.6  
+**Last Updated:** October 8, 2026  
+**Version:** 1.0.1  
 **Maintainer:** Paul Calnon
 
 ---

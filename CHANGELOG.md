@@ -11,6 +11,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Regression suites harvested from the Cursor flood-3 test PRs** (canopy#699, #701, #704, #707, #715,
+  #718, #719, #720, #724, #727, #728): 15 new test files over the replay echo, shape and control-result
+  guards; the recurrence 4xx-detail and status-bar cut bounds; version lookup, `Retry-After` and the
+  restored model; the LMU dataset-spelling refusal and dataset-schema falsy seeds; the stage-payload and
+  restage falsy edges; the image credential scan and serve-check driver; and the open-PR budget alarm,
+  sequence-safety label hatch and post-merge verdict shells. Each was re-run on `main` and
+  mutation-checked against the code it pins, and corrected where the head was wrong: #715 replaced
+  `time.monotonic` / `time.sleep` globally without restoring them, which failed five unrelated tests on
+  every CI leg; #704 pinned the 401/403 text that #722 replaced. Test-only.
+- **Operator runbook for the Snapshots Replay tab index contract (docs for canopy#697).**
+  Cascor's range `end` is exclusive and `snapshot_window.end_epoch` is a history length; the
+  scrubber and range slider are inclusive. `render_session` writes those slider values, and
+  they are Inputs of `queue_control`, so without its equality guard every paint would queue a
+  control; since #697 the guard returns `dash.no_update`. Canonical page:
+  [AGENTS_REFERENCE.md § Replay index contract](docs/AGENTS_REFERENCE.md#replay-index-contract).
+  Pins: `src/tests/unit/frontend/test_replay_range_end_and_echo.py` (13 tests, landed with
+  #697). `notes/development/REPLAY_V2_FAQ.md` no longer says the player shows no session
+  against cascor (F-CANOPY-059 was fixed in canopy#694), and its `curl` check now reads
+  `.data.session.weights_available` and `.data.session.weight_sampling`.
+- **Operator runbooks for a refused recurrence fit, the in-sample regression card, and the
+  recurrence key, rate limit, restored model and service version** (documenting canopy#702 and
+  canopy#722). `docs/AGENTS_REFERENCE.md` § Recurrence fit refusal and in-sample scores covers the
+  4xx `detail` suffix (300 characters; a validation `input` is omitted), the 5xx omission, the
+  status-bar hover (480 characters), and the in-sample card. § Recurrence key, restored model, and
+  service version covers the 401/403 remedy that names `JUNIPER_CANOPY_RECURRENCE_API_KEY` and
+  `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`, the 429 `Retry-After` wait, `restored` counting as a
+  model, and the service-reported model version. Pointers in `docs/REFERENCE.md`,
+  `docs/DEVELOPER_CHEATSHEET.md` (procedures, the three recurrence variables, troubleshooting
+  rows), `docs/QUICK_START.md` (Issues 11 and 12), `docs/USER_MANUAL.md`,
+  `docs/DOCUMENTATION_OVERVIEW.md`, and the testing guides. Documentation only.
+- **Operator runbook for a Start refused because the staged dataset is wider than the network
+  (F1, F2).** The behaviour shipped in canopy#681. This documents the `[start_fresh_required]`
+  alert, why a cascor that lacks the marker gets no second wording, what **Start fresh** keeps
+  (applied parameters, snapshots) and discards (the model, retained metrics and history), and the
+  confirm order (re-stage, apply parameters, then `POST /api/train/restart`). Canonical section:
+  `docs/AGENTS_REFERENCE.md` § Start-fresh refusal (F1, F2); operator steps in `docs/USER_MANUAL.md`
+  and `docs/QUICK_START.md`; test commands in `docs/testing/`.
+- **Operator runbook for the sidebar model summary (X11; documents canopy#680).** `nn-model-summary`
+  says **Active** only after a round-trip names a `backend` that serves the selection; first paint and
+  a failed `GET /api/selection` read `backend status unknown`. Canonical section:
+  `docs/AGENTS_REFERENCE.md` § Sidebar model summary (X11); pointers in `docs/REFERENCE.md`,
+  `docs/DEVELOPER_CHEATSHEET.md`, `docs/QUICK_START.md` (Issue 14) and `docs/USER_MANUAL.md`.
+- **CI/CD documentation for the image serve-and-version gate, the Claude Code workflow, and Dependabot
+  floors versus the lockfile regen.** `docs/ci_cd/CICD_REFERENCE.md` gains § Container image
+  (`publish-image.yml`, `util/check_image_serves.py`) and § Claude Code workflow (`claude.yml`);
+  `docs/ci_cd/CICD_MANUAL.md` gains the matching runbooks and rewrites § Runbook: Dependabot lockfile automation:
+  Dependabot's floor edit lands in `conf/requirements_ci.txt`, while `lockfile-update.yml` compiles
+  `pyproject.toml` with `--upgrade`. `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`'s install pattern now
+  matches `ci.yml`, which installs `pyproject.toml` extras and not `conf/requirements_ci.txt`
+  (since canopy#650).
 - **The publish path asserts that the image serves, and that it is the version it is tagged**
   (`util/check_image_serves.py`, new; `publish-image.yml`). The existing checks cover what the image
   contains and that `juniper_canopy` imports. Neither can see a stale version. The worker's 0.5.0 and
@@ -137,6 +187,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`TestA422DetailReachesTheOperator` no longer reads the previous test's WARNING.** A failing recurrence
+  fit logs its WARNING after the state flips, outside the lock, so a test that waited only for
+  `is_training_active()` could end while its fit thread was about to log, and the record landed in the
+  next test's `caplog` (main's own macOS CI failed this way at #702, #708 and #711). An autouse fixture in
+  `src/tests/unit/backend/test_recurrence_backend.py` now joins every `recurrence-fit` thread after each
+  test. Test-only.
 - **The wheel again carries `outbound_errors`, which `main` imports.** canopy#631's
   `py-modules` list was not updated when #685 added `src/outbound_errors.py` and wired it into
   `main`, `status_cache`, the cascor adapter and the recurrence backend. `packages.find` does not
