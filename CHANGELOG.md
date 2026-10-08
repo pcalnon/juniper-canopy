@@ -137,6 +137,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The wheel again carries `outbound_errors`, which `main` imports.** canopy#631's
+  `py-modules` list was not updated when #685 added `src/outbound_errors.py` and wired it into
+  `main`, `status_cache`, the cascor adapter and the recurrence backend. `packages.find` does not
+  collect a bare `src/*.py`, so a wheel built from `main` failed `import main` with
+  `No module named 'outbound_errors'` — the same shape as the 0.5.0–0.8.0 wheels, and invisible
+  to the image, which runs from `PYTHONPATH=/app/src`. `publish.yml`'s import smoke imports `main`,
+  so it would have stopped the next release at the build job. `outbound_errors` is now a
+  `py-module` and a target of `util/wheel_import_smoke.py`. `adapter_validation` stays out: nothing
+  imports it. `demo_mode` stays out of the bare smoke: it needs torch.
+  `src/tests/unit/test_wheel_import_smoke.py` pins both lists, the cwd guard, and that a module
+  resolved from the checkout is a failure.
 - **A refused recurrence request now says what to do, and a restored model counts as a model (W1.6;
   plan findings F-C5, F-C6, F-C7).** The plan is juniper-ml's
   `notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md`

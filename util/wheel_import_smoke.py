@@ -83,6 +83,7 @@ MODULES: tuple[str, ...] = (
     "middleware",
     "model_registry",
     "observability",
+    "outbound_errors",
     "provenance",
     "secrets_util",
     "security",
