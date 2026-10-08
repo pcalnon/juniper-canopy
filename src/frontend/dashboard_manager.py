@@ -453,11 +453,89 @@ _CASCADE_ONLY_TAB_IDS = frozenset({"candidates", "topology", "evolution", "bound
 # Design of record: notes/JUNIPER_2026-08-23_JUNIPER-CANOPY_CALLBACK-STARVATION-REMEDIATION-DESIGN.md
 # Evidence:         juniper-ml notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md
 # F-CANOPY-035: the metrics-store poll's dedicated lane id, referenced by the layout,
-# its callback's ``Input`` and ``running=`` guard, and the full-history modulus gate in
+# its pacer's ``Input`` (``_setup_poll_pacers``), the trigger the feeder hands its
+# handler (``_metrics_store_trigger``), and the full-history modulus gate in
 # ``_update_metrics_store_handler``. Named once so those four cannot drift apart — the
 # handler's gate is a ``trigger.startswith(...)`` string test, which fails SILENTLY
 # (every tick refetches the complete history) if the interval is renamed without it.
 _METRICS_STORE_INTERVAL: Final[str] = "metrics-store-interval"
+
+# F-CANOPY-055 / F-CANOPY-058 / F-CANOPY-068: REQUEST/ACK PACING for a poll whose round
+# trip can exceed its trigger's period.
+#
+# dash-renderer evicts a ``watched`` request the moment the same callback identity is
+# requested again, and discards the evicted request's response (see the
+# ``update_metrics_store`` comment). A poll triggered straight off an Interval is therefore
+# re-requested over itself whenever its round trip outlasts the period, and it never
+# applies: F-CANOPY-055 measured the top status bar at 0 of 36 responses applied.
+#
+# canopy#613's answer for the metrics store was a ``running=`` guard on the Interval's
+# ``disabled``. That guard cannot hold. The renderer releases it from ``completeJob()`` for
+# EVERY completion, including an evicted request's late one, with no check that the request
+# is still current. So any re-enable that lets the next request be made before the in-flight
+# response lands starts a chain in which each evicted request's late completion re-enables
+# the lane under its successor (F-CANOPY-058, observed live in runs of up to 11 evictions and
+# 34.8 s). The guard needed a strand watchdog, which sampled ``disabled`` every 5 s against a
+# ~4.9 s cycle and fired falsely ~31-36 times an hour, each time mid-fetch (F-CANOPY-068).
+#
+# The pacer replaces both. Each paced poll has:
+#
+#   * a REQUEST store, written only by a clientside pacer and the feeder's ONLY Input;
+#   * an ACK store, a second Output of the feeder, which echoes the request's ``seq``;
+#   * the pacer, which runs on the lane's ticks (and on the poll's other Input, if it has
+#     one) and writes a new request only when the ack has caught up with the last request,
+#     or when that request is older than ``POLL_PACER_STALE_MS``.
+#
+# The feeder is therefore never re-requested while a request is in flight, so nothing evicts
+# it. No callback writes ``disabled`` for pacing, so the tab/apply gate is again the lane's
+# only writer and the Apply clamp holds. The stale recovery is measured from the outstanding
+# request's own ``issued_at``, which is progress, not from samples of a prop. The ack is
+# read as State, never as an Input: an Input would close the cycle pacer -> feeder -> pacer.
+_METRICS_STORE_REQUEST: Final[str] = "metrics-store-request"
+_METRICS_STORE_ACK: Final[str] = "metrics-store-ack"
+_STATUS_BAR_REQUEST: Final[str] = "status-bar-request"
+_STATUS_BAR_ACK: Final[str] = "status-bar-ack"
+
+
+def poll_pacer_js(lane: str, stale_ms: int, extra_input: bool) -> str:
+    """Return the clientside pacer for one request/ack-paced poll (F-055/F-058/F-068).
+
+    Arguments, in registration order: the lane Interval's ``n_intervals``, then (when
+    ``extra_input``) the poll's other Input, then the REQUEST and ACK stores as State.
+
+    Returns ``no_update`` while the last request is unacknowledged and younger than
+    ``stale_ms``; otherwise a new request ``{seq, issued_at, reason, extra_key}``, where
+    ``reason`` is ``"stale"`` (re-issued over an unanswered request), ``"extra"`` (the
+    other Input's VALUE differs from the one the last request was issued with) or
+    ``"tick"``. The extra Input is compared by value, not by trigger, because the renderer
+    replaces a queued request with a newer one of the same callback and loses its trigger.
+
+    A request with no ``issued_at`` (the layout's seq-0 request, answered by the feeder's
+    mount call) is aged from the first time this page's pacer sees it.
+    """
+    params = "n, extra, req, ack" if extra_input else "n, req, ack"
+    extra_key = "JSON.stringify(extra === undefined ? null : extra)" if extra_input else "null"
+    return f"""
+            function({params}) {{
+                var NU = window.dash_clientside.no_update;
+                var now = Date.now();
+                var seq = (req && typeof req.seq === 'number') ? req.seq : 0;
+                var acked = Boolean(ack) && ack.seq === seq;
+                var firstSeen = window.__junPollPacerFirstSeen || (window.__junPollPacerFirstSeen = {{}});
+                var issuedAt = (req && typeof req.issued_at === 'number') ? req.issued_at : (firstSeen[{json.dumps(lane)}] || (firstSeen[{json.dumps(lane)}] = now));
+                if (!acked && now - issuedAt < {int(stale_ms)}) {{
+                    return NU;
+                }}
+                var extraKey = {extra_key};
+                var reason = 'tick';
+                if (!acked) {{
+                    reason = 'stale';
+                }} else if (extraKey !== null && req && typeof req.extra_key === 'string' && req.extra_key !== extraKey) {{
+                    reason = 'extra';
+                }}
+                return {{seq: seq + 1, issued_at: now, reason: reason, extra_key: extraKey}};
+            }}
+            """
 
 
 _GATED_POLL_INTERVALS: Final[Tuple[Tuple[str, Optional[str]], ...]] = (
@@ -466,10 +544,10 @@ _GATED_POLL_INTERVALS: Final[Tuple[Tuple[str, Optional[str]], ...]] = (
     ("slow-update-interval", None),
     # F-CANOPY-035: the metrics-store poll's own lane. Registered here so the CAN-000
     # apply clamp still silences it exactly as it did while the poll rode the fast
-    # lane. Its ``disabled`` prop is ALSO driven by the callback's ``running=`` guard,
-    # which is a renderer ``sideUpdate`` rather than a callback Output — so there is
-    # still exactly one registered writer of this prop, and the two never conflict
-    # except in the harmless window of a tab/apply change landing mid-fetch.
+    # lane. It now drives the poll's request/ack pacer (F-CANOPY-058), so this gate is
+    # the ONLY writer of its ``disabled``: the ``running=`` guard and the strand
+    # watchdog that also wrote it are gone, and a tab or apply change landing
+    # mid-fetch can no longer re-request the feeder.
     (_METRICS_STORE_INTERVAL, None),
     # dashboard-owned per-tab lanes (live OUTSIDE visualization-tabs, so the
     # A1-iii-b1 children rebuild cannot reset their gate)
@@ -1953,11 +2031,17 @@ class DashboardManager:
                 # Update intervals
                 dcc.Interval(id="fast-update-interval", interval=DashboardConstants.FAST_UPDATE_INTERVAL_MS, n_intervals=0),
                 dcc.Interval(id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0),
-                # F-CANOPY-035: the metrics-store poll's own lane, so it can stop its
-                # own clock while in flight (``running=`` on update_metrics_store)
-                # without silencing the nine other fast-lane callbacks. Same nominal
-                # cadence as the fast lane; see ``METRICS_STORE_POLL_INTERVAL_MS``.
+                # F-CANOPY-035: the metrics-store poll's own lane. Since F-CANOPY-058 it
+                # clocks the poll's request/ack pacer rather than the feeder itself.
+                # Same nominal cadence as the fast lane; see ``METRICS_STORE_POLL_INTERVAL_MS``.
                 dcc.Interval(id=_METRICS_STORE_INTERVAL, interval=DashboardConstants.METRICS_STORE_POLL_INTERVAL_MS, n_intervals=0),
+                # F-CANOPY-055/058/068: the request/ack stores of the two paced polls. The
+                # seq-0 requests are answered by each feeder's mount call; every later
+                # request is written by the pacer in ``_setup_poll_pacers``.
+                dcc.Store(id=_METRICS_STORE_REQUEST, storage_type="memory", data={"seq": 0}),
+                dcc.Store(id=_METRICS_STORE_ACK, storage_type="memory", data=None),
+                dcc.Store(id=_STATUS_BAR_REQUEST, storage_type="memory", data={"seq": 0}),
+                dcc.Store(id=_STATUS_BAR_ACK, storage_type="memory", data=None),
                 # F-CANOPY-027: per-tab poll lanes. These carry the panel-scoped pollers that
                 # used to ride the shared fast/slow intervals, so an inactive tab costs ZERO
                 # renderer slots instead of one round-trip per tick per poller. They start
@@ -2494,62 +2578,51 @@ class DashboardManager:
             prevent_initial_call=False,
         )
 
-        # F-CANOPY-035 follow-up: UNSTICK THE `running=` GUARD AFTER A NETWORK FAILURE.
-        #
-        # canopy#613 stops `metrics-store-interval` for the duration of each fetch via
-        # `running=`, and the renderer restores it from `completeJob()`
-        # (dash_renderer.dev.js:925-932). `completeJob()` runs on every HTTP OUTCOME —
-        # 200, non-OK, prevent-update — but a request that never produces a response at
-        # all lands in `handleError` (:987-998), which dispatches `updateResourceUsage`
-        # and rejects WITHOUT calling it. So a canopy restart, a connection reset or a
-        # browser offline moment leaves `disabled = true` with nothing to clear it: the
-        # metrics store then stops updating for the life of that page.
-        #
-        # #613's commit message, PR body and in-source comment all claimed this could
-        # not happen, citing `:1038`/`:1113` — which are in `_handleWebsocketCallback`,
-        # a transport this callback never takes (`useWebSocket` is false at `:1311`;
-        # the HTTP branch is `handleServerside` at `:807`, call site `:1330`). The
-        # error path was checked; the function it belonged to was not.
-        #
-        # This watchdog bounds that outage instead of leaving it unbounded. It rides
-        # the EXISTING slow lane (no new poller — the F-CANOPY-027 rule) and re-enables
-        # the interval only after it has been continuously disabled for longer than any
-        # plausible round trip.
-        #
-        # Two things it must not do, both encoded below:
-        #  * It must not re-enable DURING a legitimate fetch, which would re-open the
-        #    very eviction window #613 closed. Hence a threshold an order of magnitude
-        #    above the measured worst case (3.0 s observed; API_TIMEOUT_SECONDS is 2).
-        #  * It must not defeat the CAN-000 apply clamp, which legitimately holds the
-        #    interval disabled for as long as an apply is in flight. Hence the
-        #    `applyInFlight` short-circuit, which also resets the timer so the clock
-        #    starts from when the clamp RELEASES.
+        # F-CANOPY-068: the strand watchdog that stood here is GONE, with the ``running=``
+        # guard it repaired. It sampled ``metrics-store-interval.disabled`` every 5 s and
+        # re-enabled the lane after 30 s of samples that all found it disabled. On a page
+        # whose feeder cycle was ~4.9 s its samples kept phase with the cycle's disabled
+        # part, so it fired 13 and 15 times in two 25-minute runs on canopy ``main``, each
+        # time mid-fetch, and 7 of those fires evicted a response (juniper-ml
+        # ``notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md``, Phase 11).
+        # The request/ack pacers (``_setup_poll_pacers``) bound a lost request by its own
+        # age instead, so nothing is left for a watchdog to unstick.
+
+    def _setup_poll_pacers(self):
+        """F-CANOPY-055/058/068: one clientside request/ack pacer per paced poll.
+
+        See ``poll_pacer_js`` and the comment above ``_METRICS_STORE_REQUEST`` for the design.
+        Each pacer rides its poll's existing Interval, so it adds no poller (the F-CANOPY-027
+        rule), and the tab/apply gate still silences that Interval during an Apply.
+
+        * The metrics store (F-CANOPY-058, F-CANOPY-068) is paced on its own
+          ``metrics-store-interval`` and on ``metrics-panel-display-mode-store``, its second
+          Input until now, whose mid-flight change evicted the in-flight fetch.
+        * The top status bar (F-CANOPY-055) is paced on ``fast-update-interval``. Its feeder
+          rode that 1 s lane directly with a round trip of ~1.2 s and more, so every response
+          was evicted and the bar held its layout defaults for the life of the page.
+        """
+        stale_ms = DashboardConstants.POLL_PACER_STALE_MS
         self.app.clientside_callback(
-            f"""
-            function(n, disabled, applyInFlight) {{
-                var NU = window.dash_clientside.no_update;
-                if (!disabled || Boolean(applyInFlight)) {{
-                    // Healthy, or the apply clamp owns the prop: hold the timer clear.
-                    window.__metricsStoreDisabledSince = null;
-                    return NU;
-                }}
-                var now = Date.now();
-                if (!window.__metricsStoreDisabledSince) {{
-                    window.__metricsStoreDisabledSince = now;
-                    return NU;
-                }}
-                if (now - window.__metricsStoreDisabledSince < {DashboardConstants.METRICS_STORE_STRAND_TIMEOUT_MS}) {{
-                    return NU;
-                }}
-                window.__metricsStoreDisabledSince = null;
-                return false;
-            }}
-            """,
-            Output(_METRICS_STORE_INTERVAL, "disabled", allow_duplicate=True),
-            Input("slow-update-interval", "n_intervals"),
+            poll_pacer_js(_METRICS_STORE_INTERVAL, stale_ms, extra_input=True),
+            Output(_METRICS_STORE_REQUEST, "data"),
             [
-                dash.dependencies.State(_METRICS_STORE_INTERVAL, "disabled"),
-                dash.dependencies.State("apply-in-flight", "data"),
+                Input(_METRICS_STORE_INTERVAL, "n_intervals"),
+                Input("metrics-panel-display-mode-store", "data"),
+            ],
+            [
+                State(_METRICS_STORE_REQUEST, "data"),
+                State(_METRICS_STORE_ACK, "data"),
+            ],
+            prevent_initial_call=True,
+        )
+        self.app.clientside_callback(
+            poll_pacer_js("fast-update-interval", stale_ms, extra_input=False),
+            Output(_STATUS_BAR_REQUEST, "data"),
+            Input("fast-update-interval", "n_intervals"),
+            [
+                State(_STATUS_BAR_REQUEST, "data"),
+                State(_STATUS_BAR_ACK, "data"),
             ],
             prevent_initial_call=True,
         )
@@ -4104,21 +4177,33 @@ class DashboardManager:
                 Output("top-hidden-units-display", "children"),
                 Output("training-status-store", "data"),
                 Output("live-dataset-switch-button", "disabled"),
+                Output(_STATUS_BAR_ACK, "data"),
             ],
-            Input("fast-update-interval", "n_intervals"),
+            # F-CANOPY-055: paced by request/ack, not by ``fast-update-interval`` directly.
+            # On that 1 s lane a round trip of ~1.2 s and more had every response evicted
+            # by the next tick's request, so the bar NEVER applied (0 of 36 on the census).
+            # The pacer in ``_setup_poll_pacers`` writes the next request only once this
+            # callback's ack has echoed the last one.
+            Input(_STATUS_BAR_REQUEST, "data"),
             dash.dependencies.State("training-status-store", "data"),
             dash.dependencies.State("experimental-flags-store", "data"),
             dash.dependencies.State("live-dataset-switch-button", "disabled"),
             prevent_initial_call=False,
         )
-        def update_unified_status_bar(n_intervals, prev_training_status, experimental_flags, prev_switch_disabled):
+        def update_unified_status_bar(request, prev_training_status, experimental_flags, prev_switch_disabled):
             """Update unified status bar (+ the training-status store and the Live Switch gate)."""
-            return self._update_unified_status_bar_handler(
-                n_intervals=n_intervals,
-                prev_training_status=prev_training_status,
-                experimental_flags=experimental_flags,
-                prev_switch_disabled=prev_switch_disabled,
-            )
+            seq = request.get("seq") if isinstance(request, dict) else None
+            try:
+                outputs = self._update_unified_status_bar_handler(
+                    n_intervals=seq,
+                    prev_training_status=prev_training_status,
+                    experimental_flags=experimental_flags,
+                    prev_switch_disabled=prev_switch_disabled,
+                )
+            except Exception as exc:  # the ack must land, or the pacer waits out POLL_PACER_STALE_MS
+                self.logger.warning("status bar poll failed: %s", exc)
+                outputs = (dash.no_update,) * 11
+            return (*outputs, {"seq": seq})
 
     # Define Network callbacks
     def _setup_network_callbacks(self):
@@ -4236,6 +4321,7 @@ class DashboardManager:
             prevent_initial_call=True,
         )
         self._setup_poll_gating()
+        self._setup_poll_pacers()
         # E-3: clientside watchdog — force-release a stuck clamp. Runs on its
         # own always-enabled interval (the clamp disables the fast/slow
         # intervals, so neither can host its own rescue).
@@ -4714,59 +4800,48 @@ class DashboardManager:
         # all HTTP 200, all carrying the full payload, store length 0 throughout — and
         # the store filled within ~3 s of the tick stopping, twice.
         #
-        # ``running=`` disables this Interval at request dispatch and re-enables it when
-        # the response arrives, so this callback cannot re-request over ITSELF on its own
-        # clock. Measured effective cadence is 5.5-7.3 s — see
-        # ``METRICS_STORE_POLL_INTERVAL_MS`` for the numbers and why that is the right
-        # trade for a stale-stream backstop.
+        # canopy#613 stopped this Interval for the duration of each fetch with a
+        # ``running=`` guard. That guard is GONE (F-CANOPY-058): the renderer released it
+        # from ``completeJob()`` for an evicted request's late completion too, so any
+        # mid-fetch re-enable could start a chain of evictions, and its strand watchdog
+        # re-enabled it mid-fetch ~31-36 times an hour on its own (F-CANOPY-068). The
+        # feeder is now paced by request/ack (``_setup_poll_pacers``): its ONLY Input is
+        # the request store, which the pacer writes only once the ack below has echoed
+        # the last request, so nothing can re-request it while a fetch is in flight.
         #
-        # **THREE QUALIFICATIONS, each of which an earlier version of this comment got
-        # wrong by stating the guarantee unconditionally** (corrected 2026-09-10 by
-        # independent review):
+        # The display mode, its second Input until now, is State here and an Input of the
+        # pacer. A mid-flight mode change used to create a same-identity request and evict
+        # the fetch (``getUniqueIdentifier`` ignores the trigger); now the pacer issues a
+        # ``reason="extra"`` request once the fetch in flight is acknowledged.
         #
-        #  1. The renderer restores the interval from ``completeJob()``
-        #     (dash_renderer.dev.js:925-932), which runs on every HTTP outcome but NOT on
-        #     a request that never produces a response — ``handleError`` (:987-998)
-        #     rejects without calling it. A network-level failure strands the poll, and
-        #     the watchdog in ``_setup_poll_gating`` is what bounds that. (The earlier
-        #     comment cited :1113 as the error path; that line is in
-        #     ``_handleWebsocketCallback``, a transport this callback never takes.)
-        #  2. ``metrics-store-interval.disabled`` has a SECOND writer — the CAN-000
-        #     tab/apply gate. If it fires mid-fetch it re-enables the clock and reopens
-        #     the eviction window for that cycle. Self-healing, bounded to one cycle,
-        #     and UNMEASURED.
-        #  3. The guard covers this callback's own Interval, not its other Input.
-        #     ``getUniqueIdentifier`` ignores the trigger, so a mid-flight change to
-        #     ``metrics-panel-display-mode-store`` creates a same-identity ``requested``
-        #     entry and evicts exactly as a tick would. Also unmeasured.
-        #
-        # Do NOT fold this back onto a shared lane: ``disabled`` is a property of the
-        # Interval, so guarding this callback there would silence the other nine
-        # fast-lane callbacks for the duration of every fetch.
+        # The ack is written on EVERY return path, including a raised handler: without it
+        # the pacer waits out ``POLL_PACER_STALE_MS`` before it asks again.
         @self.app.callback(
             Output("metrics-panel-metrics-store", "data"),
-            Input(_METRICS_STORE_INTERVAL, "n_intervals"),
-            Input("metrics-panel-display-mode-store", "data"),
+            Output(_METRICS_STORE_ACK, "data"),
+            Input(_METRICS_STORE_REQUEST, "data"),
+            dash.dependencies.State("metrics-panel-display-mode-store", "data"),
             dash.dependencies.State("ws-liveness-store", "data"),
             dash.dependencies.State("metrics-panel-metrics-store", "data"),
-            running=[(Output(_METRICS_STORE_INTERVAL, "disabled"), True, False)],
             prevent_initial_call=False,
         )
-        def update_metrics_store(n, display_mode_state, ws_liveness, current_metrics):
-            """Liveness-gated REST poll for the metrics store (N8 O1 half)."""
-            try:
-                ctx = dash.callback_context
-                trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
-            except dash.exceptions.MissingCallbackContextException:
-                trigger = ""  # direct invocation (tests) — treated like a mount/mode-switch fetch
+        def update_metrics_store(request, display_mode_state, ws_liveness, current_metrics):
+            """Liveness-gated REST poll for the metrics store (N8 O1 half), paced by request/ack."""
+            request = request if isinstance(request, dict) else {}
+            seq = request.get("seq")
             ws_live = bool(ws_liveness and ws_liveness.get("metrics_live"))
-            return self._update_metrics_store_handler(
-                n=n,
-                display_mode_state=display_mode_state,
-                current_metrics=current_metrics,
-                trigger=trigger,
-                ws_live=ws_live,
-            )
+            try:
+                data = self._update_metrics_store_handler(
+                    n=seq,
+                    display_mode_state=display_mode_state,
+                    current_metrics=current_metrics,
+                    trigger=self._metrics_store_trigger(request),
+                    ws_live=ws_live,
+                )
+            except Exception as exc:  # the ack must land, or the pacer waits out POLL_PACER_STALE_MS
+                self.logger.warning("metrics store poll failed: %s", exc)
+                data = dash.no_update
+            return data, {"seq": seq}
 
         # N8 (posture O3 half): WS-PRIMARY append. Triggered ONLY by a ws-metrics-buffer
         # change — which the clientside drain emits only when it actually drained events
@@ -7876,6 +7951,23 @@ class DashboardManager:
         window_size = mode_state.get("window_size", 100) or 100
         merged = (current_metrics if isinstance(current_metrics, list) else []) + ws_events
         return merged[-window_size:] if len(merged) > window_size else merged
+
+    @staticmethod
+    def _metrics_store_trigger(request):
+        """Map a paced request onto the trigger ``_update_metrics_store_handler`` gates on.
+
+        The handler's full-history modulus gate skips only INTERVAL-driven fetches, and still
+        fetches at once on a display-mode switch or the mount call. Under request/ack pacing
+        the feeder's one trigger is the request store, so the request's ``reason`` says which
+        it was: ``"tick"`` and ``"stale"`` read as the lane's tick, ``"extra"`` (the display
+        mode changed) as the mode store, and the layout's seq-0 request (no reason) as mount.
+        """
+        reason = request.get("reason") if isinstance(request, dict) else None
+        if reason in ("tick", "stale"):
+            return f"{_METRICS_STORE_INTERVAL}.n_intervals"
+        if reason == "extra":
+            return "metrics-panel-display-mode-store.data"
+        return ""
 
     def _update_metrics_store_handler(self, n=None, display_mode_state=None, current_metrics=None, trigger=None, ws_live=None):
         """Liveness-gated REST poll for the metrics-panel store (N8 posture O1).
