@@ -187,6 +187,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The lockfile regen's comment said `[dependabot skip]` keeps Dependabot from rebasing over it. It does
+  the opposite, and the tag stays on purpose.** GitHub's docs ("Allowing Dependabot to rebase and force
+  push over extra commits") say Dependabot ignores a commit carrying the tag when it decides whether
+  someone else edited its branch, so it keeps rebasing and may force-push over the regen. That is how
+  canopy#709 lost its signed regen commit `b63f211e`. Each rebase is a push to `dependabot/pip/**`, which
+  re-runs the regen, because the PAT has been in the Dependabot secret store since 2026-07-30. Without the
+  tag, Dependabot would stop rebasing and leave its PR stuck behind `main` under the strict up-to-date
+  ruleset. The required `Lockfile Freshness` check still fails a stale lock. juniper-data, -cascor,
+  -data-client, -cascor-client and -cascor-worker tag their regen commit the same way. Comments only in
+  `.github/workflows/lockfile-update.yml` (banner 0.1.1). The banner's Dependabot caveat also gains a
+  line, because it still read as if the PAT were unregistered.
+- **`AGENTS.md` said Sequence Safety is advisory and never a required check. The `juniper-canopy-rules`
+  ruleset requires it.** The workflow table row now says so, and says the workflow is standalone, outside
+  `ci.yml`'s Quality Gate `needs:`, so a green Quality Gate is not enough to merge. #617 corrected the
+  `sequence-safety.yml` header but left two comments calling the check advisory (its concurrency note
+  and its reference to cascor's workflow), and `main-verify.yml`'s header still called the per-PR screen
+  advisory. All three are corrected. Comments only: no trigger, step, pin or job name changed.
 - **`TestA422DetailReachesTheOperator` no longer reads the previous test's WARNING.** A failing recurrence
   fit logs its WARNING after the state flips, outside the lock, so a test that waited only for
   `is_training_active()` could end while its fit thread was about to log, and the record landed in the

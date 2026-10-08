@@ -70,7 +70,7 @@
 # References:
 #    - juniper-ci-tools console scripts: juniper-symbol-loss-check / juniper-docs-additions-check
 #    - juniper-ml notes/JUNIPER_2026-08-07_JUNIPER-ECOSYSTEM_SEQUENCE-SAFETY-ROLLOUT-PLAN.md (Wave 2)
-#    - juniper-cascor .github/workflows/sequence-safety.yml (the standalone advisory this adapts)
+#    - juniper-cascor .github/workflows/sequence-safety.yml (the standalone pattern this adapts)
 #    - juniper-ml notes/JUNIPER_2026-07-28_JUNIPER-ML_CURSOR-PR-FLOOD-REMEDIATION-ANALYSIS.md
 #####################################################################################################################################################################################################
 
@@ -82,7 +82,7 @@ on:
       - main
       - develop
 
-# Per-PR ref, cancel superseded runs: an advisory review signal only needs the latest push.
+# Per-PR ref, cancel superseded runs: the required check is read on the PR's latest push only.
 concurrency:
   group: sequence-safety-${{ github.ref }}
   cancel-in-progress: true
