@@ -35,7 +35,7 @@ dash==4.4.1
     #   dash-bootstrap-components
 dash-bootstrap-components==2.0.4
     # via juniper-canopy (pyproject.toml)
-fastapi==0.142.2
+fastapi==0.142.4
     # via
     #   juniper-canopy (pyproject.toml)
     #   juniper-service-core
@@ -100,7 +100,7 @@ numpy==2.5.3
     #   juniper-data-client
     #   juniper-service-core
     #   scipy
-opentelemetry-api==1.45.0
+opentelemetry-api==1.45.1
     # via fastapi
 packaging==26.3
     # via plotly
