@@ -1,8 +1,8 @@
 # Juniper Canopy User Manual
 
-**Version:** 0.26.2
+**Version:** 0.26.3
 **Status:** ✅ Production Ready
-**Last Updated:** September 5, 2026
+**Last Updated:** October 8, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -161,6 +161,10 @@ You should see:
 - 🟠 **Orange ● Standby** - Server connected, not healthy
 - 🔴 **Red ● Error** - Connection or server error
 
+#### Training status line
+
+The training status text is separate from the connection dots above. A failed recurrence fit reads `Failed — <reason>`: the status code, method, and path (`recurrence service error 422 on POST /v1/train`), followed by the service's 4xx `detail` when it sent one. When the line cuts the reason at 120 characters it ends in `…`; hover that text for the rest (up to 480 characters). A 5xx failure stays the status code, method, and path.
+
 #### WebSocket Status (Top Right)
 
 - **`N connection(s)`** (Green) - Active WebSocket connections
@@ -187,10 +191,10 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 └─────────────────┘
 ```
 
-- **Action:** Starts or restarts training from beginning
+- **Action:** Starts training. A plain Start sends `reset=false` and continues the current network; it does not rebuild it
 - **Demo Mode:** Begins simulated training with automatic epoch progression
 - **Production Mode:** Initiates training on real CasCor backend
-- **Note:** Automatically resets state on start
+- **Note:** Start does not reset the model. To discard it and rebuild, use **Stop & Restart with new dataset** with **Start fresh** on ([A wider dataset needs Start fresh](#a-wider-dataset-needs-start-fresh))
 
 #### Pause Training
 
@@ -217,6 +221,40 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 - **Demo Mode:** Halts simulation thread cleanly
 - **Production Mode:** Sends stop command to CasCor backend
 - **Warning:** State is preserved but training cannot be resumed (use Start to restart)
+
+### A wider dataset needs Start fresh
+
+**Start** continues the network that is already loaded. It cannot grow that network to more features or outputs. Staging a wider dataset — the tests use `equities` (15 features) and `mnist` (784) — and pressing Start is refused before anything is loaded.
+
+When cascor opens that refusal with `[start_fresh_required]`:
+
+1. The alert names the two controls. It stays until you dismiss it or a later command succeeds. The charts are still the previous run.
+2. The pending-dataset banner, "Dataset change pending — restart training to apply.", stays up, because the dataset is still staged.
+3. Click **Stop & Restart with new dataset**.
+4. Turn **Start fresh** on. It defaults to off. Off would continue the narrow network.
+5. Confirm. Parameter edits in the expanded section are applied first, then the restart. Confirm stops the current run if one is active, waits for it to settle, and starts on the staged dataset.
+
+| Start fresh | Result |
+|-------------|--------|
+| Off | Continue the current model and keep its metrics and history. The network is not rebuilt, so the width mismatch remains. |
+| On | Discard the current model and its retained metrics and history. Rebuild an untrained network from the dataset. Applied parameters, including any you edit in the modal, and on-disk snapshots are kept. |
+
+The modal says those parameters carry over and that snapshots are kept. That is the service-mode contract with a current cascor. Demo mode does not send a `start_fresh` field; a demo restart resets the demo run's epoch and metrics history whichever way the toggle is set.
+
+If you staged a wider dataset and the alert is the ordinary "Start failed." alert (it closes itself after eight seconds) and does not name Start fresh, cascor did not send the marker. There is no second set of instructions for that older service.
+
+### Model summary
+
+Under **Model:** the sidebar shows one line (`nn-model-summary`) and a **▸ change** button, which opens the model-selection table. The line is one of three sentences. **Active** means a round-trip named a backend that serves the selection. **NOT ACTIVE** means the named backend does not, and Start and **Apply Dataset** stay disabled until the selection and the running backend agree. `backend status unknown` means the page has not confirmed a backend yet.
+
+| What you see | What it means | What to do |
+| --- | --- | --- |
+| `Selected: CasCor (Cascade-Correlation) · backend status unknown` | First paint, or `GET /api/selection` failed. This is not a claim that training is down. | Reload. If it stays, the mount read failed. The log says `Selection hydration read failed`. |
+| `Active: CasCor (Cascade-Correlation)` or `Active: Recurrence (LMU)` | The live backend serves that model (`service` or `demo` for CasCor, `recurrence` for the LMU). | Nothing, for this line. |
+| `Selected: … · NOT ACTIVE — the <backend> backend is running` | The selection and the running backend disagree. Start and **Apply Dataset** are disabled. | Select the model that backend serves, or configure `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL` and select Recurrence again. |
+| `No model selected — all datasets shown; choose one to train` | The model was cleared. This is not the unknown sentence. | Choose a model. |
+
+A lifecycle note such as `· coming soon` can sit in front of the liveness clause. Both shipped models are live, so the ordinary CasCor line has none. Developer contract: [AGENTS_REFERENCE.md § Sidebar model summary](AGENTS_REFERENCE.md#sidebar-model-summary-x11).
 
 ### Configuration Parameters
 
@@ -260,6 +298,13 @@ The dashboard ships **15 tabs**, in tab-bar order: [Training Metrics](#training-
 [About](#about-tab). The five cascade-only tabs — Candidate Metrics, Network Topology, Network
 Evolution, Decision Boundary and Workers — are hidden while a one-shot model such as
 *Recurrence (LMU)* is selected.
+
+While Recurrence (LMU) is selected, the Training Metrics tab shows one regression card
+instead of the classification cards and the per-epoch loss and accuracy plots. The card is
+titled `Recurrence (LMU) — in-sample (train split) regression metrics`, over the caption
+`Computed on the training split the fit saw; not a held-out score.` The numbers are R²,
+RMSE, MSE, MAE, and Loss from `POST /v1/train`, scored on the training split the fit saw.
+While the fit is still running, the card is the spinner `Awaiting recurrence (LMU) fit result…`.
 
 ### Training Metrics Tab
 
@@ -754,14 +799,24 @@ Editing happens in the sidebar; the tables re-render after every **Apply**.
 2. **Session header** — snapshot id, FSM badge, and a weights badge (`V2 ✓ weights` when the
    snapshot carries weights, otherwise `V1 (metrics only)`)
 3. **Transport** — ▶ Play, ⏸ Pause, ⏹ Stop
-4. **Epoch scrubber** — drag and release to seek; readout `current / end`
+4. **Epoch scrubber** — drag and release to seek; readout `current / end`. The max is the
+   last frame. cascor's `snapshot_window.end_epoch` is the history length, so a 12-frame
+   snapshot stops at index 11
 5. **Speed slider** — −10× … 10×; negative values play backwards, 0 pauses (`Paused (0×)`)
-6. **Time range** — restrict playback to a sub-window of epochs
+6. **Time range** — restrict playback to a sub-window. The slider is inclusive. The request
+   cascor receives is exclusive: choosing frames 3 through 8 posts `{start: 3, end: 9}`, so
+   frame 8 is inside `[start, end)`
 7. **Status block** — the result of the last control action
 8. **Dataset-swap events** — markers on a wall-clock axis with a count; hover for details
 
-Every control posts `POST /api/v1/snapshots/{id}/replay/control`, which canopy proxies to the cascor
-service. By design, weight samples streamed during playback are drained every 500 ms into the buffer
+Play, pause, stop, and a slider released on a new value post `POST /api/v1/snapshots/{id}/replay/control`,
+which canopy proxies to the cascor service. Releasing a slider on the value the session already shows
+does not post: the player writes those values when it renders, and a matching write is an echo, not a
+new request. Before canopy#697 a chosen range omitted its last frame, both sliders offered one position
+past the history, and each render sent the scrubber, speed, or range again. Developer contract:
+[AGENTS_REFERENCE.md § Replay index contract](AGENTS_REFERENCE.md#replay-index-contract).
+
+By design, weight samples streamed during playback are drained every 500 ms into the buffer
 that feeds the [Network Evolution](#network-evolution-tab) weight-norm traces. Today no weight sample
 reaches the page, because cascor's replay frames carry none, so those traces stay hidden during a replay.
 The drain starts only once the page has started a replay.
@@ -904,7 +959,8 @@ upper-cased under the `JUNIPER_CANOPY_` prefix, with `__` between a nested secti
 | `demo_mode`                                   | `JUNIPER_CANOPY_DEMO_MODE`                                       | `false`                        |
 | `cascor_service_url`                          | `JUNIPER_CANOPY_CASCOR_SERVICE_URL`                              | unset (demo fallback)          |
 | `juniper_data_url`                            | `JUNIPER_DATA_URL` (or `JUNIPER_CANOPY_JUNIPER_DATA_URL`)        | `http://localhost:8100`        |
-| `recurrence_service_url`                      | `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL`                          | unset                          |
+| `recurrence_service_url`                      | `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL` (fallback `RECURRENCE_SERVICE_URL`) | unset                          |
+| `recurrence_api_key`                          | `JUNIPER_CANOPY_RECURRENCE_API_KEY` or `_FILE` (then the shared `JUNIPER_RECURRENCE_API_KEY` pair) | unset                          |
 | `training.<param>.{min,max,default}`          | `JUNIPER_CANOPY_TRAINING__<PARAM>__{MIN,MAX,DEFAULT}`            | see `TrainingSettings`         |
 | `demo_cascade_every`                          | `JUNIPER_CANOPY_DEMO_CASCADE_EVERY`                              | `30`                           |
 | `demo_update_interval`                        | `JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL` — declared, **not applied** (fixed 1.0 s) | `1.0`           |
@@ -1198,6 +1254,65 @@ pytest tests/regression/test_csp_plotly_image_export.py \
 Do not "fix" this by adding `blob:` to `script-src` or by replacing
 `data:` (Bootstrap icons need `data:`). Developer contract:
 [AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047).
+
+#### 7. Recurrence fit: a status code and no reason
+
+**Symptoms:** The status line is `Failed — recurrence service error <code> on POST /v1/train`, and nothing follows the path.
+
+**Cause:** The recurrence service answered with a 5xx, or with a 4xx that carried no usable `detail`. A 5xx `detail` is never shown: it can quote the recurrence service's upstream header value, so canopy keeps its own status code, method, and path. A 4xx `detail` (for example a non-finite `X_train`) is appended after the path. canopy 0.8.1 and earlier show a bare `Failed` and append no `detail`.
+
+**What to read:**
+
+```bash
+curl -s http://127.0.0.1:8050/api/status | python -m json.tool
+```
+
+`completion_reason` holds the whole message; hover the status line when it ends in `…`. For a 5xx, use the recurrence service log for the reason. See [AGENTS_REFERENCE.md § Recurrence fit refusal and in-sample scores](AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores).
+
+#### 8. Recurrence fit names the API key, or says to retry
+
+**Symptoms:**
+
+- The status bar names the recurrence API key variables, or it says `retry after 30 s`
+- The visible line ends in `…`
+
+**Causes:**
+
+- A 401 or 403 means the key canopy sends as `X-API-Key` is missing or is not a key the service accepts. The message names `JUNIPER_CANOPY_RECURRENCE_API_KEY` and `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`. canopy 0.8.1 and earlier say `check recurrence_api_key` instead.
+- A 429 means the recurrence service rate-limited the call. The wait is the reply's `Retry-After`. The dashboard polls canopy, so another client is usually sharing that key or address.
+- The status line shows 120 characters. Hover it for the rest (up to 480 characters).
+
+**Solutions:**
+
+✅ **Set the key, then restart canopy.** The `_FILE` form is read first. The shared `JUNIPER_RECURRENCE_API_KEY` pair applies when the canopy-prefixed pair is unset.
+
+```bash
+export JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE=/run/secrets/recurrence_api_key
+```
+
+✅ **On `retry after`, wait out that window.** A 429 with no `Retry-After` header has no wait clause. The window is still closed.
+
+✅ **A restored snapshot is a model.** `restored` means the service loaded a snapshot (`restored_from` names it). It does not mean the fit you just started succeeded. The model version is read from the service, and no screen shows it yet.
+
+See [AGENTS_REFERENCE.md § Recurrence key, restored model, and service version](AGENTS_REFERENCE.md#recurrence-key-restored-model-and-service-version).
+
+#### 9. Sidebar says "backend status unknown"
+
+**Symptoms:**
+
+- The **Model:** line reads `Selected: CasCor (Cascade-Correlation) · backend status unknown`
+- It does not say `Active:`, and it does not say `NOT ACTIVE`
+
+**Cause:** Nothing has round-tripped `GET /api/selection` yet, or that read failed. "Active"
+on this line is a claim about the backend, and nothing has answered.
+
+**What to do:** Wait for the page to finish loading. If the line stays unknown, the
+selection read failed and the sidebar kept the default model rather than inventing
+"Active". The log says `Selection hydration read failed`. A line that names `NOT ACTIVE`
+and a backend is a different state: the selection and the running backend disagree, and
+Start is disabled.
+
+**See:** [AGENTS_REFERENCE.md § Sidebar model summary](AGENTS_REFERENCE.md#sidebar-model-summary-x11)
 
 ### Diagnostic Commands
 

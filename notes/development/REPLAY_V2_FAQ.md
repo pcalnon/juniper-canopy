@@ -8,19 +8,24 @@
 > **Status note, 2026-09-24: the status line above, and the weight answers, the g-3 and g-7
 > related-work notes and the glossary below, describe the design, not what runs today.**
 >
-> - **Against cascor the player shows no session at all** (F-CANOPY-059, P0 in the juniper-ml E2E
->   evidence ledger). Its render reads cascor's `range`, a dict, and indexes it as a list, so it raises
->   on every session cascor serves. The Replay tab keeps its "No active replay session" placeholder, and
->   none of the player's controls, readouts or badges is on screen. A cascor replay starts paused at its
->   first frame and advances only on a Play, so from the page it never advances. While it is open, cascor
->   refuses training, a new network, and restore, resume and retrain, and it refuses Stop Training too.
->   The sidebar's **Reset Training** ends it: cascor documents reset as a replay's escape hatch, and a
->   reset also discards the run's metrics and counters, not its data. "Verifying everything wired
->   correctly" below therefore fails from step 2 against cascor. Its `curl` check reads
->   `.data.weights_available` and `.data.weight_sampling`, which cascor nests under `.data.session`, and
->   its POST starts a replay. A replay started that way or from the page loads the snapshot's network in
->   place of cascor's live one, and neither a Reset nor a Stop puts the old one back: save a snapshot
->   first.
+> - **A cascor session renders, and its ends are right** (F-CANOPY-059, canopy#694; canopy#697).
+>   `range` arrives as a dict `{"start", "end"}` and `render_session` no longer indexes it as a
+>   list. That `end` is exclusive and `time_index.snapshot_window.end_epoch` is a history length,
+>   while the scrubber and the range slider are inclusive. Before canopy#697 a chosen range
+>   skipped its last frame, both sliders offered one index cascor clamps away, and a session paint
+>   re-queued a control because those slider values are Inputs of `queue_control`. Contract:
+>   [replay index runbook](../../docs/AGENTS_REFERENCE.md#replay-index-contract).
+> - **Cascor's session rules around the player** (2026-09-24 ledger). A replay starts paused at
+>   its first frame and advances on Play. While it is open, cascor refuses training, a new
+>   network, and restore, resume and retrain, and it refuses Stop Training. **Reset Training**
+>   ends the replay and also discards the run's metrics and counters, not its data. Save a
+>   snapshot first: a replay loads the snapshot's network in place of the live one, and neither
+>   Reset nor Stop puts the old one back. The curl under
+>   [Verifying everything wired correctly](#verifying-everything-wired-correctly) reads
+>   `.data.session.weights_available` and `.data.session.weight_sampling`, and its POST starts a
+>   replay, so the same warning applies to it. Step 3 of that
+>   procedure (the `last sample` readout) stays empty, because no weight sample reaches the
+>   page (next bullet).
 > - **No replay weight reaches the page** (F-CANOPY-057 in the same ledger). The g-3
 >   emitter never reached cascor's `main`. Its PR, cascor#190, merged into its stacked base branch 13
 >   minutes after that branch had itself landed on `main` as cascor#189, and nothing merged the branch
@@ -271,7 +276,7 @@ window._juniperWsDrain.drainReplayWeights();
 ```bash
 # Confirm cascor is emitting the V2-shape events
 curl -s -X POST http://localhost:8200/v1/snapshots/<id>/replay \
-  | jq '.data.weights_available, .data.weight_sampling'
+  | jq '.data.session.weights_available, .data.session.weight_sampling'
 ```
 
 If `weights_available` is `false` here, no amount of canopy

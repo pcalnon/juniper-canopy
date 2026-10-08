@@ -162,6 +162,8 @@ src/tests/
 | `pytest -v`             | Verbose output          |
 | `pytest --cov=src`      | Run with coverage       |
 | `pytest src/tests/regression/test_x7_status_cache.py -v` | X7 1c status cache (landed with `#578`) |
+| `pytest src/tests/unit/test_recurrence_service_adapter.py src/tests/unit/frontend/test_completion_reason_status_bar.py src/tests/unit/test_recurrence_oneshot_result.py -q` | Recurrence 4xx detail and in-sample card (landed with `#702`) |
+| `pytest src/tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v` | Wider-dataset Start alert and Start-fresh modal text (`#681`) |
 | `pytest --lf`           | Run last failed tests   |
 | `pytest --ff`           | Run failures first      |
 

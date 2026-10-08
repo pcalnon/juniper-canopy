@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-08-24
-**Version:** 0.27.0
+**Last Updated:** 2026-10-08
+**Version:** 0.27.1
 **Status:** Current
 
 ## Table of Contents
@@ -655,6 +655,9 @@ It is source-verified against:
 - `.github/workflows/security-scan.yml`
 - `.github/workflows/lockfile-update.yml`
 - `.github/workflows/publish.yml`
+- `.github/workflows/publish-image.yml`
+- `util/check_image_serves.py`
+- `.github/workflows/claude.yml`
 - `.github/dependabot.yml`
 - `pyproject.toml`
 - `scripts/check_doc_links.py`
@@ -710,7 +713,7 @@ python -m pytest \
 
 ### 2. If dependencies changed
 
-Regenerate lockfile exactly as CI expects:
+`uv pip compile` keeps the pins already in the `-o` file unless you pass `--upgrade`. This command preserves those pins:
 
 ```bash
 uv pip compile pyproject.toml \
@@ -719,6 +722,8 @@ uv pip compile pyproject.toml \
   --extra observability \
   -o requirements.lock
 ```
+
+Pass `--upgrade` when the goal is to accept newer wheels. That is the command [Dependabot lockfile automation](#runbook-dependabot-lockfile-automation) runs. The compiler reads `pyproject.toml`. A floor that lives only in `conf/requirements_ci.txt` is a separate edit.
 
 ### 3. If docs changed
 
@@ -737,17 +742,45 @@ python scripts/check_doc_links.py \
 
 ### Runbook: Dependabot lockfile automation
 
-When Dependabot pushes to `dependabot/pip/**`, `lockfile-update.yml`:
+Dependabot's pip updates and `lockfile-update.yml` write different files. Read both diffs.
 
-1. Regenerates `requirements.lock` via `uv pip compile`
-2. Commits `[dependabot skip] Update requirements.lock` if changed
-3. Pushes with `CROSS_REPO_DISPATCH_TOKEN` so downstream CI is triggered
+**Floor edit.** `.github/dependabot.yml` sets the pip ecosystem `directory` to `/`. Repo-root `requirements.txt` is a symlink to `conf/requirements_ci.txt` (`requirements.txt` → `conf/requirements.txt` → `conf/requirements_ci.txt`). The committed floor bump is therefore `conf/requirements_ci.txt`.
+No `ci.yml` job installs that file: since canopy#650 it is `juniper-generate-dep-docs` output, and every lane installs `pyproject.toml` extras. The floor edit alone changes no CI install.
+The mdurl floor change (canopy#709) is `mdurl>=0.1` to `mdurl>=0.1.2` in that file.
 
-Operational constraints:
+**Lock compiler.** When the token gate passes, the workflow runs:
 
-- Keep `CROSS_REPO_DISPATCH_TOKEN` valid
-- Keep compile extras aligned with `ci.yml` (`juniper-data`, `juniper-cascor`, `observability`)
-- Keep `requirements.lock` committed in PRs that modify dependency constraints
+```bash
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  --upgrade \
+  -o requirements.lock
+```
+
+`--upgrade` is required. Without it, `uv` treats the existing `-o` file as pins and leaves transitive dependencies where they are. The compiler input is `pyproject.toml`, not `conf/requirements_ci.txt`. mdurl is absent from `pyproject.toml` and from `requirements.lock`, so that floor bump does not add an mdurl pin; canopy#709 merged with no lock change.
+The same regen can still move other pins. canopy#708, a `python-dotenv` floor bump, merged with `websockets` 17.1 → 17.2 and `zipp` 4.1.0 → 4.1.1 in `requirements.lock`; its floor edit named neither.
+
+**Triggers and commit subjects**
+
+| Event | When it runs | Subject line |
+| --- | --- | --- |
+| `push` | Branch matches `dependabot/pip/**` | `[dependabot skip] Update requirements.lock` |
+| `pull_request` | The PR touches `pyproject.toml`, the head is in this repo, and the head ref does not start with `release/` | `chore(deps): auto-regenerate requirements.lock after pyproject change` |
+
+`[dependabot skip]` lets Dependabot keep rebasing its own branch: a rebase force-pushes over the regen commit, and that push runs this workflow again. Without the tag, Dependabot stops rebasing once another commit lands on its branch (GitHub docs, *Managing pull requests for dependency updates*).
+The workflow's own comment, above its commit-message choice in `lockfile-update.yml`, says the tag keeps Dependabot from rebasing; that is the reverse of GitHub's documented behaviour.
+A regen commit can therefore vanish from a Dependabot PR. canopy#709's branch carried the signed regen `b63f211e` (narwhals 2.26.0 → 2.27.0, websockets 17.1 → 17.2). Dependabot's 2026-10-06 rebase onto canopy#708 dropped it, the regen on the new head committed nothing, and the PR merged with no lock change.
+`release/**` is excluded so a version-only `pyproject.toml` edit stays a single-purpose release PR.
+
+**Token gate.** Regen steps run only when `CROSS_REPO_DISPATCH_TOKEN` is non-empty. A Dependabot-triggered run reads the Dependabot secret store, not the Actions store. An empty token with actor `dependabot[bot]` logs a notice and finishes green (`proceed=false`) without writing a lock. Register the same PAT under Settings → Secrets → Dependabot to turn regen back on. An empty token for any other actor fails the job.
+
+Lockfile Freshness stays green across a skipped regen whenever the existing lock still satisfies `pyproject.toml`. That job compiles with `--constraint requirements.lock` and compares pin lines. It fails when a floor in `pyproject.toml` has moved past a pin, not when newer wheels exist on PyPI, and not when only `conf/requirements_ci.txt` changed.
+
+**Signed commit.** The lock commit is the GitHub `createCommitOnBranch` mutation, with `expectedHeadOid` set to the checked-out HEAD. The mutation authenticates as `CROSS_REPO_DISPATCH_TOKEN`, so the new commit re-triggers CI. A local `git commit` on the runner is unsigned, and `required_signatures` would leave the PR unmergeable. If the branch moved after checkout, the mutation fails instead of overwriting the new tip. An unchanged `requirements.lock` produces no commit.
+
+**Review.** Confirm the expected floor is in `conf/requirements_ci.txt`. Treat every other pin in the lock diff as an `--upgrade` of `pyproject.toml`. Recompile locally with the three extras and `--upgrade` before changing those pins by hand.
 
 ### Runbook: Scheduled security scan
 
@@ -810,6 +843,27 @@ Review findings at GitHub Security → Code scanning. The `ci.yml` `Quality Gate
 4. Publish to PyPI (`environment: pypi`)
 
 Do not bypass TestPyPI stage; production publish is intentionally downstream.
+
+### Runbook: Container image serve and version
+
+`publish-image.yml` is the GHCR image workflow. The package publish above does not build this image. Contract and flags: [Serve and version gate](CICD_REFERENCE.md#serve-and-version-gate).
+
+When it runs:
+
+1. A `v*` release, or a manual dispatch with `push: true`, builds `linux/amd64` and `linux/arm64` on native runners and pushes each arch by digest.
+2. `util/check_image_serves.py` starts that digest with the image `CMD` and requires `GET /v1/health` on port 8050 inside the container, plus one version on three surfaces: installed `juniper-canopy` metadata, `juniper_canopy.__version__`, and the health body's `version` field.
+3. On a release that version is the tag with the leading `v` removed, and it must equal `pyproject.toml` `project.version` or the step stops before the script.
+4. The digest is exported only after the check passes. The `merge` job then writes `X.Y.Z`, `X.Y`, and `latest`. A failed arch uploads no digest, so no tag is written.
+
+A pull request runs the same check only when a path in the workflow filter changes, against the local tag `canopy-smoke:<arch>`, and pushes nothing. The expected version on that arm is `project.version`.
+
+Reading a failure:
+
+- `installed metadata version … != expected` or `__version__ … != metadata`: the image's package version and the tag (or `pyproject.toml` on a PR) disagree. Fix the version source that is wrong, then rebuild. An import-only smoke test stays green in this case.
+- `liveness answered …, not 200` or the container exited: `/v1/health` did not come up within 120 seconds. The step prints the last log lines. The image binds `127.0.0.1`, so check the in-container probe, not a host-published port.
+- `release vX.Y.Z names X.Y.Z, but pyproject.toml says …`: the tag and `project.version` disagree. Retag or fix `pyproject.toml` before publishing. The script has not run yet.
+
+The image is built with demo mode off and `CASCOR_SERVICE_URL=http://juniper-cascor:8200`. When that host does not answer, startup falls back to demo mode so `/v1/health` can still return 200. The gate does not require a live CasCor, and it does not call `/v1/health/ready`.
 
 ## Quality Gates and Merge Criteria
 
@@ -1564,6 +1618,16 @@ The `codeql-action` group updates `init` / `autobuild` / `analyze` in `codeql.ym
     queries: +security-and-quality
 ```
 
+### Claude Code assistant
+
+`claude.yml` is an optional assistant, not a merge gate. The contract is [Claude Code workflow](CICD_REFERENCE.md#claude-code-workflow).
+
+1. Mention `@claude` as its own word in a new issue comment, a pull-request review comment, a submitted review body, or the title or body of an issue you are opening. Case does not matter: the workflow `if` and the action both ignore it.
+2. Do not expect a pull-request description, an issue edit, or an assignee change to call the model. Assigning an issue whose text already contains `@claude` starts the job, then the action skips (`assignee_trigger` is unset).
+3. The actor must be a human with write access. Bot comments are not on `allowed_bots`, so a matching bot comment fails the step.
+4. Confirm the repo can read `ANTHROPIC_API_KEY`. The workflow header calls that an org secret. The step passes no other auth input.
+5. A Dependabot pull request that only changes the `anthropics/claude-code-action` `uses:` line and its `# vX.Y.Z` comment is the expected shape. It is not in the `codeql-action` group. The SHA stays on the `uses:` line and the version in its `# vX.Y.Z` comment; do not copy either into these docs.
+
 ---
 
 ## Emergency Procedures
@@ -1700,8 +1764,9 @@ Fix by: 2025-11-12
 
 ### `lockfile-check` fails with diff
 
-- Recompile `requirements.lock` using all three extras.
-- Ensure no manual edits were made to lockfile body.
+- Recompile `requirements.lock` with `--extra juniper-data`, `--extra juniper-cascor`, `--extra observability`, and `--upgrade`.
+- Freshness compares pin lines only. It uses `requirements.lock` as a `--constraint`. It fails when `pyproject.toml` has drifted past those pins.
+- A floor bump that exists only in `conf/requirements_ci.txt` leaves this job green. The lock diff on that PR is the `--upgrade` regen described in [Dependabot lockfile automation](#runbook-dependabot-lockfile-automation).
 
 ### `docs` fails
 

@@ -2,9 +2,9 @@
 
 ## Get Juniper Canopy running in 5 minutes
 
-**Version:** 0.25.3
+**Version:** 0.25.4
 **Status:** ✅ Production Ready
-**Last Updated:** September 5, 2026
+**Last Updated:** October 8, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -556,6 +556,98 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 **See:** [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)
 
+---
+
+### Issue 10: Replay Range Skips the Last Frame, or a Control Re-fires
+
+**Symptom:** A time range on the Replay tab never plays its last epoch. The scrubber's last position does nothing. After a control, or after the session simply repaints, the same action is sent again.
+
+**Cause:** The build predates canopy#697. Cascor's range end is exclusive (`[start, end)`) and `snapshot_window.end_epoch` is the history length. The sliders are inclusive. `render_session` writes the scrubber, speed, and range, and those values are Inputs of `queue_control`. Since canopy#697 the player shows `end - 1`, sends `hi + 1`, stops the scrubber at `end_epoch - 1`, and returns `dash.no_update` when the painted value already matches the session.
+
+**Check:**
+
+```bash
+cd src && pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v
+```
+
+**See:** [AGENTS_REFERENCE.md § Replay index contract](AGENTS_REFERENCE.md#replay-index-contract)
+
+---
+
+### Issue 11: Recurrence Fit Shows a Status Code and No Reason
+
+**Symptom:** A Recurrence (LMU) fit fails. The status bar reads `Failed — recurrence service error <code> on POST /v1/train`, with nothing after the path.
+
+**Cause:** The service answered with a 5xx, or with a 4xx whose body had no usable `detail`. A 5xx `detail` is never appended, because that text can quote the recurrence service's own upstream header value. A 4xx `detail` is appended after the path, as in `recurrence service error 422 on POST /v1/train: invalid dataset: X_train has non-finite values (NaN/Inf)`. canopy 0.8.1 and earlier append no `detail` at all, and their status bar shows a bare `Failed`.
+
+**Check:**
+
+```bash
+curl -s http://127.0.0.1:8050/api/status | python -m json.tool
+```
+
+`completion_reason` holds the whole message. A 4xx `detail` is flattened and cut at 300 characters. A validation list becomes `loc -> msg` pairs and omits each item's `input`. When the status-bar label cuts a long reason at 120 characters, hover the bar: the tooltip holds the rest, up to 480 characters. For a 5xx, read the recurrence service's own log.
+
+The regression card is titled `Recurrence (LMU) — in-sample (train split) regression metrics`, with the caption `Computed on the training split the fit saw; not a held-out score.` Its numbers are the training split `POST /v1/train` scored.
+
+**See:** [AGENTS_REFERENCE.md § Recurrence fit refusal and in-sample scores](AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores)
+
+---
+
+### Issue 12: Recurrence Fit Names the Key, or Says Retry After
+
+**Symptom:** A recurrence fit fails and the status bar names `JUNIPER_CANOPY_RECURRENCE_API_KEY` and `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`, or it says `retry after 30 s`. The visible line cuts at 120 characters and ends in `…`. canopy 0.8.1 and earlier word the key refusal as `check recurrence_api_key`.
+
+**Cause:** 401 / 403 means the outbound `X-API-Key` is missing or wrong. 429 means the recurrence service rate-limited the call and sent `Retry-After`. The dashboard polls canopy, so a 429 usually means another client shares that key or address.
+
+**Check:**
+
+```bash
+# Prefixed pair wins. The shared JUNIPER_RECURRENCE_API_KEY pair applies when this pair is unset.
+# The _FILE form is read before the direct variable. Restart canopy after changing either.
+export JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE=/run/secrets/recurrence_api_key
+```
+
+Hover the status text for the rest of the reason (up to 480 characters). A restored snapshot counts as a model (`model_present`); it does not mean the fit you just started succeeded. The recurrence model version is read from the service, and no screen shows it yet.
+
+**See:** [AGENTS_REFERENCE.md § Recurrence key, restored model, and service version](AGENTS_REFERENCE.md#recurrence-key-restored-model-and-service-version)
+
+---
+
+### Issue 13: Start Refuses a Wider Dataset
+
+**Symptom:** Start fails. The alert says the staged dataset is wider than the current network. The charts still show the previous run, and the pending-dataset banner is still up.
+
+**Cause:** A plain Start continues the current network. It cannot add features or outputs. Cascor refuses before loading anything and opens the message with `[start_fresh_required]` (juniper-cascor#687; canopy#681 recognises it). `equities` (15 features) and `mnist` (784 features) are the cases the unit test drives.
+
+**What to do:** Click **Stop & Restart with new dataset**. Turn **Start fresh** on. Confirm. That rebuilds an untrained network from the staged dataset. Applied parameters (including edits in the modal) and on-disk snapshots are kept; the current model and its retained metrics and history are discarded. The toggle defaults to off, which would continue the network that is too narrow. Edits in the modal are applied before the restart. The alert stays up until you dismiss it or a later command succeeds.
+
+A cascor that does not send the marker will not show this alert. It used to consume the staged dataset before refusing, so the banner this alert names is already gone. Do not invent a second wording for that case.
+
+```bash
+cd src && pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
+```
+
+**See:** [AGENTS_REFERENCE.md § Start-fresh refusal](AGENTS_REFERENCE.md#start-fresh-refusal-f1-f2)
+
+---
+
+### Issue 14: Sidebar Says "backend status unknown"
+
+**Symptom:** Under **Model:** the sidebar reads `Selected: CasCor (Cascade-Correlation) · backend status unknown` at first paint, or it stays there after the page loads.
+
+**Cause:** **Active** is only used after a round-trip includes a `backend` that serves the selection. The layout seed has no `backend`. The same sentence is written when `GET /api/selection` fails (connection error, non-OK status, or a 200 with no `nn_model`). It is not the **NOT ACTIVE** sentence, which names the backend that is running and disables Start. Unknown does not disable Start by itself. A missing dataset still does.
+
+**Check:** Reload. A healthy body includes `backend` (`service`, `demo`, or `recurrence`) and the line becomes **Active** or **NOT ACTIVE**. A stuck unknown line means the mount read failed. The log says `Selection hydration read failed`.
+
+```bash
+curl -s http://127.0.0.1:8050/api/selection | python -m json.tool
+
+cd src && pytest tests/regression/test_selection_reachability_guardrails.py -k X11 -v
+```
+
+**See:** [AGENTS_REFERENCE.md § Sidebar model summary](AGENTS_REFERENCE.md#sidebar-model-summary-x11)
+
 ## Next Steps
 
 ### Learn More
@@ -565,6 +657,10 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 - **[AGENTS.md](../AGENTS.md)** - Development guide and conventions
 - **[Event-loop I/O discipline (X7)](AGENTS_REFERENCE.md#event-loop-io-discipline-x7)** - Keep `/v1/health/live` answerable when cascor is down
 - **[Cascor status cache (X7 slice 1c)](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)** - Why `/api/status` publishes a class, not a raw payload
+- **[Replay index contract](AGENTS_REFERENCE.md#replay-index-contract)** - Exclusive range end, window length, and why a replay paint must not queue a control
+- **[Recurrence fit refusal and in-sample scores](AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores)** - Where a 4xx `detail` goes, and why the regression card is a training-split score
+- **[Recurrence key, restored model, and service version](AGENTS_REFERENCE.md#recurrence-key-restored-model-and-service-version)** - What a 401, a 429, a restored snapshot, and a blank model version mean
+- **[Start-fresh refusal (F1, F2)](AGENTS_REFERENCE.md#start-fresh-refusal-f1-f2)** - What to do when Start says the staged dataset is wider than the network
 - **[CI/CD Guide](ci_cd/CICD_QUICK_START.md)** - Testing and CI/CD workflows
 
 ### Start Developing
@@ -825,8 +921,8 @@ conda list | grep -E "(fastapi|dash|uvicorn)"
 
 ---
 
-**Last Updated:** September 5, 2026  
-**Version:** 0.25.3  
+**Last Updated:** October 8, 2026  
+**Version:** 0.25.4  
 **Status:** ✅ Production Ready
 
-**Last Updated:** 2026-03-15
+**Last Updated:** 2026-10-08
