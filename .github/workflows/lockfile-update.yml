@@ -5,10 +5,10 @@
 # Application:   juniper_canopy
 # File Name:     lockfile-update.yml
 # Author:        Paul Calnon
-# Version:       0.1.0
+# Version:       0.1.1
 #
 # Date Created:  2026-03-02
-# Last Modified: 2026-07-27
+# Last Modified: 2026-10-08
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-2026 Paul Calnon
@@ -39,6 +39,8 @@
 #    Dependabot, which re-enables full auto-regen for Dependabot pushes with
 #    no further workflow change. A missing PAT on a NON-Dependabot run still
 #    fails loudly (secret misconfiguration must not pass silently).
+#    The PAT has been registered there since 2026-07-30, so Dependabot pushes
+#    regenerate too; the commit step explains the "[dependabot skip]" tag.
 #
 #    required_signatures (2026-08-14, juniper-ml#1099): the 2026-08-12 branch-
 #    protection normalization made every repo reject UNSIGNED commits, and a
@@ -170,9 +172,20 @@ jobs:
             exit 0
           fi
 
-          # Pick a commit message tag that matches the trigger so the audit
-          # trail reads naturally. The "[dependabot skip]" tag also keeps
-          # Dependabot from rebasing on top of our regen.
+          # Pick a commit message that matches the trigger so the audit trail
+          # reads naturally. "[dependabot skip]" does NOT stop Dependabot
+          # rebasing; it does the opposite. Dependabot ignores a commit carrying
+          # it when deciding whether someone else edited its branch, so it KEEPS
+          # rebasing and may force-push over (erase) this regen, as it erased
+          # b63f211e on canopy#709 (GitHub Docs, "Allowing Dependabot to rebase
+          # and force push over extra commits"). That is deliberate: each rebase
+          # is a push to dependabot/pip/**, which re-runs this regen (the PAT
+          # has been in the Dependabot secret store since 2026-07-30). Untagged,
+          # this commit would stop Dependabot rebasing and leave its PR stuck
+          # behind main under the strict up-to-date ruleset. The required
+          # Lockfile Freshness check still fails a PR whose lock is stale.
+          # juniper-data, -cascor, -data-client, -cascor-client and
+          # -cascor-worker tag their regen commit the same way.
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
             MSG="chore(deps): auto-regenerate requirements.lock after pyproject change"
           else

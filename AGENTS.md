@@ -5,7 +5,7 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.8.1
-**Last Updated**: 2026-09-22
+**Last Updated**: 2026-10-08
 
 ---
 
@@ -340,7 +340,7 @@ Tests touching these collectors should use `juniper_observability.testing.reset_
 | Publish | `publish.yml` | Release publishing automation |
 | Publish container image | `publish-image.yml` | GHCR multi-arch (amd64 + arm64) image on `v*` releases; PR arm builds both arches for image inputs; torch CPU-only by pin; never a required check |
 | Security Scan | `security-scan.yml` | Security vulnerability scanning |
-| Sequence Safety (Advisory) | `sequence-safety.yml` | Per-PR advisory compositional-loss screen (AST symbol-loss + docs deletion-magnitude, `src/**/*.py` symbol scope) via the packaged `juniper-ci-tools` console scripts; standalone, never a required check |
+| Sequence Safety | `sequence-safety.yml` | Per-PR compositional-loss screen (AST symbol-loss + docs deletion-magnitude, `src/**/*.py` symbol scope) via the packaged `juniper-ci-tools` console scripts. **Required** by the `juniper-canopy-rules` ruleset but standalone (not in the Quality Gate `needs:`), so a green Quality Gate is not enough to merge; waivers and the WARN-only label hatch are in its header |
 | Post-Merge Main Verification | `main-verify.yml` | Bypass-proof post-merge sequence-safety net (screens-only; per-SHA no-cancel; catch-up base; stable-title tracking-issue notify) |
 
 ```bash

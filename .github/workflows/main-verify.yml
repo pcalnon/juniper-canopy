@@ -18,7 +18,7 @@
 #    juniper-ml via the published juniper-ci-tools package -- juniper-ml
 #    notes/JUNIPER_2026-08-07_JUNIPER-ECOSYSTEM_SEQUENCE-SAFETY-ROLLOUT-PLAN.md). Runs
 #    AFTER a merge lands on main, so it fires no matter who merged or what they bypassed --
-#    the bypass-proof compositional-loss net the per-PR advisory screen (sequence-safety.yml)
+#    the bypass-proof compositional-loss net the per-PR required screen (sequence-safety.yml)
 #    cannot guarantee. The flood damage class was every-PR-green but serial same-file merges
 #    fused / silently deleted sibling content, and a deleted test cannot fail, so nothing
 #    per-PR saw it.
