@@ -1,0 +1,883 @@
+{
+  "_provenance": {
+    "source": "juniper-data",
+    "commit": "462da2183d1b3c790e8885ab3e25730fab1ac6a9",
+    "dirty": false,
+    "captured": "2026-10-08",
+    "what": "GENERATOR_REGISTRY[name]['params_class'].model_json_schema() -- the `schema` field of each GET /v1/generators entry",
+    "tool": "util/ad-hoc/2026-10-08_capture_sequence_generator_schemas.py"
+  },
+  "generators": [
+    {
+      "name": "multi_sine",
+      "version": "3.0.0",
+      "schema": {
+        "description": "Configuration for the superposition-of-sinusoids regression generator.\n\nThe raw signal is ``x(t) = Σ_i A_i sin(2π f_i t + φ_i) + ε(t)`` for\n``n_components`` sinusoids. Frequencies / amplitudes / phases may be given\nexplicitly (for a known-answer signal) or left ``None`` to be drawn from a\nseeded uniform distribution. Inherits the windowing knobs (``n_steps`` /\n``lookback`` / ``horizon`` / ``sample_dt`` / ``train_ratio`` / ``seed``).",
+        "properties": {
+          "n_steps": {
+            "default": 2000,
+            "description": "Length T of the raw series before windowing.",
+            "maximum": 1000000,
+            "minimum": 8,
+            "title": "N Steps",
+            "type": "integer"
+          },
+          "lookback": {
+            "default": 32,
+            "description": "Window length L (number of steps per sequence window).",
+            "maximum": 512,
+            "minimum": 2,
+            "title": "Lookback",
+            "type": "integer"
+          },
+          "horizon": {
+            "default": 1,
+            "description": "Forecast horizon h (the target is h steps after the window end).",
+            "maximum": 512,
+            "minimum": 1,
+            "title": "Horizon",
+            "type": "integer"
+          },
+          "sample_dt": {
+            "default": 1.0,
+            "description": "Constant per-step elapsed time (the regular Δt), measured in the generator's time_unit.",
+            "exclusiveMinimum": 0,
+            "title": "Sample Dt",
+            "type": "number"
+          },
+          "train_ratio": {
+            "default": 0.8,
+            "description": "Fraction of the earliest windows used for training.",
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "title": "Train Ratio",
+            "type": "number"
+          },
+          "val_ratio": {
+            "default": 0.1,
+            "description": "Fraction of windows used for in-loop validation, taken from the windows immediately after train; the test split is every later window.",
+            "exclusiveMaximum": 1,
+            "minimum": 0,
+            "title": "Val Ratio",
+            "type": "number"
+          },
+          "seed": {
+            "default": 0,
+            "description": "Random seed for reproducibility (the synthetics are deterministic given the seed).",
+            "minimum": 0,
+            "title": "Seed",
+            "type": "integer"
+          },
+          "scaling": {
+            "default": "identity",
+            "description": "Advisory scaling reported in DatasetMeta: 'identity' (raw, no transform) or 'standardize' (train-split mean/std/min/max of dt + target). The NPZ stays RAW either way.",
+            "enum": [
+              "identity",
+              "standardize"
+            ],
+            "title": "Scaling",
+            "type": "string"
+          },
+          "n_components": {
+            "default": 3,
+            "description": "Number K of superimposed sinusoids.",
+            "maximum": 16,
+            "minimum": 1,
+            "title": "N Components",
+            "type": "integer"
+          },
+          "frequencies": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Per-component frequencies (cycles per time_unit). None => seeded uniform in [0.02, 0.15].",
+            "title": "Frequencies"
+          },
+          "amplitudes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Per-component amplitudes. None => seeded uniform in [0.5, 1.5].",
+            "title": "Amplitudes"
+          },
+          "phases": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Per-component phases in radians. None => seeded uniform in [0, 2π).",
+            "title": "Phases"
+          },
+          "noise_std": {
+            "default": 0.0,
+            "description": "Std of additive Gaussian observation noise; 0 yields the exact closed-form signal.",
+            "minimum": 0,
+            "title": "Noise Std",
+            "type": "number"
+          }
+        },
+        "title": "MultiSineParams",
+        "type": "object"
+      }
+    },
+    {
+      "name": "mackey_glass",
+      "version": "3.0.0",
+      "schema": {
+        "description": "Configuration for the Mackey-Glass delay-differential regression generator.\n\nIntegrates ``dx/dt = β x(t-τ) / (1 + x(t-τ)^n) - γ x(t)`` by the discrete\nEuler scheme ``x[k+1] = x[k] + Δt (β x[k-τ] / (1 + x[k-τ]^n) - γ x[k])`` with a\nconstant history ``x(t) = x0`` for ``t in [-τ, 0]``. The defaults are the\ncanonical chaotic regime (β=0.2, γ=0.1, n=10, τ=17). Inherits the windowing\nknobs from :class:`SyntheticSequenceParams`.",
+        "properties": {
+          "n_steps": {
+            "default": 2000,
+            "description": "Length T of the raw series before windowing.",
+            "maximum": 1000000,
+            "minimum": 8,
+            "title": "N Steps",
+            "type": "integer"
+          },
+          "lookback": {
+            "default": 32,
+            "description": "Window length L (number of steps per sequence window).",
+            "maximum": 512,
+            "minimum": 2,
+            "title": "Lookback",
+            "type": "integer"
+          },
+          "horizon": {
+            "default": 1,
+            "description": "Forecast horizon h (the target is h steps after the window end).",
+            "maximum": 512,
+            "minimum": 1,
+            "title": "Horizon",
+            "type": "integer"
+          },
+          "sample_dt": {
+            "default": 1.0,
+            "description": "Constant per-step elapsed time (the regular Δt), measured in the generator's time_unit.",
+            "exclusiveMinimum": 0,
+            "title": "Sample Dt",
+            "type": "number"
+          },
+          "train_ratio": {
+            "default": 0.8,
+            "description": "Fraction of the earliest windows used for training.",
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "title": "Train Ratio",
+            "type": "number"
+          },
+          "val_ratio": {
+            "default": 0.1,
+            "description": "Fraction of windows used for in-loop validation, taken from the windows immediately after train; the test split is every later window.",
+            "exclusiveMaximum": 1,
+            "minimum": 0,
+            "title": "Val Ratio",
+            "type": "number"
+          },
+          "seed": {
+            "default": 0,
+            "description": "Random seed for reproducibility (the synthetics are deterministic given the seed).",
+            "minimum": 0,
+            "title": "Seed",
+            "type": "integer"
+          },
+          "scaling": {
+            "default": "identity",
+            "description": "Advisory scaling reported in DatasetMeta: 'identity' (raw, no transform) or 'standardize' (train-split mean/std/min/max of dt + target). The NPZ stays RAW either way.",
+            "enum": [
+              "identity",
+              "standardize"
+            ],
+            "title": "Scaling",
+            "type": "string"
+          },
+          "tau": {
+            "default": 17.0,
+            "description": "Delay τ in time_unit; the canonical chaotic regime uses 17.",
+            "exclusiveMinimum": 0,
+            "title": "Tau",
+            "type": "number"
+          },
+          "beta": {
+            "default": 0.2,
+            "description": "Production coefficient β.",
+            "exclusiveMinimum": 0,
+            "title": "Beta",
+            "type": "number"
+          },
+          "gamma": {
+            "default": 0.1,
+            "description": "Decay coefficient γ.",
+            "exclusiveMinimum": 0,
+            "title": "Gamma",
+            "type": "number"
+          },
+          "n_exp": {
+            "default": 10.0,
+            "description": "Nonlinearity exponent n.",
+            "exclusiveMinimum": 0,
+            "title": "N Exp",
+            "type": "number"
+          },
+          "x0": {
+            "default": 0.5,
+            "description": "Constant history value x(t)=x0 for t in [-τ, 0].",
+            "exclusiveMinimum": 0,
+            "title": "X0",
+            "type": "number"
+          },
+          "init_noise_std": {
+            "default": 0.0,
+            "description": "Std of an optional seeded Gaussian perturbation added to the history block; 0 yields an exact deterministic init. THIS IS THE KNOB THAT DECIDES WHETHER ``seed`` HAS ANY EFFECT: the seed is consumed only inside ``if init_noise_std > 0``, so at 0 every seed produces byte-identical output. Defaulted from DEFAULT_MACKEY_GLASS_INIT_NOISE_STD (juniper-data#319) so a deployment can make this generator seed-sensitive without editing code.",
+            "minimum": 0,
+            "title": "Init Noise Std",
+            "type": "number"
+          },
+          "discard": {
+            "default": 250,
+            "description": "Transient steps to integrate and drop before collecting n_steps (settles onto the attractor).",
+            "maximum": 100000,
+            "minimum": 0,
+            "title": "Discard",
+            "type": "integer"
+          }
+        },
+        "title": "MackeyGlassParams",
+        "type": "object"
+      }
+    },
+    {
+      "name": "irregular_sine",
+      "version": "3.0.0",
+      "schema": {
+        "description": "Configuration for the irregularly-sampled sinusoid-superposition generator.\n\nSamples the continuous-time signal ``x(t) = Σ_i A_i sin(2π f_i t + φ_i) + ε(t)``\nat NON-uniform times: the k-th inter-sample gap is\n``sample_dt * U[1 - jitter, 1 + jitter]``, so ``sample_dt`` is the *nominal*\nstep and ``jitter`` controls the irregularity (0 => regular; toward 1 =>\nhighly irregular). The result exercises the per-step ``dt`` channel with\ngenuine non-uniformity, independently of equities' calendar gaps. Inherits the\nwindowing knobs from :class:`SyntheticSequenceParams`.",
+        "properties": {
+          "n_steps": {
+            "default": 2000,
+            "description": "Length T of the raw series before windowing.",
+            "maximum": 1000000,
+            "minimum": 8,
+            "title": "N Steps",
+            "type": "integer"
+          },
+          "lookback": {
+            "default": 32,
+            "description": "Window length L (number of steps per sequence window).",
+            "maximum": 512,
+            "minimum": 2,
+            "title": "Lookback",
+            "type": "integer"
+          },
+          "horizon": {
+            "default": 1,
+            "description": "Forecast horizon h (the target is h steps after the window end).",
+            "maximum": 512,
+            "minimum": 1,
+            "title": "Horizon",
+            "type": "integer"
+          },
+          "sample_dt": {
+            "default": 1.0,
+            "description": "Constant per-step elapsed time (the regular Δt), measured in the generator's time_unit.",
+            "exclusiveMinimum": 0,
+            "title": "Sample Dt",
+            "type": "number"
+          },
+          "train_ratio": {
+            "default": 0.8,
+            "description": "Fraction of the earliest windows used for training.",
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "title": "Train Ratio",
+            "type": "number"
+          },
+          "val_ratio": {
+            "default": 0.1,
+            "description": "Fraction of windows used for in-loop validation, taken from the windows immediately after train; the test split is every later window.",
+            "exclusiveMaximum": 1,
+            "minimum": 0,
+            "title": "Val Ratio",
+            "type": "number"
+          },
+          "seed": {
+            "default": 0,
+            "description": "Random seed for reproducibility (the synthetics are deterministic given the seed).",
+            "minimum": 0,
+            "title": "Seed",
+            "type": "integer"
+          },
+          "scaling": {
+            "default": "identity",
+            "description": "Advisory scaling reported in DatasetMeta: 'identity' (raw, no transform) or 'standardize' (train-split mean/std/min/max of dt + target). The NPZ stays RAW either way.",
+            "enum": [
+              "identity",
+              "standardize"
+            ],
+            "title": "Scaling",
+            "type": "string"
+          },
+          "jitter": {
+            "default": 0.5,
+            "description": "Sampling irregularity: per-step gap = sample_dt * U[1 - jitter, 1 + jitter]. 0 yields regular spacing; values toward 1 are highly irregular.",
+            "exclusiveMaximum": 1,
+            "minimum": 0,
+            "title": "Jitter",
+            "type": "number"
+          },
+          "n_components": {
+            "default": 3,
+            "description": "Number K of superimposed sinusoids.",
+            "maximum": 16,
+            "minimum": 1,
+            "title": "N Components",
+            "type": "integer"
+          },
+          "frequencies": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Per-component frequencies (cycles per time_unit). None => seeded uniform in [0.02, 0.15].",
+            "title": "Frequencies"
+          },
+          "amplitudes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Per-component amplitudes. None => seeded uniform in [0.5, 1.5].",
+            "title": "Amplitudes"
+          },
+          "phases": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Per-component phases in radians. None => seeded uniform in [0, 2π).",
+            "title": "Phases"
+          },
+          "noise_std": {
+            "default": 0.0,
+            "description": "Std of additive Gaussian observation noise; 0 yields the exact closed-form signal.",
+            "minimum": 0,
+            "title": "Noise Std",
+            "type": "number"
+          }
+        },
+        "title": "IrregularSineParams",
+        "type": "object"
+      }
+    },
+    {
+      "name": "ar_p",
+      "version": "3.0.0",
+      "schema": {
+        "description": "Configuration for the autoregressive AR(p) regression generator.\n\nGenerates ``xₜ = c + Σ_{i=1}^p φ_i xₜ₋ᵢ + εₜ`` with ``εₜ ~ N(0, σ²)``. The\norder ``p`` is ``len(coefficients)``; the conditional mean depends on exactly\nthe last ``p`` observations (a bounded-window memory). The default is a stable\nAR(2). Inherits the windowing knobs from :class:`SyntheticSequenceParams`.",
+        "properties": {
+          "n_steps": {
+            "default": 2000,
+            "description": "Length T of the raw series before windowing.",
+            "maximum": 1000000,
+            "minimum": 8,
+            "title": "N Steps",
+            "type": "integer"
+          },
+          "lookback": {
+            "default": 32,
+            "description": "Window length L (number of steps per sequence window).",
+            "maximum": 512,
+            "minimum": 2,
+            "title": "Lookback",
+            "type": "integer"
+          },
+          "horizon": {
+            "default": 1,
+            "description": "Forecast horizon h (the target is h steps after the window end).",
+            "maximum": 512,
+            "minimum": 1,
+            "title": "Horizon",
+            "type": "integer"
+          },
+          "sample_dt": {
+            "default": 1.0,
+            "description": "Constant per-step elapsed time (the regular Δt), measured in the generator's time_unit.",
+            "exclusiveMinimum": 0,
+            "title": "Sample Dt",
+            "type": "number"
+          },
+          "train_ratio": {
+            "default": 0.8,
+            "description": "Fraction of the earliest windows used for training.",
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "title": "Train Ratio",
+            "type": "number"
+          },
+          "val_ratio": {
+            "default": 0.1,
+            "description": "Fraction of windows used for in-loop validation, taken from the windows immediately after train; the test split is every later window.",
+            "exclusiveMaximum": 1,
+            "minimum": 0,
+            "title": "Val Ratio",
+            "type": "number"
+          },
+          "seed": {
+            "default": 0,
+            "description": "Random seed for reproducibility (the synthetics are deterministic given the seed).",
+            "minimum": 0,
+            "title": "Seed",
+            "type": "integer"
+          },
+          "scaling": {
+            "default": "identity",
+            "description": "Advisory scaling reported in DatasetMeta: 'identity' (raw, no transform) or 'standardize' (train-split mean/std/min/max of dt + target). The NPZ stays RAW either way.",
+            "enum": [
+              "identity",
+              "standardize"
+            ],
+            "title": "Scaling",
+            "type": "string"
+          },
+          "coefficients": {
+            "default": [
+              0.5,
+              -0.3
+            ],
+            "description": "AR coefficients [φ1, ..., φp]; the order p is len(coefficients). Default is a stable AR(2).",
+            "items": {
+              "type": "number"
+            },
+            "title": "Coefficients",
+            "type": "array"
+          },
+          "const": {
+            "default": 0.0,
+            "description": "Constant term c (the unconditional-mean offset).",
+            "title": "Const",
+            "type": "number"
+          },
+          "sigma": {
+            "default": 0.1,
+            "description": "Std σ of the Gaussian innovations εₜ.",
+            "minimum": 0,
+            "title": "Sigma",
+            "type": "number"
+          },
+          "burn_in": {
+            "default": 100,
+            "description": "Warmup steps to generate and drop before collecting n_steps (washes out the initial condition).",
+            "maximum": 100000,
+            "minimum": 0,
+            "title": "Burn In",
+            "type": "integer"
+          }
+        },
+        "title": "ArPParams",
+        "type": "object"
+      }
+    },
+    {
+      "name": "delay_product",
+      "version": "3.0.0",
+      "schema": {
+        "description": "Configuration for the delay-product (bilinear capacity) generator.\n\nSamples the continuous-time signal ``x(t) = Σ_i A_i sin(2π f_i t + φ_i) + ε(t)``\nat NON-uniform times (the same irregular-Δt sampling as ``irregular_sine``: the\nk-th inter-sample gap is ``sample_dt * U[1 - jitter, 1 + jitter]``), then defines\nthe regression target as the **bilinear product of two delayed in-window\nvalues**::\n\n    y_i = x(t_i − τ₁) · x(t_i − τ₂)\n\nwhere ``t_i`` is the window-end step and ``τ₁ = lag1`` / ``τ₂ = lag2`` are integer\nstep-delays measured back from the window end, kept STRICTLY inside the lookback\n(``0 <= lag < lookback``; ``lag = 0`` is the window-end step itself). Because each\ndelayed value is a (near-)linear functional of the fixed-order LMU Legendre\nmemory, their product is a *quadratic form* in the memory state: a LINEAR readout\ncan only form linear combinations and provably cannot represent it (its r² is\nbounded below 1), while a nonlinear readout (random Fourier features / MLP) can\napproximate it. This is the capacity instrument that exposes a clear\nnonlinear ≫ linear r² gap, complementing the near-linear synthetics where the\nlinear readout is already at its ceiling (DP-3 readout-spectrum design §8a).\n\nInherits the windowing knobs (``n_steps`` / ``lookback`` / ``horizon`` /\n``sample_dt`` / ``train_ratio`` / ``seed`` / ``scaling``) from\n:class:`SyntheticSequenceParams`. ``horizon`` only positions the windows (and the\nadvisory ``target_dt`` side-channel); the target itself is in-window, so the\nanswer does not live at the forecast step.",
+        "properties": {
+          "n_steps": {
+            "default": 2000,
+            "description": "Length T of the raw series before windowing.",
+            "maximum": 1000000,
+            "minimum": 8,
+            "title": "N Steps",
+            "type": "integer"
+          },
+          "lookback": {
+            "default": 32,
+            "description": "Window length L (number of steps per sequence window).",
+            "maximum": 512,
+            "minimum": 2,
+            "title": "Lookback",
+            "type": "integer"
+          },
+          "horizon": {
+            "default": 1,
+            "description": "Forecast horizon h (the target is h steps after the window end).",
+            "maximum": 512,
+            "minimum": 1,
+            "title": "Horizon",
+            "type": "integer"
+          },
+          "sample_dt": {
+            "default": 1.0,
+            "description": "Constant per-step elapsed time (the regular Δt), measured in the generator's time_unit.",
+            "exclusiveMinimum": 0,
+            "title": "Sample Dt",
+            "type": "number"
+          },
+          "train_ratio": {
+            "default": 0.8,
+            "description": "Fraction of the earliest windows used for training.",
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "title": "Train Ratio",
+            "type": "number"
+          },
+          "val_ratio": {
+            "default": 0.1,
+            "description": "Fraction of windows used for in-loop validation, taken from the windows immediately after train; the test split is every later window.",
+            "exclusiveMaximum": 1,
+            "minimum": 0,
+            "title": "Val Ratio",
+            "type": "number"
+          },
+          "seed": {
+            "default": 0,
+            "description": "Random seed for reproducibility (the synthetics are deterministic given the seed).",
+            "minimum": 0,
+            "title": "Seed",
+            "type": "integer"
+          },
+          "scaling": {
+            "default": "identity",
+            "description": "Advisory scaling reported in DatasetMeta: 'identity' (raw, no transform) or 'standardize' (train-split mean/std/min/max of dt + target). The NPZ stays RAW either way.",
+            "enum": [
+              "identity",
+              "standardize"
+            ],
+            "title": "Scaling",
+            "type": "string"
+          },
+          "lag1": {
+            "default": 2,
+            "description": "First delay τ₁ in steps back from the window end (0 = the window-end step). Must be < lookback (the delayed step must lie inside the window).",
+            "minimum": 0,
+            "title": "Lag1",
+            "type": "integer"
+          },
+          "lag2": {
+            "default": 8,
+            "description": "Second delay τ₂ in steps back from the window end. Must be < lookback. May equal lag1 (yielding a squared term x(t−τ)², still a non-linear capacity target).",
+            "minimum": 0,
+            "title": "Lag2",
+            "type": "integer"
+          },
+          "jitter": {
+            "default": 0.5,
+            "description": "Sampling irregularity: per-step gap = sample_dt * U[1 - jitter, 1 + jitter]. 0 yields regular spacing; values toward 1 are highly irregular.",
+            "exclusiveMaximum": 1,
+            "minimum": 0,
+            "title": "Jitter",
+            "type": "number"
+          },
+          "n_components": {
+            "default": 3,
+            "description": "Number K of superimposed sinusoids.",
+            "maximum": 16,
+            "minimum": 1,
+            "title": "N Components",
+            "type": "integer"
+          },
+          "frequencies": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Per-component frequencies (cycles per time_unit). None => seeded uniform in [0.02, 0.15].",
+            "title": "Frequencies"
+          },
+          "amplitudes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Per-component amplitudes. None => seeded uniform in [0.5, 1.5].",
+            "title": "Amplitudes"
+          },
+          "phases": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Per-component phases in radians. None => seeded uniform in [0, 2π).",
+            "title": "Phases"
+          },
+          "noise_std": {
+            "default": 0.0,
+            "description": "Std of additive Gaussian observation noise; 0 yields the exact closed-form signal (and an exactly-known product target).",
+            "minimum": 0,
+            "title": "Noise Std",
+            "type": "number"
+          }
+        },
+        "title": "DelayProductParams",
+        "type": "object"
+      }
+    },
+    {
+      "name": "equities_seq",
+      "version": "6.0.0",
+      "schema": {
+        "description": "Parameters for the windowed equities time-series generator.\n\nInherits the full equities configuration (universe, date range, cost basis,\nconditioning, normalization) and adds a ``lookback`` window length. The\ntrain/test boundary is a single chronological cut per ticker at\n``round(n * train_ratio)`` mapped to that row's date; windows are assigned to\na split by their target date. ``test_ratio`` is retained for API parity but\ndoes not gate the windowed cut — the test split is every window after the cut.",
+        "properties": {
+          "symbols": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Tickers to include. None = the bundled S&P 500 constituents.",
+            "title": "Symbols"
+          },
+          "start_date": {
+            "default": "2000-01-01",
+            "description": "Inclusive start date (YYYY-MM-DD) for the price history.",
+            "title": "Start Date",
+            "type": "string"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Exclusive end date (YYYY-MM-DD). None = today (UTC).",
+            "title": "End Date"
+          },
+          "purchase_date": {
+            "default": "2000-01-03",
+            "description": "Cost-basis purchase date (YYYY-MM-DD); per-ticker clamped to the first available trading day. Rows before it carry a NaN cost_basis. Under fundamentals_fill='drop' a purchase_date after start_date (at least one weekday apart) is refused.",
+            "title": "Purchase Date",
+            "type": "string"
+          },
+          "basis_price_field": {
+            "default": "close",
+            "description": "Price field used for cost basis on the purchase date.",
+            "enum": [
+              "close",
+              "adj_close"
+            ],
+            "title": "Basis Price Field",
+            "type": "string"
+          },
+          "fundamentals_fill": {
+            "default": "nan",
+            "description": "How to represent pre-2009 missing total_shares / market_cap: zero-fill, leave NaN, or drop rows. 'drop' also drops any row before the purchase session (its cost_basis is unknown) and refuses a purchase_date after start_date.",
+            "enum": [
+              "zero",
+              "nan",
+              "drop"
+            ],
+            "title": "Fundamentals Fill",
+            "type": "string"
+          },
+          "regression_target": {
+            "default": "next_close",
+            "description": "Representation of the y_reg target: raw next-day close, simple return (next_close/close - 1), or log return ln(next_close/close). The return variants are stationary; the raw close is not.",
+            "enum": [
+              "next_close",
+              "return",
+              "log_return"
+            ],
+            "title": "Regression Target",
+            "type": "string"
+          },
+          "week52_window": {
+            "default": 252,
+            "description": "Rolling window (trading sessions) for 52-week high/low.",
+            "maximum": 2520,
+            "minimum": 2,
+            "title": "Week52 Window",
+            "type": "integer"
+          },
+          "normalize_features": {
+            "default": false,
+            "description": "Min-max normalize each feature column to [0, 1], fit on the TRAIN partition only (falling back to the full set only when train is empty). Fitting on the full set would let validation and test rows move the scaler and leak into training -- the leak juniper-data#314 removed.",
+            "title": "Normalize Features",
+            "type": "boolean"
+          },
+          "max_symbols": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 14,
+            "description": "Cap on the number of symbols (after ordering), APD-DATA-018. A universe larger than this is REFUSED unless allow_truncation is set. Omit to use the deployment default (JUNIPER_DATA_EQUITIES_MAX_SYMBOLS); None means unbounded and is honoured only up to that deployment ceiling.",
+            "title": "Max Symbols"
+          },
+          "incomplete_rows": {
+            "anyOf": [
+              {
+                "enum": [
+                  "accept",
+                  "drop"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What to do with rows whose fundamentals no rescue path could resolve, once allow_truncation has opened the gate: 'accept' keeps them (filled per fundamentals_fill) or 'drop' excludes those symbols entirely. Either way the dataset is PERMANENTLY annotated in DatasetMeta.data_quality. None inherits the deployment default (JUNIPER_DATA_EQUITIES_INCOMPLETE_ROWS). Without allow_truncation this has no effect -- the request is refused instead.",
+            "title": "Incomplete Rows"
+          },
+          "allow_truncation": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Accept a partial universe when it exceeds max_symbols, and open the gate on unresolvable-fundamentals rows. TRI-STATE (APD-DATA-052): true opts in for this request; false REFUSES truncation for this request even where the deployment enabled it; null -- the default, and what an omitted field means -- defers to JUNIPER_DATA_EQUITIES_ALLOW_TRUNCATION (or the matching .env entry), which is itself false by default, so an omitted field on a default deployment still refuses with 422. When truncation is in force the leading max_symbols symbols are imported and the dataset is PERMANENTLY annotated as truncated in its metadata.",
+            "title": "Allow Truncation"
+          },
+          "use_cache": {
+            "default": true,
+            "description": "Cache raw downloads under ~/.cache/juniper_data/equities for fast re-runs.",
+            "title": "Use Cache",
+            "type": "boolean"
+          },
+          "train_ratio": {
+            "default": 0.8,
+            "description": "Fraction of each ticker's earliest rows used for training.",
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "title": "Train Ratio",
+            "type": "number"
+          },
+          "val_ratio": {
+            "default": 0.1,
+            "description": "Fraction of each ticker's rows used for in-loop validation, taken from the rows immediately after train and before test.",
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Val Ratio",
+            "type": "number"
+          },
+          "test_ratio": {
+            "default": 0.1,
+            "description": "Fraction of each ticker's latest rows used for testing.",
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Test Ratio",
+            "type": "number"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 42,
+            "description": "Unused for the temporal split; retained for API parity. Defaulted rather than left None purely for consistency with the other generators (juniper-data#319) -- setting it changes nothing here. Note this generator's real non-reproducibility source is elsewhere: ``end_date`` defaults to the wall clock, so the same params yield different data on different days.",
+            "title": "Seed"
+          },
+          "lookback": {
+            "default": 64,
+            "description": "Number of past trading-day steps per sequence window (L).",
+            "maximum": 512,
+            "minimum": 2,
+            "title": "Lookback",
+            "type": "integer"
+          }
+        },
+        "title": "EquitiesSeqParams",
+        "type": "object"
+      }
+    }
+  ]
+}

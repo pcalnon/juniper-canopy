@@ -4627,6 +4627,30 @@ async def api_cancel_pending_dataset():
         return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
 
 
+@app.post("/api/recurrence/effective_request")
+async def api_recurrence_effective_request(body: _TrainStartBody | None = None):
+    """The exact ``POST /v1/train`` body the next recurrence Start would send -- read-only (W1.2 / R7).
+
+    juniper-ml plan ``notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md``,
+    ruling R7: the effective request is shown before Start and logged at INFO. ``body`` is the one-shot
+    Start body the dashboard would send, unpacked exactly as ``POST /api/train/start`` unpacks it, and
+    the backend resolves it with the code ``start_training`` runs, so a staged dataset wins here as it
+    does there. Nothing is staged, consumed or started.
+
+    Returns the backend's preview (``ok`` / ``source`` / ``request`` / ``not_forwarded`` / ``edited``
+    / ``fit_in_progress``). 409 when Start itself would be refused for the selection (N5), or when the
+    active backend is not the recurrence backend, so there is no recurrence request to preview.
+    """
+    inactive = _selection_inactive_reason()
+    if inactive is not None:
+        return JSONResponse({"ok": False, "error": f"Training could not be started: {inactive}"}, status_code=409)
+    preview = getattr(backend, "preview_train_request", None)
+    if backend.backend_type != "recurrence" or preview is None:
+        return JSONResponse({"ok": False, "error": f"The active backend ({backend.backend_type}) is not the recurrence backend, so there is no recurrence request to preview."}, status_code=409)
+    start_kwargs = _recurrence_start_kwargs(body.model_dump()) if body is not None else {}
+    return await offload(preview, **start_kwargs)
+
+
 # =========================================================================
 # Phase 2 P2-4 (Issue #3): Experimental Functions gate proxy.
 # Canopy proxies cascor's /v1/admin/experimental_functions through its own
