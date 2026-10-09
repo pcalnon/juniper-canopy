@@ -371,11 +371,13 @@ class DashboardConstants:
     SLOW_UPDATE_INTERVAL_MS: Final[int] = 5000  # 5 seconds
 
     # F-CANOPY-035: the metrics-store REST poll's OWN lane. It is deliberately the
-    # same nominal cadence as the fast lane -- this is not a slowdown -- but it must
-    # be a SEPARATE ``dcc.Interval`` so ``update_metrics_store`` can stop its own
-    # clock while a fetch is in flight (``running=``) without silencing the other
-    # nine fast-lane callbacks. The poll self-clocks instead of re-requesting over
-    # itself.
+    # same nominal cadence as the fast lane. canopy#613 made it a SEPARATE
+    # ``dcc.Interval`` so ``update_metrics_store`` could stop its own clock while a
+    # fetch was in flight (``running=``) without silencing the other nine fast-lane
+    # callbacks. Since F-CANOPY-058 that guard is gone: this Interval clocks the poll's
+    # request/ack pacer, which asks for the next fetch only once the last one has been
+    # acknowledged, so the cycle is the round trip plus at most one period. The
+    # measurements below are of canopy#613's guard, kept as history.
     #
     # MEASURED effective cadence, so nobody has to rediscover it -- and stated as the
     # RANGE it actually is, because the first version of this comment cited the single
@@ -407,22 +409,28 @@ class DashboardConstants:
     # whose round trip exceeds its trigger period is therefore re-requested over
     # itself forever and NEVER applies a single response. Measured on canopy at
     # 1000 ms: 55 responses, every one carrying a full payload, store length 0.
-    METRICS_STORE_POLL_INTERVAL_MS: Final[int] = 1000  # 1 second (self-clocked; see above)
+    METRICS_STORE_POLL_INTERVAL_MS: Final[int] = 1000  # 1 second (paces the request/ack pacer; see above)
 
-    # F-CANOPY-035 follow-up: how long ``metrics-store-interval`` may stay disabled
-    # before the watchdog in ``_setup_poll_gating`` re-enables it.
+    # F-CANOPY-055/058/068: how old an UNACKNOWLEDGED paced request may grow before the
+    # request/ack pacer (``poll_pacer_js`` in ``dashboard_manager.py``) issues a new one
+    # over it. This replaces ``METRICS_STORE_STRAND_TIMEOUT_MS`` and the strand watchdog it
+    # configured, which sampled ``metrics-store-interval.disabled`` every 5 s and fired
+    # falsely, mid-fetch, ~31-36 times an hour (F-CANOPY-068).
     #
-    # ``running=`` restores the interval from the renderer's ``completeJob()``, which
-    # runs on every HTTP outcome but NOT on a request that never produces a response
-    # (``handleError``, dash_renderer.dev.js:987-998, rejects without calling it). A
-    # network-level failure therefore strands the poll permanently for that page. This
-    # bounds that outage.
-    #
-    # An order of magnitude above the worst round trip ever measured on this callback
-    # (3.0 s; ``API_TIMEOUT_SECONDS`` is 2), because re-enabling while a fetch is
-    # genuinely in flight would re-open the eviction window the guard exists to close.
-    # Recovering in 30 s is the goal; recovering fast is not.
-    METRICS_STORE_STRAND_TIMEOUT_MS: Final[int] = 30000  # 30 seconds
+    # The age is the outstanding request's own (``issued_at``), which is progress, not a
+    # sample of a prop. A request that never gets a response at all (a canopy restart, a
+    # connection reset: the renderer's ``handleError`` path), or whose non-OK reply carries
+    # no ack, is re-issued after this long. Re-issuing evicts the request in flight, so the
+    # bound must stay well above any legitimate round trip. Measured from entering
+    # ``watched``: at most 5.4 s on canopy ``main`` at host load averages of 1.9-4.6 (juniper-ml
+    # evidence ledger, Phase 11), but up to 16.4 s and 17.3 s (p90 12.2 s and 11.7 s) in two
+    # runs on the pacer's own verify leg, on a host loaded by other work (post-run load averages
+    # 13.8-32.7; not sampled during the runs; 2026-10-08). So this is a
+    # FLOOR: the pacer raises it to ``PACER_STALE_RTT_FACTOR`` (3) times the longest round trip
+    # its page has seen on that poll, measured as a lower bound, and caps it at
+    # ``PACER_STALE_CAP_MS`` (120 s); both live beside ``poll_pacer_js`` in
+    # ``dashboard_manager.py``. Recovering within about 30 s is the goal; recovering fast is not.
+    POLL_PACER_STALE_MS: Final[int] = 30000  # 30 seconds (a floor; see above)
 
     # F-CANOPY-053 (provisional id): the Candidate Metrics panel's poll period, i.e.
     # ``candidate-metrics-panel-update-interval``, the only trigger of
@@ -488,6 +496,13 @@ class DashboardConstants:
     # constants interact and no one has measured a full-mode round trip. Re-tune only
     # with that measurement in hand. ``full`` / ``hidden_units`` are the non-real-time
     # history-analysis surfaces, and a mode switch still forces an immediate fetch.
+    #
+    # **THE COUNT CHANGED AGAIN WITH F-CANOPY-058.** The ``running=`` guard is gone and
+    # the poll is paced by request/ack, so ``n`` is now the request's ``seq``, which
+    # advances once per acknowledged request. A skipped request answers ``no_update``
+    # without fetching, so its round trip is short and the next one follows about a
+    # period later: a full-history refetch on every 5th request is expected roughly every
+    # 5-10 s, closer to the original intent. Not measured; the caveat above stands.
     FULL_HISTORY_POLL_TICK_MODULUS: Final[int] = 5
 
     # N8 (training-runtime defects plan §4 I-1, posture O3+O1 / Q6): WS-data

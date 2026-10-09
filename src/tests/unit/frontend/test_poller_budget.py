@@ -41,7 +41,7 @@ sys.path.insert(0, str(src_dir))
 
 import pytest  # noqa: E402
 
-from frontend.dashboard_manager import _GATED_POLL_INTERVALS, DashboardManager  # noqa: E402
+from frontend.dashboard_manager import _GATED_POLL_INTERVALS, _PACED_POLLS, DashboardManager  # noqa: E402
 
 # dash_renderer.dev.js:2846 — hard-coded, not configurable, not raisable.
 RENDERER_SLOT_CAP = 12
@@ -102,11 +102,19 @@ def _perpetual_pollers(dashboard):
     """
     comps = _components_by_id(dashboard)
     gate = dict(_GATED_POLL_INTERVALS)
+    # F-CANOPY-055/058/068: a request/ack-PACED feeder takes a request store as its Input, not
+    # the Interval, but it is still a perpetual server poller of the lane its clientside pacer
+    # rides. Map each pacer's request store to that lane (``_PACED_POLLS``), or the census would
+    # drop both paced feeders and the budget would read two pollers better than it is.
+    # ``test_paced_polls_registry_is_complete`` keeps the registry honest.
+    paced = {f"{request}.data": lane for request, lane in _PACED_POLLS}
     rows = []
     for entry in dashboard.app._callback_list:
         if entry.get("clientside_function"):
             continue
         for dep in _deps(entry, "inputs"):
+            if dep in paced:
+                dep = f"{paced[dep]}.n_intervals"
             if not dep.endswith(".n_intervals"):
                 continue
             interval_id = dep.split(".")[0]
@@ -163,6 +171,45 @@ class TestPollerShape:
             if rides_shared and is_panel_scoped:
                 offenders.append(str(entry["output"])[:90])
         assert not offenders, "panel-scoped pollers on an ungateable shared lane:\n  " + "\n  ".join(offenders)
+
+    def test_paced_feeders_are_counted_against_their_pacers_lanes(self, dashboard):
+        """F-CANOPY-055/058/068: the two request/ack-paced feeders still cost a slot each."""
+        rows = {(iid, out.split("...")[0].lstrip(".")) for iid, _gate, out in _perpetual_pollers(dashboard)}
+        assert ("metrics-store-interval", "metrics-panel-metrics-store.data") in rows, rows
+        assert ("fast-update-interval", "status-indicator.style") in rows, rows
+
+    def test_paced_polls_registry_is_complete(self, dashboard):
+        """Every server callback whose Inputs are all clientside-interval-driven stores is a
+        paced poll, and must be in ``_PACED_POLLS`` or the census silently drops it.
+
+        Found structurally, not by name: a clientside callback with exactly one Interval
+        Input and one Output store that it ALSO reads as State (a pacer reads its own last
+        request), where that store is the ONLY Input of a server callback. The WS drains on
+        the fast lane also feed server callbacks, but they do not read their own output, and
+        their consumers fire only on WS pushes, so they are not perpetual pollers. A MODE-gated
+        lane (declared ``disabled=True`` and absent from the tab gate, e.g. the replay weight
+        drain) is excluded exactly as ``_perpetual_pollers`` excludes it."""
+        comps = _components_by_id(dashboard)
+        gated = {iid for iid, _tab in _GATED_POLL_INTERVALS}
+        clientside_store_lane = {}
+        for entry in dashboard.app._callback_list:
+            if not entry.get("clientside_function"):
+                continue
+            lanes = [d.split(".")[0] for d in _deps(entry, "inputs") if d.endswith(".n_intervals")]
+            raw = str(entry["output"])
+            outs = {part.split("@", 1)[0] for part in (raw[2:-2].split("...") if raw.startswith("..") and raw.endswith("..") else [raw])}
+            mode_gated = bool(lanes) and lanes[0] not in gated and getattr(comps.get(lanes[0]), "disabled", False) is True
+            if len(lanes) == 1 and len(outs) == 1 and outs <= _deps(entry, "state") and not mode_gated:
+                clientside_store_lane[next(iter(outs))] = lanes[0]
+        found = set()
+        for entry in dashboard.app._callback_list:
+            if entry.get("clientside_function"):
+                continue
+            inputs = _deps(entry, "inputs")
+            if len(inputs) == 1 and next(iter(inputs)) in clientside_store_lane:
+                store = next(iter(inputs))
+                found.add((store.rsplit(".", 1)[0], clientside_store_lane[store]))
+        assert found == set(_PACED_POLLS), f"paced polls in the app {sorted(found)} != _PACED_POLLS {sorted(_PACED_POLLS)}"
 
     def test_every_gated_interval_is_actually_used(self, dashboard):
         """A registry entry for an interval no callback reads is dead config that will

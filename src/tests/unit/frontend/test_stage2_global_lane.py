@@ -79,13 +79,16 @@ class TestLever1Consolidation:
         assert "gate_live_switch_button" not in names, "gate_live_switch_button must stay merged into update_unified_status_bar (F-CANOPY-025)"
 
     def test_global_lane_shape_is_pinned(self, dm):
-        """Exactly 2 fast-lane and 2 slow-lane server-side global riders remain.
+        """Exactly 1 fast-lane and 2 slow-lane server-side global riders remain.
 
-        ``update_metrics_store`` LEFT the fast lane in the F-CANOPY-035 fix and now
-        rides ``metrics-store-interval``, which it stops for the duration of each
-        fetch. It was 3 fast-lane riders before that; the count is 2 by design, not
-        by drift. ``TestF035MetricsPollHasItsOwnGuardedLane`` below pins where it
-        went — without that companion, deleting the poll entirely would pass here.
+        ``update_metrics_store`` LEFT the fast lane in the F-CANOPY-035 fix, and since
+        F-CANOPY-058 it is paced by request/ack on ``metrics-store-interval``.
+        ``update_unified_status_bar`` LEFT it for F-CANOPY-055: its feeder is paced by
+        request/ack, and only its clientside pacer (not counted here) rides the fast lane.
+        It was 3 fast-lane riders before F-035 and 2 before F-055; the count is 1 by
+        design, not by drift. ``TestF035MetricsPollHasItsOwnGuardedLane`` below and
+        ``test_f055_f058_f068_request_ack_pacer.py`` pin where they went — without those
+        companions, deleting either feeder entirely would pass here.
         """
         fast, slow = [], []
         for entry in dm.app.callback_map.values():
@@ -99,7 +102,7 @@ class TestLever1Consolidation:
                 fast.append(name)
             if "slow-update-interval" in input_ids:
                 slow.append(name)
-        assert sorted(fast) == sorted(["update_unified_status_bar", "handle_button_timeout_and_acks"]), f"fast lane drifted: {sorted(fast)}"
+        assert sorted(fast) == sorted(["handle_button_timeout_and_acks"]), f"fast lane drifted: {sorted(fast)}"
         assert sorted(slow) == sorted(["update_system_panels", "poll_dataset_swap_events"]), f"slow lane drifted: {sorted(slow)}"
 
 
@@ -115,10 +118,14 @@ class TestF035MetricsPollHasItsOwnGuardedLane:
     as 55 responses, all HTTP 200, all carrying a full payload, store length 0
     throughout, filling within ~3 s of the tick being stopped.
 
-    Two properties keep that fixed, and neither is sufficient alone — a dedicated lane
-    with no guard still re-requests over itself whenever the round trip exceeds the
-    period, and a guard on a SHARED lane would silence the other nine fast-lane
-    callbacks for the duration of every fetch. Both are asserted here.
+    canopy#613 fixed it with a dedicated lane plus a ``running=`` guard. The guard is
+    gone (F-CANOPY-058): the renderer released it for an evicted request's late
+    completion too, so a mid-fetch re-enable could start a chain of evictions. The poll
+    is now paced by request/ack: its ONLY Input is ``metrics-store-request``, written by
+    a clientside pacer on ``metrics-store-interval`` once the last request is
+    acknowledged, or past its stale bound. Asserted here: the lane still exists and the feeder is off the shared
+    lanes; the full suite of pacer properties is in
+    ``test_f055_f058_f068_request_ack_pacer.py``.
     """
 
     def _entry(self, dm):
@@ -135,26 +142,21 @@ class TestF035MetricsPollHasItsOwnGuardedLane:
                 return spec
         raise AssertionError(f"no callback spec for {key}")
 
-    def test_poll_rides_its_own_interval_not_a_shared_lane(self, dm):
+    def test_poll_is_off_the_shared_lanes_and_paced_by_its_request(self, dm):
         _key, entry = self._entry(dm)
         input_ids = {i.get("id") for i in entry.get("inputs", []) if isinstance(i, dict)}
-        assert _METRICS_STORE_INTERVAL in input_ids, f"metrics poll lost its own lane: {input_ids}"
+        assert input_ids == {"metrics-store-request"}, f"metrics poll must have the request as its ONLY Input (F-CANOPY-058): {input_ids}"
         assert "fast-update-interval" not in input_ids, "metrics poll is back on the shared fast lane (F-CANOPY-035)"
         assert "slow-update-interval" not in input_ids, "metrics poll moved onto the shared slow lane (F-CANOPY-035)"
 
-    def test_poll_stops_its_own_clock_while_in_flight(self, dm):
-        """``running=`` is what makes a re-request during flight structurally impossible.
-
-        Asserted off the callback SPEC (``app._callback_list``), which is what is served
-        as ``_dash-dependencies`` and read by the renderer — ``running`` is not kept on
-        the ``callback_map`` entry.
+    def test_poll_carries_no_running_guard(self, dm):
+        """F-CANOPY-058: the renderer releases a guard for an evicted request's late
+        completion too. Read off the callback SPEC (``app._callback_list``), which is
+        what is served as ``_dash-dependencies`` — ``running`` is not kept on the
+        ``callback_map`` entry, so a scan there would pass vacuously.
         """
         key, _entry = self._entry(dm)
-        running = self._spec(dm, key).get("running")
-        assert running, "update_metrics_store lost its running= guard (F-CANOPY-035)"
-        prop = f"{_METRICS_STORE_INTERVAL}.disabled"
-        assert running.get("running", {}).get(prop) is True, f"guard does not disable its own interval: {running}"
-        assert running.get("runningOff", {}).get(prop) is False, f"guard does not re-enable its own interval: {running}"
+        assert not self._spec(dm, key).get("running"), "update_metrics_store regained a running= guard (F-CANOPY-058)"
 
     def test_the_guarded_interval_exists_in_the_layout(self, dm):
         """A ``running=`` Output naming a component that does not exist is a silent no-op."""

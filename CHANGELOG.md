@@ -211,23 +211,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **The lockfile regen's comment said `[dependabot skip]` keeps Dependabot from rebasing over it. It does
-  the opposite, and the tag stays on purpose.** GitHub's docs ("Allowing Dependabot to rebase and force
-  push over extra commits") say Dependabot ignores a commit carrying the tag when it decides whether
-  someone else edited its branch, so it keeps rebasing and may force-push over the regen. That is how
-  canopy#709 lost its signed regen commit `b63f211e`. Each rebase is a push to `dependabot/pip/**`, which
-  re-runs the regen, because the PAT has been in the Dependabot secret store since 2026-07-30. Without the
-  tag, Dependabot would stop rebasing and leave its PR stuck behind `main` under the strict up-to-date
-  ruleset. The required `Lockfile Freshness` check still fails a stale lock. juniper-data, -cascor,
-  -data-client, -cascor-client and -cascor-worker tag their regen commit the same way. Comments only in
-  `.github/workflows/lockfile-update.yml` (banner 0.1.1). The banner's Dependabot caveat also gains a
-  line, because it still read as if the PAT were unregistered.
-- **`AGENTS.md` said Sequence Safety is advisory and never a required check. The `juniper-canopy-rules`
-  ruleset requires it.** The workflow table row now says so, and says the workflow is standalone, outside
-  `ci.yml`'s Quality Gate `needs:`, so a green Quality Gate is not enough to merge. #617 corrected the
-  `sequence-safety.yml` header but left two comments calling the check advisory (its concurrency note
-  and its reference to cascor's workflow), and `main-verify.yml`'s header still called the per-PR screen
-  advisory. All three are corrected. Comments only: no trigger, step, pin or job name changed.
+- **The top status bar applies its periodic responses again, and the metrics store's poll no longer evicts
+  itself in chains (F-CANOPY-055, F-CANOPY-058, F-CANOPY-068).** Both polls are now paced by request/ack.
+  Each feeder's only Input is a request store, written by a clientside pacer on the poll's existing
+  Interval, and each feeder echoes the request's `seq` into an ack store on every return path. The pacer
+  asks again only once the ack has caught up, or once the outstanding request is past its stale bound:
+  `POLL_PACER_STALE_MS` (30 s) or three times the longest round trip the page has seen on that poll,
+  whichever is longer, capped at 120 s. Each round trip is a lower bound (to the last pacer run that still
+  saw the request unanswered), so a throttled background tab cannot inflate it. On the fix's own verify leg,
+  on a host loaded by other work, requests stayed in flight up to 17.3 s, which a fixed 30 s would have
+  cleared by under 2x. Because it waits for the ack, the pacer never re-requests a feeder while its
+  request is in flight,
+  except for that deliberate stale re-issue. Two other paths can still re-request one, each costing at most
+  one response with no chain: the renderer's initial call after a live/one-shot model switch rebuilds the
+  tab container, and a pacer write that lands during that call.
+  - **F-CANOPY-055.** `update_unified_status_bar` rode `fast-update-interval` (1 s) directly. Its wire latency
+    had a median of 1.16 s (0.21–3.08 s), plus the renderer's queue, so each response was still unprocessed
+    when the next tick's request evicted it: 0 of 36 applied on the census, and status, phase, step, hidden
+    units and latency held their layout defaults for the life of the page. The Live Dataset Switch gate
+    computed in the same feeder could not land either.
+  - **F-CANOPY-058.** canopy#613's `running=` guard on `metrics-store-interval` is removed. The renderer
+    released it from `completeJob()` for an evicted request's late completion too, so any re-enable that
+    let the next request be made before the in-flight response landed could start a chain of evictions.
+    Two 25-minute census runs on `main` found 29 of 611 responses evicted, in runs of up to 11 and 34.8 s.
+    The display mode, the feeder's second Input until now, is now State of the feeder and an Input of the
+    pacer, compared by value, and a mode change reaches the handler as one even when its own request is lost (not when a raising handler acks it with
+    `no_update`; the next request is then a tick). Its mid-flight change
+    evicted the fetch in a synthetic app with this wiring; it was not observed in mid-request on canopy.
+    The full-history modulus (`FULL_HISTORY_POLL_TICK_MODULUS`, 5) now counts requests rather
+    than ticks of the guarded Interval, so `full` / `hidden_units` refetch on every fifth request
+    (expected every ~5–10 s; not measured).
+  - **F-CANOPY-068.** The strand watchdog is removed, with `METRICS_STORE_STRAND_TIMEOUT_MS`.
+    **Correction to the `[0.8.0]` entry**, which says it re-enabled the interval "once it has been
+    continuously disabled" for 30 s. It could not do that. It sampled `disabled` every 5 s, and its clock
+    reset only on a sample that found the lane enabled or the Apply clamp held, so it measured how long
+    every sample had found the lane disabled, not how long the lane had been. It fired 13 and 15 times in
+    the two runs, about 31 and 36 an hour, every time mid-fetch, with the lane enabled for 11–15 s of the
+    30 s before each fire, and 7 of those fires evicted a response. (That its samples kept phase with the
+    feeder's ~4.9 s cycle is inferred from a replay, not measured.) A request that never gets a response is
+    now re-issued by its own age, which measures progress, not samples of a prop.
+  - The gate is again the only writer of `metrics-store-interval.disabled`, and a completion can no longer
+    re-enable a lane under the CAN-000 Apply clamp. Both pacers ride clamped lanes.
+  - **One cost.** A failure outside a feeder's own `try` (a non-OK reply from Dash or a middleware, or a
+    network failure) lands no ack, so that lane waits out its stale bound, at least 30 s. canopy#613's guard
+    retried the metrics store on the next tick after a non-OK reply, and the status bar's 1 s lane retried
+    on the next tick.
+  - Tests: `src/tests/unit/frontend/test_f055_f058_f068_request_ack_pacer.py`. It pins the wiring and the
+    acks on every return path, runs the registered pacer under node, and simulates 10 idle minutes of a
+    healthy lane whose cycle is near 5 s: no request made in flight, none stale. The same simulation of the
+    old guard and watchdog fires falsely. `test_poll_gating.py` now requires one writer per `disabled` prop
+    and no `running=` guard, and `test_poller_budget.py` counts the paced feeders against their pacers'
+    lanes.
+  - Evidence: juniper-ml `notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phases 8,
+    9 and 11.
 - **`TestA422DetailReachesTheOperator` no longer reads the previous test's WARNING.** A failing recurrence
   fit logs its WARNING after the state flips, outside the lock, so a test that waited only for
   `is_training_active()` could end while its fit thread was about to log, and the record landed in the

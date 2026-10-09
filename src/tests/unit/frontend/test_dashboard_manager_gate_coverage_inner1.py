@@ -257,12 +257,15 @@ class TestStatusAndNetworkInner:
         # the store element carries {is_running, phase}, the gate element the
         # button's disabled state (idle + no flag -> disabled True).
         mock_get.return_value = _resp(ok=True, status=200, json_value={"is_running": False, "phase": "idle", "current_epoch": 0, "hidden_units": 0})
+        # F-CANOPY-055: the first argument is the paced request, and a 12th element,
+        # the ack, echoes its seq.
         cb = raw_cb(dm, "update_unified_status_bar")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = cb(1, None, None, None)
-        assert len(result) == 11
+            result = cb({"seq": 1, "reason": "tick"}, None, None, None)
+        assert len(result) == 12
         assert result[9] == {"is_running": False, "phase": "idle"}
         assert result[10] is True
+        assert result[11] == {"seq": 1}
 
     @patch("requests.get")
     def test_update_unified_status_bar_suppresses_unchanged_training_status(self, mock_get, dm):
@@ -271,7 +274,7 @@ class TestStatusAndNetworkInner:
         mock_get.return_value = _resp(ok=True, status=200, json_value={"is_running": True, "phase": "output"})
         cb = raw_cb(dm, "update_unified_status_bar")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = cb(1, {"is_running": True, "phase": "output"}, None, True)
+            result = cb({"seq": 1}, {"is_running": True, "phase": "output"}, None, True)
         assert result[9] is dash.no_update
         assert result[10] is dash.no_update
 
@@ -284,7 +287,7 @@ class TestStatusAndNetworkInner:
         mock_get.return_value = _resp(ok=True, status=200, json_value={"is_running": True, "phase": "output"})
         cb = raw_cb(dm, "update_unified_status_bar")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = cb(1, None, {"experimental_functions": True}, True)
+            result = cb({"seq": 1}, None, {"experimental_functions": True}, True)
         assert result[10] is False
 
     @patch("requests.get")
@@ -337,31 +340,36 @@ class TestDatastoreInner:
 
     @patch("requests.get")
     def test_update_metrics_store_delegates(self, mock_get, dm):
-        # Called outside a Dash callback context: the wrapper's
-        # MissingCallbackContextException branch maps that to trigger="" (a
-        # mount/mode-switch-style fetch). N8 args: (n, display_mode_state,
-        # ws_liveness, current_metrics). ws_liveness=None → stale → the REST poll
-        # runs (the liveness-gated O1 fallback); current_metrics=None (empty-guard).
+        # F-CANOPY-058: the first argument is the paced request; the layout's seq-0
+        # request (no reason) maps to trigger="" (a mount-style fetch). Args:
+        # (request, display_mode_state, ws_liveness, current_metrics). ws_liveness=None
+        # → stale → the REST poll runs (the liveness-gated O1 fallback). The ack echoes
+        # the seq.
         mock_get.return_value = _resp(ok=True, json_value={"history": [{"epoch": 1}]})
         cb = raw_cb(dm, "update_metrics_store")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = cb(1, {"mode": "window", "window_size": 100}, None, None)
-        assert result == [{"epoch": 1}]
+            result = cb({"seq": 0}, {"mode": "window", "window_size": 100}, None, None)
+        assert result == ([{"epoch": 1}], {"seq": 0})
 
     @patch("requests.get")
     def test_update_metrics_store_interval_trigger_in_callback_context(self, mock_get, dm):
-        # N8: exercise the wrapper's happy ctx path — an interval-tick trigger
-        # inside a (mocked) callback context reaches the handler with the interval
-        # prop_id; with the WS stream stale (ws_liveness=None) window mode fetches on
-        # every tick (the O1 fallback).
+        # N8 / F-CANOPY-058: a paced "tick" request reaches the handler as the lane's
+        # interval trigger; with the WS stream stale (ws_liveness=None) window mode
+        # fetches on every tick (the O1 fallback).
         mock_get.return_value = _resp(ok=True, json_value={"history": [{"epoch": 2}]})
         cb = raw_cb(dm, "update_metrics_store")
-        fake_ctx = MagicMock()
-        fake_ctx.triggered = [{"prop_id": "fast-update-interval.n_intervals"}]
-        with patch.object(dmmod.dash, "callback_context", fake_ctx):
+        seen = {}
+        original = dm._update_metrics_store_handler
+
+        def spy(**kw):
+            seen.update(kw)
+            return original(**kw)
+
+        with patch.object(dm, "_update_metrics_store_handler", spy):
             with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-                result = cb(1, {"mode": "window", "window_size": 100}, None, None)
-        assert result == [{"epoch": 2}]
+                result = cb({"seq": 3, "reason": "tick"}, {"mode": "window", "window_size": 100}, None, None)
+        assert result == ([{"epoch": 2}], {"seq": 3})
+        assert seen["trigger"] == "metrics-store-interval.n_intervals" and seen["n"] == 3
 
     def test_update_topology_store_ws_complete(self, dm):
         cb = raw_cb(dm, "update_topology_store")

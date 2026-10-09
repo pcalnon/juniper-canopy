@@ -182,7 +182,11 @@ def _attach_store_collector(page, output_name):
                 # co-owned by the liveness-gated poll (plain output) AND the WS-primary
                 # append callback (``@hash`` output); accept both so this collector sees
                 # the store's data regardless of which callback wrote it.
-                if out != output_name and not out.startswith(output_name + "@"):
+                # F-CANOPY-058: the request/ack-paced feeder writes the store AND its ack, so
+                # its wire key is the multi-output form ``..<store>.data...<ack>.data..``.
+                # Match any part of a multi-output key, not only a single-output one.
+                parts = out[2:-2].split("...") if out.startswith("..") and out.endswith("..") else [out]
+                if not any(part == output_name or part.startswith(output_name + "@") for part in parts):
                     memo[i] = ("nonmatch",)
                     continue
                 inputs[i] = {inp.get("id"): inp.get("value") for inp in req.get("inputs", []) if isinstance(inp, dict)}
