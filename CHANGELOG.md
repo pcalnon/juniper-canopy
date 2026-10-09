@@ -180,6 +180,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The registry's availability and task-type comments match what juniper-data ships, and the recurrence
+  seed carries a gate note (W1.11, the canopy comment half).** The plan is juniper-ml's
+  `notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md`.
+  `src/model_registry.py` said `equities` and `equities_seq` are unavailable in the deployed container
+  because juniper-deploy pins juniper-data 0.15.0. The pin has been 0.16.0 since juniper-deploy#230; that
+  image carries `yfinance` (juniper-data#421), and juniper-deploy#231 gave the container its outbound
+  network, so both are available there. The vocabulary comment now says where `equities_seq` is
+  `regression`: from generator 6.0.0 (juniper-data#437, X8), on juniper-data `main` and in its releases
+  from 0.17.0. Releases through 0.16.0 still declare `classification`. The gate note records that
+  `compatible()` reads canopy's own label, never juniper-data's, so the pair passes the gate under
+  either. juniper-deploy#245's smoke completed the fit against published juniper-data 0.16.0 on
+  2026-10-08 without reaching the gate, because it staged without `nn_model`. The same stale pin claim
+  is corrected in three test docstrings (`src/tests/regression/test_dataset_generator_contract.py`,
+  `src/tests/unit/test_model_registry.py`), and the X8 test constant's comment gains the release
+  boundary. Comments only: no behaviour or assertion changed.
 - **The recurrence regression card says its numbers are in-sample (W0.7, the label half of plan
   findings F-S5 and F-SCI3).** The plan is juniper-ml's
   `notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md`.
