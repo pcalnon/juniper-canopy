@@ -11,7 +11,7 @@
 # File Path:     JuniperCanopy/juniper_canopy/src/backend/
 #
 # Date Created:  2026-06-22
-# Last Modified: 2026-10-04
+# Last Modified: 2026-10-08
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -52,6 +52,7 @@
 # References:
 #     - backend/service_backend.py (the cascor ServiceBackend, the delegation template).
 #     - backend/recurrence_service_adapter.py (the REST client wrapped here, A1-i).
+#     - backend/recurrence_request.py (W1.2 / ruling R7: what the fit request carries, and its preview).
 #     - backend/protocol.py (BackendProtocol + the total=False TypedDict return types).
 #
 #####################################################################################################################################################################################################
@@ -86,6 +87,7 @@ from backend.protocol import (
     StatusResult,
     TopologyResult,
 )
+from backend.recurrence_request import NO_DATASET_REF_ERROR, FitRequest, resolve_fit_request, shape_staged_ref
 from backend.recurrence_service_adapter import RecurrenceServiceAdapter, RecurrenceServiceError, RecurrenceTrainResult
 from outbound_errors import outbound_error_text
 
@@ -97,12 +99,6 @@ _HYPERPARAM_KEYS = ("d", "theta", "ridge")
 # Internal fit state -> the dashboard "phase" label.
 _PHASE_BY_STATE = {"idle": "idle", "training": "fitting", "trained": "complete", "failed": "error"}
 
-# Canopy-dialect staging keys that translate to juniper-data generator params. The spiral-only
-# typed fields (``nn_spiral_rotations`` / ``nn_spiral_number``) are deliberately absent: a spiral is
-# rank-2 and can never be staged into this backend, and forwarding them to a sequence generator
-# would 422 at juniper-data.
-_STAGED_PARAM_KEYS = {"nn_dataset_elements": "n_samples", "nn_dataset_noise": "noise"}
-
 
 def dataset_ref_from_staged(cfg: Mapping[str, Any]) -> Dict[str, Any]:
     """Translate a canopy-dialect staged dataset config into a recurrence ``DatasetRef``.
@@ -110,25 +106,18 @@ def dataset_ref_from_staged(cfg: Mapping[str, Any]) -> Dict[str, Any]:
     The staging channel speaks canopy's dialect (``nn_dataset_type`` + typed fields +
     ``nn_dataset_params``) because ``/api/stage_dataset`` was built for cascor, whose
     ``StageDatasetRequest`` is the authoritative validator there. The recurrence service takes the
-    one-shot ``DatasetRef`` -- ``generator`` in juniper-data's vocabulary plus ``params`` forwarded
-    verbatim -- so the alias map is applied HERE (``spirals`` -> ``spiral``), exactly where the
-    one-shot Start body applies it (X3 / design §4.6), and never on the cascor-bound payload.
+    one-shot ``DatasetRef`` -- ``generator`` in juniper-data's vocabulary plus ``params`` -- so the
+    alias map is applied HERE (``spirals`` -> ``spiral``), exactly where the one-shot Start body
+    applies it (X3 / design §4.6), and never on the cascor-bound payload.
 
-    The registry's ``default_params`` for the dataset seed ``params`` (bounded + stationary, the
-    same seed the one-shot Start body carries); the typed fields override them; the schema-driven
-    ``nn_dataset_params`` override both. A staged fit and an un-staged fit of the same dataset
-    therefore differ only by what the operator actually edited.
+    W1.2 / ruling R7 (``backend/recurrence_request.py``, which holds the rules): the registry seed is
+    the base; a parameter the generator does not declare is never forwarded (F-C3 -- this used to
+    translate ``nn_dataset_elements`` / ``nn_dataset_noise`` into ``n_samples`` / ``noise`` for
+    generators that have neither); and a form value is forwarded only when it differs from what the
+    form rendered for it, so an untouched form stages nothing but the seed (F-C2). A staged fit and an
+    un-staged fit of the same dataset therefore differ only by what the operator actually edited.
     """
-    from dataset_schema import generator_name_for_type
-    from model_registry import dataset_default_params
-
-    dataset_type = cfg.get("nn_dataset_type")
-    params: Dict[str, Any] = dict(dataset_default_params(dataset_type or ""))
-    for canopy_key, param_key in _STAGED_PARAM_KEYS.items():
-        if cfg.get(canopy_key) is not None:
-            params[param_key] = cfg[canopy_key]
-    params.update(cfg.get("nn_dataset_params") or {})
-    return {"generator": generator_name_for_type(dataset_type), "params": params, "split": "train"}
+    return shape_staged_ref(cfg).dataset_ref
 
 
 class RecurrenceBackend:
@@ -184,23 +173,22 @@ class RecurrenceBackend:
         what the operator edited and applied, so preferring it would discard the applied change
         while reporting success. Start consumes the staged config, as cascor's does, so the
         pending-dataset banner closes.
+
+        **The request itself is shaped by W1.2 / ruling R7** (``backend/recurrence_request.py``):
+        only parameters the generator declares are forwarded, and a staged form value only when the
+        operator edited it. It is logged at INFO before the fit thread starts -- the same computation
+        :meth:`preview_train_request` shows before Start.
         """
-        explicit_ref = {k: kwargs[k] for k in _DATASET_REF_KEYS if kwargs.get(k) is not None}
-
-        hyperparams = dict(self._pending_hyperparams)
-        for key in _HYPERPARAM_KEYS:
-            if kwargs.get(key) is not None:
-                hyperparams[key] = kwargs[key]
-
         with self._lock:
             if self._state == "training":
                 return ControlResult(ok=False, error="a recurrence fit is already in progress", is_training=True)
             staged = self._pending_dataset_config
-            dataset_ref = dataset_ref_from_staged(staged) if staged else explicit_ref
-            if not any(dataset_ref.get(k) for k in ("dataset_id", "name", "generator")):
-                return ControlResult(ok=False, error="no dataset reference (need one of dataset_id / name / generator, or a staged dataset)")
-            if staged and explicit_ref.get("generator") not in (None, dataset_ref["generator"]):
-                logger.info("recurrence fit uses the staged dataset %r over the start body's %r", dataset_ref["generator"], explicit_ref.get("generator"))
+            request = self._resolve_request_locked(kwargs)
+            dataset_ref, hyperparams = request.dataset_ref, request.hyperparams
+            if not request.has_dataset_ref:
+                return ControlResult(ok=False, error=NO_DATASET_REF_ERROR)
+            if staged and request.start_body_generator not in (None, dataset_ref["generator"]):
+                logger.info("recurrence fit uses the staged dataset %r over the start body's %r", dataset_ref["generator"], request.start_body_generator)
             self._pending_dataset_config = None  # consumed by this start (cascor parity)
             self._fit_dataset_ref = dict(dataset_ref)
             self._result = None
@@ -208,8 +196,41 @@ class RecurrenceBackend:
             self._state = "training"
             thread = threading.Thread(target=self._run_fit, args=(dataset_ref, hyperparams), name="recurrence-fit", daemon=True)
             self._thread = thread
+        request.log("start")  # W1.2 / R7: the body about to be POSTed, exactly as the preview showed it
         thread.start()  # outside the lock — never hold it across thread start / the blocking call
         return ControlResult(ok=True, is_training=True, message="recurrence fit started")
+
+    def _resolve_request_locked(self, kwargs: Mapping[str, Any]) -> FitRequest:
+        """Resolve the next fit's request for these Start kwargs. The caller holds ``self._lock``.
+
+        Hyperparameters are whatever :meth:`apply_params` staged, overridden by the kwargs. They are
+        read under the lock: ``start_training`` used to copy ``_pending_hyperparams`` before taking
+        it, while :meth:`apply_params` writes the dict inside it.
+        """
+        explicit_ref = {k: kwargs[k] for k in _DATASET_REF_KEYS if kwargs.get(k) is not None}
+        hyperparams = dict(self._pending_hyperparams)
+        for key in _HYPERPARAM_KEYS:
+            if kwargs.get(key) is not None:
+                hyperparams[key] = kwargs[key]
+        return resolve_fit_request(explicit_ref=explicit_ref, staged_cfg=self._pending_dataset_config, hyperparams=hyperparams)
+
+    def preview_train_request(self, **kwargs: Any) -> Dict[str, Any]:
+        """Return, without starting anything, the request ``start_training(**kwargs)`` would send.
+
+        W1.2 / ruling R7: the read-only "effective request" the dashboard shows before Start. Nothing
+        is consumed or changed. It is resolved by the same :meth:`_resolve_request_locked` the fit
+        uses, so the preview cannot disagree with the request. Returns
+        :meth:`FitRequest.describe <backend.recurrence_request.FitRequest.describe>` (``ok``,
+        ``source``, ``request``, ``not_forwarded``, ``edited``) plus ``fit_in_progress``, true when a
+        Start now would be refused because a fit is running. Logged at INFO.
+        """
+        with self._lock:
+            request = self._resolve_request_locked(kwargs)
+            fit_in_progress = self._state == "training"
+        request.log("preview")
+        preview = request.describe()
+        preview["fit_in_progress"] = fit_in_progress
+        return preview
 
     def _run_fit(self, dataset_ref: Dict[str, Any], hyperparams: Dict[str, Any]) -> None:
         """Daemon-thread target: run the blocking fit, then record terminal state."""

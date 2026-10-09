@@ -180,4 +180,16 @@ MANIFEST: tuple[ControlContract, ...] = (
         expect_status=(200,),
         notes="Dataset-plotter selector -> load-selected-btn -> load_selected_dataset State -> POST /api/dataset/generate {generator}. Response is the dataset dict (no 'status' key), so status-only assertion.",
     ),
+    # ---- W1.2 / ruling R7: the effective-request preview above Start ----
+    ControlContract(
+        control_id="recurrence-request-preview-refresh",
+        kind="button",
+        method="POST",
+        endpoint="/api/recurrence/effective_request",  # main.py api_recurrence_effective_request
+        body={},
+        expect_status=(409,),
+        resp_key="ok",
+        resp_equals=False,
+        notes="Refresh on the effective-request panel (frontend/components/recurrence_request_preview.py). Demo mode has no recurrence backend, so the read-only preview answers 409 ok=false; the recurrence answers are pinned in tests/regression/test_recurrence_staging.py.",
+    ),
 )

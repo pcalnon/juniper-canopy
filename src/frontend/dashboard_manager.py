@@ -67,6 +67,7 @@ from .components.network_evolution import MAX_SNAPSHOTS as _EVOLUTION_MAX_SNAPSH
 from .components.network_evolution import NetworkEvolution
 from .components.network_visualizer import NetworkVisualizer
 from .components.parameters_panel import ParametersPanel
+from .components.recurrence_request_preview import RecurrenceRequestPreview
 from .components.redis_panel import RedisPanel
 from .components.replay_player_panel import ReplayPlayerPanel
 from .components.tutorial_panel import TutorialPanel
@@ -738,6 +739,9 @@ class DashboardManager:
         # Remote Worker Monitoring Panel
         self.worker_panel = WorkerPanel(self.config.get("worker_panel", {}), component_id="worker-panel")
 
+        # W1.2 / ruling R7: the read-only effective-request preview above Start (one-shot models only).
+        self.recurrence_request_preview = RecurrenceRequestPreview(self.config.get("recurrence_request_preview", {}), component_id="recurrence-request-preview")
+
         # Register components
         self.register_component(self.metrics_panel)
         self.register_component(self.candidate_metrics_panel)
@@ -754,6 +758,7 @@ class DashboardManager:
         self.register_component(self.tutorial_panel)
         self.register_component(self.network_evolution)
         self.register_component(self.worker_panel)
+        self.register_component(self.recurrence_request_preview)
 
         self.logger.info("All MVP components initialized and registered")
 
@@ -1019,6 +1024,7 @@ class DashboardManager:
                                                 # selectable but NOT trainable — this status reason explains why Start is
                                                 # disabled (filled by ``annotate_train_gate``). Empty/hidden for a live model.
                                                 html.Div(id="train-gate-notice", className="mb-2"),
+                                                self.recurrence_request_preview.get_layout(),
                                                 html.Div(
                                                     [
                                                         dbc.Button(

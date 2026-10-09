@@ -61,8 +61,16 @@ written against **juniper-recurrence 0.5.0**, its documented contract floor (`RE
 - The model version is read from the service, never assumed: the `version` in the `GET /v1/health` body when it has
   one, else `info.version` from `GET /openapi.json`. The 0.5.0 health body is `{"status": "ok"}`, so the fallback is
   the path that answers. A failed lookup reads `unknown (version lookup failed)`.
+- The `POST /v1/train` request carries only parameters the dataset's generator declares, and only what the operator
+  chose. The registry seed is the base. A form value goes into the request only when it differs from what the form
+  showed for that field, and an edited field wins over the seed. The generic `nn_dataset_elements` / `nn_dataset_noise`
+  fields are not sent to a generator that declares no `n_samples` / `noise`; no sequence generator does. This is
+  owner ruling R7's recommended default, applied pending the ruling. The declared parameters are a dated snapshot of
+  juniper-data's own schemas (`dataset_schema.DECLARED_PARAM_DEFAULTS`). The body Start would send can be read first
+  from [`POST /api/recurrence/effective_request`](#post-apirecurrenceeffective_request), and both that preview and
+  the Start log it at INFO.
 
-Primary codepaths: `src/backend/recurrence_service_adapter.py`, `src/backend/recurrence_backend.py`, `src/model_registry.py`.
+Primary codepaths: `src/backend/recurrence_service_adapter.py`, `src/backend/recurrence_backend.py`, `src/backend/recurrence_request.py`, `src/model_registry.py`.
 
 ### Base URL
 
@@ -1036,6 +1044,50 @@ The dashboard hydrates both selectors from it once, on page load.
 - `dataset.value` is canopy's dataset-type value (`"spirals"`, not juniper-data's `"spiral"`). It is
   `null` when the backend holds something canopy cannot name: an unseeded generator (`generator`
   then names it), or raw inline data.
+
+### POST /api/recurrence/effective_request
+
+**Description:** The exact `POST /v1/train` body the next recurrence Start would send. Read-only:
+nothing is staged, consumed or started. The dashboard's "Effective request (next Start)" panel above
+the Start button shows it for a one-shot model.
+
+**Body (optional):** The one-shot Start body, as `POST /api/train/start` takes it
+(`{"dataset": {"generator": ..., "params": {...}}, "d": ..., "theta": ..., "ridge": ...}`). It is
+resolved exactly as Start resolves it, so a dataset staged with Apply wins over it.
+
+**Response Schema:**
+
+```json
+{
+  "ok": true,
+  "source": "staged",
+  "request": {
+    "dataset": {
+      "split": "train",
+      "generator": "equities_seq",
+      "params": {"symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"], "regression_target": "next_close", "fundamentals_fill": "drop"}
+    }
+  },
+  "not_forwarded": ["nn_dataset_elements"],
+  "edited": ["regression_target"],
+  "declared_params_source": "juniper-data 462da218 (main, 2026-10-08); identical at v0.16.0",
+  "fit_in_progress": false
+}
+```
+
+**Status Codes:**
+
+- `200 OK` - Preview computed. `ok` is `false`, `request` is `null` and `error` says why when there is no dataset reference to send.
+- `409 Conflict` - Start would be refused for the selection, or the active backend is not the recurrence backend.
+
+**Notes:**
+
+- `source` is `"staged"` (a dataset applied with Apply) or `"start_body"` (the dropdown value and its registry defaults).
+- `edited` names the form fields sent because they differ from what the form showed. `not_forwarded` names staged
+  keys the request does not carry: a parameter the generator does not declare, or a generic field held to the
+  registry default.
+- The preview and the Start each log the body at INFO (`juniper_canopy.backend.recurrence_request`), with sorted
+  keys, so the two lines compare equal as text.
 
 ## Remote Worker Endpoints
 
