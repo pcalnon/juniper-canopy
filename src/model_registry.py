@@ -11,7 +11,7 @@
 # File Path:     ${HOME}/Development/python/Juniper/juniper-canopy/src/
 #
 # Date Created:  2026-06-17
-# Last Modified: 2026-10-05
+# Last Modified: 2026-10-08
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -184,20 +184,26 @@ class GeneratorBound:
 #         non-``⊥`` sidebar dataset is replaced there by ``enabled[0]``, so this order picks
 #         the replacement.
 #     Measured 2026-09-09, the first enabled entry is ``multi_sine``: generate 0.0s, fit
-#     0.10s, r² 1.000. ``equities_seq`` is 40.5s and r² -0.004, and is ``available=false`` in
-#     the deployed container: juniper-deploy pins juniper-data 0.15.0, whose image lacks
-#     ``yfinance`` (juniper-data#421 added it to the image lock on main on 2026-09-22; no
-#     release carries it yet). That is why selecting Recurrence there used to raise §4.7's "no
-#     dataset is available for this model" alert. These five declare no ``is_available`` hook,
-#     so they are available everywhere.
+#     0.10s, r² 1.000. ``equities_seq`` is 40.5s and r² -0.004. It was ``available=false`` in
+#     the deployed container through juniper-deploy's juniper-data 0.15.0 pin, because no
+#     juniper-data image before 0.16.0 carries ``yfinance``. That is why selecting Recurrence
+#     there used to raise §4.7's "no dataset is available for this model" alert. From the
+#     0.16.0 pin (juniper-deploy#230) it is available there: that image carries ``yfinance``
+#     (juniper-data#421), and juniper-deploy#231 gave the container the outbound network its
+#     fetches need. These five declare no ``is_available`` hook, so they are available
+#     everywhere.
 #   * They carry NO ``default_params``, and that is correct rather than an omission — see
 #     ``SEEDED_GENERATOR_BOUNDS`` below (G11), which classifies each of them as bounded by its
 #     own defaults: 1,574 windows of (32, 1), generated and fitted in ~0.1s total against a
 #     300s timeout.
 #
 # ``task_type="regression"`` matches what juniper-data declares for all five, so these seeds
-# introduce no vocabulary disagreement. ``equities_seq`` agrees too since juniper-data#437
-# relabelled it (generator 6.0.0, owner ruling 2026-09-24), which closed the X8 divergence.
+# introduce no vocabulary disagreement. ``equities_seq`` agrees from generator 6.0.0, where
+# juniper-data#437 relabelled it and closed the X8 divergence (owner ruling 2026-09-24). That is
+# juniper-data ``main`` and its releases from 0.17.0. Releases through 0.16.0 still declare it
+# ``classification`` (at ``5.0.0`` in 0.15.0 and 0.16.0), and juniper-deploy serves 0.16.0 until
+# juniper-deploy#243 moves its pin. canopy never reads that label (see the gate note on the
+# recurrence seed in ``MODELS``), so this table and the gate behave the same either way.
 # All five are rank-3, so cascor (``input_ndim={2}``) rejects them and the compatibility graph
 # keeps exactly two components — §12.2's "this expansion adds no deadlock surface", now measured.
 DATASET_TYPES: tuple[DatasetTypeSpec, ...] = (
@@ -266,11 +272,13 @@ DATASET_TYPES: tuple[DatasetTypeSpec, ...] = (
     # trainability probe, not a benchmark. Train top-1 0.5375 is the honest ceiling for next-day
     # direction, not a defect — the same story as the sequence sibling's r² near zero.
     #
-    # Unavailable in the deployed container: juniper-deploy pins juniper-data 0.15.0, whose image
-    # lacks the ``equities`` extra's ``yfinance``, so this renders greyed with an install hint
-    # there. That is the availability gate doing its job (§12.5), not a broken seed.
-    # juniper-data#421 added ``yfinance`` to the image lock on main on 2026-09-22; this becomes
-    # available in the container once a juniper-data release carries it and the pin moves.
+    # Availability in the deployed container follows juniper-deploy's juniper-data pin. Through
+    # the 0.15.0 pin the image lacked the ``equities`` extra's ``yfinance``, so this rendered
+    # greyed with an install hint there: the availability gate doing its job (§12.5), not a
+    # broken seed. From the 0.16.0 pin (juniper-deploy#230) on it is available there: the image
+    # carries ``yfinance`` (juniper-data#421), and juniper-deploy#231 gave the container the
+    # outbound network its fetches need. The flag alone does not prove that: it reports whether
+    # the extra imports, and before #231 it read available while every request failed at DNS.
     DatasetTypeSpec(
         value="equities",
         label="Equities (tabular)",
@@ -496,6 +504,17 @@ MODELS: tuple[ModelSpec, ...] = (
         label="Recurrence (LMU)",
         category="ts_established",
         input_ndim=frozenset({3}),
+        # Gate note (W1.11). ``compatible()`` compares this with canopy's OWN label for the dataset
+        # (``DATASET_TYPES`` above), never juniper-data's: ``GeneratorInfo`` carries no ``task_type``,
+        # and nothing in canopy reads the one juniper-data stores in a dataset's meta. So recurrence +
+        # ``equities_seq`` passes the gate whichever label the producer declares: ``regression`` from
+        # generator 6.0.0 (juniper-data#437), ``classification`` in its releases through 0.16.0.
+        # Measured 2026-10-08 by juniper-deploy#245's smoke against published juniper-data 0.16.0,
+        # canopy 0.8.1 and recurrence 0.5.0: the fit completed. That run staged without ``nn_model``,
+        # so it never reached the REST call site that applies this predicate
+        # (``_request_model_refusal`` in main.py). It shows that nothing downstream refused the pair;
+        # that the gate would not follows from the comparison, not from the run. To tell 5.0.0 from
+        # 6.0.0, the smoke reads the producer's label from the dataset's meta.
         supported_task_types=frozenset({"regression"}),
         family="lmu",
         version="",  # service-reported: refresh_model_versions({RECURRENCE_PROVIDER: adapter.service_version}) (W1.7 / F-C8)

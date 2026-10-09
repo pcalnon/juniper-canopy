@@ -148,9 +148,11 @@ class TestX6StagingIsGuarded:
 
 
 #: What juniper-data declares for ``equities_seq`` since juniper-data#437 (generator 6.0.0; owner
-#: ruling X8, 2026-09-24). RECORDED, not read: ``GeneratorInfo`` does not put ``task_type`` on the
-#: wire, and the ``juniper_data`` installed in this env is 0.6.0 (see the module docstring), so
-#: there is nothing current to read it from.
+#: ruling X8, 2026-09-24): on its ``main``, and in its releases from 0.17.0. Its releases through
+#: 0.16.0 declare ``classification`` (at ``5.0.0`` in 0.15.0 and 0.16.0), which juniper-deploy
+#: serves until juniper-deploy#243 moves its pin. RECORDED, not read: ``GeneratorInfo`` does not
+#: put ``task_type`` on the wire, and the ``juniper_data`` installed in this env is 0.6.0 (see the
+#: module docstring), so there is nothing current to read it from.
 JUNIPER_DATA_EQUITIES_SEQ_TASK_TYPE = "regression"
 
 
@@ -197,8 +199,8 @@ class TestX8TaskTypeAgreesWithJuniperData:
         ruling (2026-09-22), a deliberate exception to OQ-6. So ``multi_sine`` leading is what
         makes both the first option offered and the modal's replacement for a stranded dataset
         one that is instant, offline and actually learnable (r² 1.000), rather than
-        ``equities_seq``: 40.5s, r² -0.004, and unavailable in the deployed container
-        (juniper-deploy pins juniper-data 0.15.0, whose image lacks ``yfinance``).
+        ``equities_seq``: 40.5s, r² -0.004, and unavailable in the deployed container until
+        juniper-deploy's juniper-data 0.16.0 pin (the 0.15.0 image lacks ``yfinance``).
         """
         recurrence = next(m for m in MODELS if m.key == "recurrence")
         assert [d.value for d in DATASET_TYPES if compatible_models(d, models=(recurrence,))] == [
@@ -213,9 +215,9 @@ class TestX8TaskTypeAgreesWithJuniperData:
     def test_every_lmu_dataset_but_equities_is_available_without_an_extra(self):
         """The §4.7 empty-set state was the CONTAINER'S NORMAL STATE, and this is why it is not.
 
-        ``yfinance`` is absent from the requirements.lock of every juniper-data release so far
-        (juniper-data#421 adds it on main, unreleased as of 2026-09-23), so ``equities_seq`` is
-        ``available=false`` in the container — and while it was the LMU's only compatible dataset, picking
+        ``yfinance`` is absent from the requirements.lock of every juniper-data release before
+        0.16.0 (juniper-data#421 added it), so ``equities_seq`` was ``available=false`` in the
+        container through the 0.15.0 pin — and while it was the LMU's only compatible dataset, picking
         Recurrence in the container produced "No dataset is available for this model" and
         nothing else. The five synthetics are numpy-only and declare no ``is_available`` hook
         upstream, so they are available in every deployment.
