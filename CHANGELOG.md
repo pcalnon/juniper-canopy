@@ -192,7 +192,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Each feeder's only Input is a request store, written by a clientside pacer on the poll's existing
   Interval, and each feeder echoes the request's `seq` into an ack store on every return path. The pacer
   asks again only once the ack has caught up, or once the outstanding request is past its stale bound:
-  `POLL_PACER_STALE_MS` (30 s) or three times the longest round trip the page has seen on that lane,
+  `POLL_PACER_STALE_MS` (30 s) or three times the longest round trip the page has seen on that poll,
   whichever is longer, capped at 120 s. Each round trip is a lower bound (to the last pacer run that still
   saw the request unanswered), so a throttled background tab cannot inflate it. On the fix's own verify leg,
   on a host loaded by other work, requests stayed in flight up to 17.3 s, which a fixed 30 s would have
@@ -211,7 +211,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     let the next request be made before the in-flight response landed could start a chain of evictions.
     Two 25-minute census runs on `main` found 29 of 611 responses evicted, in runs of up to 11 and 34.8 s.
     The display mode, the feeder's second Input until now, is now State of the feeder and an Input of the
-    pacer, compared by value, and a mode change reaches the handler as one even when its own request is lost. Its mid-flight change
+    pacer, compared by value, and a mode change reaches the handler as one even when its own request is lost (not when a raising handler acks it with
+    `no_update`; the next request is then a tick). Its mid-flight change
     evicted the fetch in a synthetic app with this wiring; it was not observed in mid-request on canopy.
     The full-history modulus (`FULL_HISTORY_POLL_TICK_MODULUS`, 5) now counts requests rather
     than ticks of the guarded Interval, so `full` / `hidden_units` refetch on every fifth request

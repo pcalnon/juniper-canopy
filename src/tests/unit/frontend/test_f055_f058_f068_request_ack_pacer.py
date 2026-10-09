@@ -515,6 +515,13 @@ class TestPacerRule:
         assert got[0] == NU and got[1]["seq"] == 2 and got[2] == NU and got[3]["seq"] == 3, got
         assert got[4] == NU and got[5]["stale"] is True, got
 
+    def test_an_acknowledged_mode_fetch_returns_to_ticks(self, tmp_path):
+        """Round 3 of the review: ``extra`` must not stick. Once a mode fetch is acknowledged
+        and the mode is unchanged, the next request is a tick, or every request would bypass
+        the full-history modulus for the life of the page."""
+        out = self._one(tmp_path, now=50000, n=9, extra=self.WIN, req={"seq": 4, "issued_at": 49000, "reason": "extra", "extra_key": self.WIN_KEY}, ack={"seq": 4}, reset=True)
+        assert out["reason"] == "tick" and out["stale"] is False
+
     def test_a_lost_mode_fetch_is_reissued_as_a_mode_fetch(self, tmp_path):
         """Round 2 of the review: if the ``extra`` request itself is lost, its stale re-issue
         must still say the mode changed, or the full-history modulus can hold it back."""

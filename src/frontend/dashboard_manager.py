@@ -509,7 +509,7 @@ _STATUS_BAR_REQUEST: Final[str] = "status-bar-request"
 _STATUS_BAR_ACK: Final[str] = "status-bar-ack"
 # The stale bound grows with the page: a request is re-issued over only once it is older
 # than ``POLL_PACER_STALE_MS`` AND this many times the longest round trip (a lower bound) seen
-# on its lane. On the branch's own verify leg, on a host loaded by other work, requests
+# on its poll. On the branch's own verify leg, on a host loaded by other work, requests
 # stayed in flight up to 16.4 s and 17.3 s in two runs, so a fixed 30 s would leave a margin under 2x.
 PACER_STALE_RTT_FACTOR: Final[int] = 3
 # ...and never beyond this, so no measurement can push recovery out indefinitely.
@@ -546,7 +546,7 @@ def poll_pacer_js(key: str, stale_ms: int, extra_input: bool) -> str:
       callback and loses its trigger.
     * ``stale`` is true when the request is re-issued over an unacknowledged one. That
       re-issue evicts the request in flight, deliberately: it is the recovery for a request
-      that never gets a response. The server reads ``reason`` only; ``stale`` is for
+      that never gets a response. The feeders read ``seq`` and ``reason``; ``stale`` is for
       instruments and logs.
     * The stale bound is ``min(PACER_STALE_CAP_MS, max(stale_ms, PACER_STALE_RTT_FACTOR x
       the longest round trip this page has seen on this poll))``, so a slow page does not

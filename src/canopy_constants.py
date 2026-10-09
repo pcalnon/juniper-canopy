@@ -427,7 +427,7 @@ class DashboardConstants:
     # runs on the pacer's own verify leg, on a host loaded by other work (post-run load averages
     # 13.8-32.7; not sampled during the runs; 2026-10-08). So this is a
     # FLOOR: the pacer raises it to ``PACER_STALE_RTT_FACTOR`` (3) times the longest round trip
-    # its page has seen on that lane, measured as a lower bound, and caps it at
+    # its page has seen on that poll, measured as a lower bound, and caps it at
     # ``PACER_STALE_CAP_MS`` (120 s); both live beside ``poll_pacer_js`` in
     # ``dashboard_manager.py``. Recovering within about 30 s is the goal; recovering fast is not.
     POLL_PACER_STALE_MS: Final[int] = 30000  # 30 seconds (a floor; see above)
