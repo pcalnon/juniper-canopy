@@ -409,7 +409,7 @@ class DashboardConstants:
     # whose round trip exceeds its trigger period is therefore re-requested over
     # itself forever and NEVER applies a single response. Measured on canopy at
     # 1000 ms: 55 responses, every one carrying a full payload, store length 0.
-    METRICS_STORE_POLL_INTERVAL_MS: Final[int] = 1000  # 1 second (self-clocked; see above)
+    METRICS_STORE_POLL_INTERVAL_MS: Final[int] = 1000  # 1 second (paces the request/ack pacer; see above)
 
     # F-CANOPY-055/058/068: how old an UNACKNOWLEDGED paced request may grow before the
     # request/ack pacer (``poll_pacer_js`` in ``dashboard_manager.py``) issues a new one
@@ -419,12 +419,17 @@ class DashboardConstants:
     #
     # The age is the outstanding request's own (``issued_at``), which is progress, not a
     # sample of a prop. A request that never gets a response at all (a canopy restart, a
-    # connection reset: the renderer's ``handleError`` path) is re-issued after this long.
-    # Re-issuing evicts the request in flight, so it must stay far above any legitimate
-    # round trip: the longest measured on the metrics store was 5.4 s from entering
-    # ``watched`` (juniper-ml evidence ledger, Phase 11), and ``API_TIMEOUT_SECONDS`` is 2.
-    # Recovering in 30 s is the goal; recovering fast is not.
-    POLL_PACER_STALE_MS: Final[int] = 30000  # 30 seconds
+    # connection reset: the renderer's ``handleError`` path), or whose non-OK reply carries
+    # no ack, is re-issued after this long. Re-issuing evicts the request in flight, so the
+    # bound must stay well above any legitimate round trip. Measured from entering
+    # ``watched``: at most 5.4 s on canopy ``main`` at a host load average of 2-4 (juniper-ml
+    # evidence ledger, Phase 11), but up to 16.4 s and 17.3 s (p90 12.2 s and 11.7 s) in two
+    # runs on the pacer's own verify leg at a load average of ~14-33 (2026-10-08). So this is a
+    # FLOOR: the pacer raises it to ``PACER_STALE_RTT_FACTOR`` (3) times the longest round trip
+    # its page has seen on that lane, measured as a lower bound, and caps it at
+    # ``PACER_STALE_CAP_MS`` (120 s); both live beside ``poll_pacer_js`` in
+    # ``dashboard_manager.py``. Recovering within about 30 s is the goal; recovering fast is not.
+    POLL_PACER_STALE_MS: Final[int] = 30000  # 30 seconds (a floor; see above)
 
     # F-CANOPY-053 (provisional id): the Candidate Metrics panel's poll period, i.e.
     # ``candidate-metrics-panel-update-interval``, the only trigger of

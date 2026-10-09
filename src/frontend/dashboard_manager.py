@@ -476,25 +476,50 @@ _METRICS_STORE_INTERVAL: Final[str] = "metrics-store-interval"
 # response lands starts a chain in which each evicted request's late completion re-enables
 # the lane under its successor (F-CANOPY-058, observed live in runs of up to 11 evictions and
 # 34.8 s). The guard needed a strand watchdog, which sampled ``disabled`` every 5 s against a
-# ~4.9 s cycle and fired falsely ~31-36 times an hour, each time mid-fetch (F-CANOPY-068).
+# ~4.9 s cycle and fired falsely ~31-36 times an hour, each time mid-fetch (F-CANOPY-068;
+# that its samples kept phase with the cycle is the ledger's inference, not a measurement).
 #
 # The pacer replaces both. Each paced poll has:
 #
 #   * a REQUEST store, written only by a clientside pacer and the feeder's ONLY Input;
-#   * an ACK store, a second Output of the feeder, which echoes the request's ``seq``;
+#   * an ACK store, a second Output of the feeder, which echoes the request's ``seq`` on
+#     every return path of the feeder, a raised handler included;
 #   * the pacer, which runs on the lane's ticks (and on the poll's other Input, if it has
 #     one) and writes a new request only when the ack has caught up with the last request,
-#     or when that request is older than ``POLL_PACER_STALE_MS``.
+#     or when that request is older than its stale bound (``poll_pacer_js``).
 #
-# The feeder is therefore never re-requested while a request is in flight, so nothing evicts
-# it. No callback writes ``disabled`` for pacing, so the tab/apply gate is again the lane's
-# only writer and the Apply clamp holds. The stale recovery is measured from the outstanding
-# request's own ``issued_at``, which is progress, not from samples of a prop. The ack is
-# read as State, never as an Input: an Input would close the cycle pacer -> feeder -> pacer.
+# So the PACER never re-requests a feeder while its request is in flight, with one deliberate
+# exception: the stale re-issue, which is the recovery for a request that never gets a
+# response. Two other paths can still re-request a feeder, and each costs at most one
+# response with no chain, because no guard is left to release: the renderer's initial call
+# when ``suppress_cascade_tabs`` rebuilds the tab container that holds the metrics store (a
+# live/one-shot model switch), and a pacer write that lands while that initial call is in
+# flight. No callback writes ``disabled`` for pacing, so the tab/apply gate is again the
+# lane's only writer and the Apply clamp holds. The stale recovery is measured from the
+# outstanding request's own ``issued_at``, which is progress, not from samples of a prop.
+# The ack is read as State, never as an Input: an Input would close the cycle
+# pacer -> feeder -> pacer.
+#
+# One cost: a failure OUTSIDE the feeder's own ``try`` (a non-OK HTTP reply from Dash or a
+# middleware, a network failure) lands no ack, so the lane waits out the stale bound,
+# >= 30 s, where canopy#613's guard retried on the next tick after a non-OK reply.
 _METRICS_STORE_REQUEST: Final[str] = "metrics-store-request"
 _METRICS_STORE_ACK: Final[str] = "metrics-store-ack"
 _STATUS_BAR_REQUEST: Final[str] = "status-bar-request"
 _STATUS_BAR_ACK: Final[str] = "status-bar-ack"
+# The stale bound grows with the page: a request is re-issued over only once it is older
+# than ``POLL_PACER_STALE_MS`` AND this many times the longest round trip (a lower bound) seen
+# on its lane. On the branch's own verify leg, at host load averages of ~14-33, requests
+# stayed in flight up to 16.4 s and 17.3 s in two runs, so a fixed 30 s would leave a margin under 2x.
+PACER_STALE_RTT_FACTOR: Final[int] = 3
+# ...and never beyond this, so no measurement can push recovery out indefinitely.
+PACER_STALE_CAP_MS: Final[int] = 120000
+# Every request/ack-paced poll: (request store, the Interval its pacer rides). The F-027
+# poller census counts each paced feeder against that lane.
+_PACED_POLLS: Final[Tuple[Tuple[str, str], ...]] = (
+    (_METRICS_STORE_REQUEST, _METRICS_STORE_INTERVAL),
+    (_STATUS_BAR_REQUEST, "fast-update-interval"),
+)
 
 
 def poll_pacer_js(lane: str, stale_ms: int, extra_input: bool) -> str:
@@ -503,18 +528,34 @@ def poll_pacer_js(lane: str, stale_ms: int, extra_input: bool) -> str:
     Arguments, in registration order: the lane Interval's ``n_intervals``, then (when
     ``extra_input``) the poll's other Input, then the REQUEST and ACK stores as State.
 
-    Returns ``no_update`` while the last request is unacknowledged and younger than
-    ``stale_ms``; otherwise a new request ``{seq, issued_at, reason, extra_key}``, where
-    ``reason`` is ``"stale"`` (re-issued over an unanswered request), ``"extra"`` (the
-    other Input's VALUE differs from the one the last request was issued with) or
-    ``"tick"``. The extra Input is compared by value, not by trigger, because the renderer
-    replaces a queued request with a newer one of the same callback and loses its trigger.
+    Returns ``no_update`` while the last request is unacknowledged and younger than the
+    stale bound; otherwise a new request ``{seq, issued_at, reason, extra_key, stale}``.
+
+    * ``reason`` is ``"extra"`` when the other Input's VALUE differs from the one the last
+      request was issued with (or the last request recorded none, as the layout's seq-0
+      request does), else ``"tick"`` when the last request was acknowledged, else
+      ``"stale"``. A display-mode change therefore always reaches the handler as one, even
+      when it rides a stale re-issue. The extra Input is compared by value, not by trigger,
+      because the renderer replaces a queued request with a newer one of the same callback
+      and loses its trigger.
+    * ``stale`` is true when the request is re-issued over an unacknowledged one. That
+      re-issue evicts the request in flight, deliberately: it is the recovery for a request
+      that never gets a response.
+    * The stale bound is ``min(PACER_STALE_CAP_MS, max(stale_ms, PACER_STALE_RTT_FACTOR x
+      the longest round trip this page has seen on this lane))``, so a slow page does not
+      re-issue over its own legitimate requests. Each round trip is a LOWER bound: from
+      ``issued_at`` to the last pacer run that still saw the request unacknowledged, so a
+      run delayed by a throttled background tab or a sleep cannot inflate it (round 1 of
+      the review measured the bound at ~180 s after one throttled tick when it was read at
+      the run that saw the ack).
 
     A request with no ``issued_at`` (the layout's seq-0 request, answered by the feeder's
-    mount call) is aged from the first time this page's pacer sees it.
+    mount call) is aged from the first time this page's pacer sees it. Ages use
+    ``Date.now()``, so a backward step of the wall clock delays a stale re-issue by that step.
     """
     params = "n, extra, req, ack" if extra_input else "n, req, ack"
     extra_key = "JSON.stringify(extra === undefined ? null : extra)" if extra_input else "null"
+    lane_js = json.dumps(lane)
     return f"""
             function({params}) {{
                 var NU = window.dash_clientside.no_update;
@@ -522,18 +563,25 @@ def poll_pacer_js(lane: str, stale_ms: int, extra_input: bool) -> str:
                 var seq = (req && typeof req.seq === 'number') ? req.seq : 0;
                 var acked = Boolean(ack) && ack.seq === seq;
                 var firstSeen = window.__junPollPacerFirstSeen || (window.__junPollPacerFirstSeen = {{}});
-                var issuedAt = (req && typeof req.issued_at === 'number') ? req.issued_at : (firstSeen[{json.dumps(lane)}] || (firstSeen[{json.dumps(lane)}] = now));
-                if (!acked && now - issuedAt < {int(stale_ms)}) {{
+                var maxRtt = window.__junPollPacerMaxRtt || (window.__junPollPacerMaxRtt = {{}});
+                var lastUnacked = window.__junPollPacerLastUnacked || (window.__junPollPacerLastUnacked = {{}});
+                var issuedAt = (req && typeof req.issued_at === 'number') ? req.issued_at : (firstSeen[{lane_js}] || (firstSeen[{lane_js}] = now));
+                var seen = lastUnacked[{lane_js}];
+                if (acked && seen && seen.seq === seq && typeof req.issued_at === 'number') {{
+                    // A LOWER bound on this round trip: the request was still unanswered at
+                    // the last run that saw it. A late run (a throttled background tab, a
+                    // sleep) cannot inflate it, as the time of this run would.
+                    maxRtt[{lane_js}] = Math.max(maxRtt[{lane_js}] || 0, seen.t - req.issued_at);
+                }}
+                var staleMs = Math.min({int(PACER_STALE_CAP_MS)}, Math.max({int(stale_ms)}, {int(PACER_STALE_RTT_FACTOR)} * (maxRtt[{lane_js}] || 0)));
+                if (!acked && now - issuedAt < staleMs) {{
+                    lastUnacked[{lane_js}] = {{seq: seq, t: now}};
                     return NU;
                 }}
                 var extraKey = {extra_key};
-                var reason = 'tick';
-                if (!acked) {{
-                    reason = 'stale';
-                }} else if (extraKey !== null && req && typeof req.extra_key === 'string' && req.extra_key !== extraKey) {{
-                    reason = 'extra';
-                }}
-                return {{seq: seq + 1, issued_at: now, reason: reason, extra_key: extraKey}};
+                var changed = extraKey !== null && !(req && req.extra_key === extraKey);
+                var reason = changed ? 'extra' : (acked ? 'tick' : 'stale');
+                return {{seq: seq + 1, issued_at: now, reason: reason, extra_key: extraKey, stale: !acked}};
             }}
             """
 
@@ -2580,10 +2628,12 @@ class DashboardManager:
 
         # F-CANOPY-068: the strand watchdog that stood here is GONE, with the ``running=``
         # guard it repaired. It sampled ``metrics-store-interval.disabled`` every 5 s and
-        # re-enabled the lane after 30 s of samples that all found it disabled. On a page
-        # whose feeder cycle was ~4.9 s its samples kept phase with the cycle's disabled
-        # part, so it fired 13 and 15 times in two 25-minute runs on canopy ``main``, each
-        # time mid-fetch, and 7 of those fires evicted a response (juniper-ml
+        # re-enabled the lane after 30 s of samples that all found it disabled (a sample
+        # that found it enabled, or the Apply clamp held, reset its clock). It fired 13 and
+        # 15 times in two 25-minute runs on canopy ``main``, each time mid-fetch, with the
+        # lane enabled for 11-15 s of the 30 s before each fire, and 7 of those fires
+        # evicted a response. That its 5 s samples kept phase with the feeder's ~4.9 s
+        # cycle is the ledger's inference from a replay, not a measurement (juniper-ml
         # ``notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md``, Phase 11).
         # The request/ack pacers (``_setup_poll_pacers``) bound a lost request by its own
         # age instead, so nothing is left for a watchdog to unstick.
@@ -2597,10 +2647,14 @@ class DashboardManager:
 
         * The metrics store (F-CANOPY-058, F-CANOPY-068) is paced on its own
           ``metrics-store-interval`` and on ``metrics-panel-display-mode-store``, its second
-          Input until now, whose mid-flight change evicted the in-flight fetch.
+          Input until now. A mid-flight change of that Input creates a same-identity request
+          and evicts the fetch: reproduced in a synthetic app with this wiring, and not
+          observed in mid-request on canopy itself.
         * The top status bar (F-CANOPY-055) is paced on ``fast-update-interval``. Its feeder
-          rode that 1 s lane directly with a round trip of ~1.2 s and more, so every response
-          was evicted and the bar held its layout defaults for the life of the page.
+          rode that 1 s lane directly. Its wire latency had a median of 1.16 s (0.21-3.08 s),
+          plus the renderer's queue, so each response was still unprocessed when the next
+          tick's request arrived: 0 of 36 applied, and the bar held its layout defaults for
+          the life of the page.
         """
         stale_ms = DashboardConstants.POLL_PACER_STALE_MS
         self.app.clientside_callback(
@@ -4180,8 +4234,9 @@ class DashboardManager:
                 Output(_STATUS_BAR_ACK, "data"),
             ],
             # F-CANOPY-055: paced by request/ack, not by ``fast-update-interval`` directly.
-            # On that 1 s lane a round trip of ~1.2 s and more had every response evicted
-            # by the next tick's request, so the bar NEVER applied (0 of 36 on the census).
+            # On that 1 s lane (wire latency median 1.16 s, plus the renderer's queue) every
+            # response was evicted by the next tick's request before it was processed, so the
+            # bar NEVER applied (0 of 36 on the census).
             # The pacer in ``_setup_poll_pacers`` writes the next request only once this
             # callback's ack has echoed the last one.
             Input(_STATUS_BAR_REQUEST, "data"),
@@ -4194,13 +4249,17 @@ class DashboardManager:
             """Update unified status bar (+ the training-status store and the Live Switch gate)."""
             seq = request.get("seq") if isinstance(request, dict) else None
             try:
-                outputs = self._update_unified_status_bar_handler(
-                    n_intervals=seq,
-                    prev_training_status=prev_training_status,
-                    experimental_flags=experimental_flags,
-                    prev_switch_disabled=prev_switch_disabled,
+                outputs = tuple(
+                    self._update_unified_status_bar_handler(
+                        n_intervals=seq,
+                        prev_training_status=prev_training_status,
+                        experimental_flags=experimental_flags,
+                        prev_switch_disabled=prev_switch_disabled,
+                    )
                 )
-            except Exception as exc:  # the ack must land, or the pacer waits out POLL_PACER_STALE_MS
+                if len(outputs) != 11:
+                    raise ValueError(f"status bar handler returned {len(outputs)} outputs, expected 11")
+            except Exception as exc:  # the ack must land, or the pacer waits out its stale bound
                 self.logger.warning("status bar poll failed: %s", exc)
                 outputs = (dash.no_update,) * 11
             return (*outputs, {"seq": seq})
@@ -4807,11 +4866,15 @@ class DashboardManager:
         # re-enabled it mid-fetch ~31-36 times an hour on its own (F-CANOPY-068). The
         # feeder is now paced by request/ack (``_setup_poll_pacers``): its ONLY Input is
         # the request store, which the pacer writes only once the ack below has echoed
-        # the last request, so nothing can re-request it while a fetch is in flight.
+        # the last request, or once that request is past its stale bound. The paths that
+        # can still re-request it (the stale re-issue, and the renderer's initial call
+        # after a tab-container rebuild) are listed above ``_METRICS_STORE_REQUEST``; each
+        # costs at most one response.
         #
         # The display mode, its second Input until now, is State here and an Input of the
-        # pacer. A mid-flight mode change used to create a same-identity request and evict
-        # the fetch (``getUniqueIdentifier`` ignores the trigger); now the pacer issues a
+        # pacer. A mid-flight mode change creates a same-identity request and evicts the
+        # fetch (``getUniqueIdentifier`` ignores the trigger; reproduced in a synthetic
+        # app, not observed in mid-request on canopy); now the pacer issues a
         # ``reason="extra"`` request once the fetch in flight is acknowledged.
         #
         # The ack is written on EVERY return path, including a raised handler: without it
@@ -4829,8 +4892,8 @@ class DashboardManager:
             """Liveness-gated REST poll for the metrics store (N8 O1 half), paced by request/ack."""
             request = request if isinstance(request, dict) else {}
             seq = request.get("seq")
-            ws_live = bool(ws_liveness and ws_liveness.get("metrics_live"))
             try:
+                ws_live = bool(isinstance(ws_liveness, dict) and ws_liveness.get("metrics_live"))
                 data = self._update_metrics_store_handler(
                     n=seq,
                     display_mode_state=display_mode_state,

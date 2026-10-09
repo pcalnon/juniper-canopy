@@ -1223,8 +1223,8 @@ class MetricsPanel(BaseComponent):
         # ``metrics-store.data`` is STATE, not an Input. ``getReadyCallbacks`` holds a
         # requested callback while any of its INPUTS lies in the downstream closure of a
         # pending callback (State is never checked), and the store's primary writer
-        # ``update_metrics_store`` is pending most of the time: a ``running=``-gated poll
-        # against L ~5 s. With the store as an Input the controls waited on every poll, the
+        # ``update_metrics_store`` is pending most of the time: a request/ack-paced poll
+        # (``running=``-gated until F-CANOPY-058) against L ~5 s. With the store as an Input the controls waited on every poll, the
         # condition canopy#658 recorded; now no pending callback holds back their readiness
         # (``test_nothing_pending_can_hold_the_replay_controls``) -- a ready run can still wait
         # for a slot, as above. The cost: a refill no longer

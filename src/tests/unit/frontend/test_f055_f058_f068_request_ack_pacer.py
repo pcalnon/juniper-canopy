@@ -4,7 +4,7 @@
 Findings: juniper-ml ``notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md``.
 
 * **F-CANOPY-055 (P1).** The top status bar's feeder rode ``fast-update-interval`` (1 s)
-  with a round trip of ~1.2 s and more. dash-renderer evicts a ``watched`` request when the
+  with a wire latency of 1.16 s at the median, plus the renderer's queue. dash-renderer evicts a ``watched`` request when the
   same callback is requested again and discards its response, so every response was
   evicted: 0 of 36 applied on the census, and the bar held its layout defaults for the
   life of the page.
@@ -232,6 +232,19 @@ class TestFeeders:
         out = _feeder_fn(dashboard, STATUS_ACK)({"seq": 12, "reason": "tick"}, None, None, True)
         assert len(out) == 12 and out[:11] == tuple(range(11)) and out[11] == {"seq": 12}
 
+    def test_metrics_ack_lands_on_a_malformed_liveness_store(self, dashboard, monkeypatch):
+        """Round 1 of the review: the liveness read sat before the ``try``, so a truthy
+        non-dict store raised a 500 and stalled the lane for the stale bound."""
+        monkeypatch.setattr(dashboard, "_update_metrics_store_handler", lambda **kw: [{"epoch": 1}])
+        data, ack = _feeder_fn(dashboard, METRICS_ACK)({"seq": 8, "reason": "tick"}, None, ["not", "a", "dict"], None)
+        assert data == [{"epoch": 1}] and ack == {"seq": 8}
+
+    @pytest.mark.parametrize("bad", [None, (1, 2, 3)])
+    def test_status_ack_lands_when_the_handler_returns_the_wrong_shape(self, dashboard, monkeypatch, bad):
+        monkeypatch.setattr(dashboard, "_update_unified_status_bar_handler", lambda **kw: bad)
+        out = _feeder_fn(dashboard, STATUS_ACK)({"seq": 9}, None, None, True)
+        assert len(out) == 12 and all(v is dash.no_update for v in out[:11]) and out[11] == {"seq": 9}
+
     def test_status_ack_lands_when_the_handler_raises(self, dashboard, monkeypatch):
         def _raise(**_kw):
             raise RuntimeError("boom")
@@ -286,28 +299,49 @@ const input = JSON.parse(process.argv[2]);
 function runCases(cases) {
     return cases.map(function (c) {
         NOW = c.now;
-        if (c.reset) { delete window.__junPollPacerFirstSeen; }
+        if (c.reset) { delete window.__junPollPacerFirstSeen; delete window.__junPollPacerMaxRtt; delete window.__junPollPacerLastUnacked; }
         return c.extra === undefined ? pacerStatus(c.n, c.req, c.ack) : pacerMetrics(c.n, c.extra, c.req, c.ack);
     });
 }
 
-// A healthy lane for `minutes`: the Interval ticks every 1000 ms; the feeder answers each
-// request after a round trip drawn from `rtts` (ms, cycled). `mode` "pacer" runs the
-// registered pacer; "guard" models canopy#613's running= guard + 5 s strand watchdog.
-function simulate(mode, minutes, rtts, watchdogPhase) {
+// A lane for `minutes`: the Interval ticks every 1000 ms; the feeder answers each request
+// after a round trip drawn from `rtts` (ms, cycled). The response leaves the renderer's
+// `watched` set when it lands, and its ack reaches the layout `applyDelay` ms later (cycled
+// 0-300 ms), as in dash-renderer, where a callback moves to `executed` before its outputs
+// are applied. `mode` "pacer" runs the registered pacer; "guard" models canopy#613's
+// running= guard + 5 s strand watchdog. With `strandAfterMs`, the first request issued after
+// that time never gets a response (a network failure), and a deliberate stale re-issue
+// evicts it; that eviction is counted as `staleEvictions`, not as a request made in flight.
+// This models the pacer's clock and the ack's timing, NOT the renderer's queue: the
+// real-renderer check in juniper-ml does that.
+function simulate(mode, minutes, rtts, watchdogPhase, strandAfterMs) {
     const end = minutes * 60000;
-    let req = { seq: 0 }, ack = null, inFlight = null, rttIdx = 0;
-    let issuedWhileInFlight = 0, stale = 0, requests = 0, falseFires = 0;
+    let req = { seq: 0 }, ack = null, inFlight = null, pendingAck = null, rttIdx = 0, delayIdx = 0;
+    let issuedWhileInFlight = 0, stale = 0, staleEvictions = 0, requests = 0, falseFires = 0;
     let disabled = true, disabledSince = null, nextTick = 1000, nextSample = watchdogPhase;
+    let stranded = null, strandReissueAfterMs = null, answeredAfterStrand = 0;
+    const delays = [0, 40, 120, 300, 80];
+    function launch(seq) {
+        let rtt = rtts[rttIdx++ % rtts.length];
+        if (strandAfterMs !== undefined && strandAfterMs !== null && stranded === null && NOW >= strandAfterMs && mode === "pacer") {
+            rtt = Infinity;
+            stranded = { seq: seq, at: NOW };
+        }
+        return { seq: seq, landsAt: NOW + rtt };
+    }
     // mount: the feeder's seq-0 call is in flight from t=0
-    inFlight = { seq: 0, landsAt: rtts[rttIdx++ % rtts.length] };
+    inFlight = launch(0);
     delete window.__junPollPacerFirstSeen;
+    delete window.__junPollPacerMaxRtt;
+    delete window.__junPollPacerLastUnacked;
     for (NOW = 0; NOW <= end; NOW += 10) {
         if (inFlight && NOW >= inFlight.landsAt) {
-            ack = { seq: inFlight.seq };
+            pendingAck = { seq: inFlight.seq, at: NOW + delays[delayIdx++ % delays.length] };
+            if (stranded && inFlight.seq > stranded.seq) { answeredAfterStrand++; }
             inFlight = null;
             if (mode === "guard") { disabled = false; nextTick = NOW + 1000; }
         }
+        if (pendingAck && NOW >= pendingAck.at) { ack = { seq: pendingAck.seq }; pendingAck = null; }
         if (mode === "guard" && NOW >= nextSample) {
             nextSample += 5000;
             if (!disabled) { disabledSince = null; }
@@ -323,23 +357,28 @@ function simulate(mode, minutes, rtts, watchdogPhase) {
             if (mode === "pacer") {
                 const out = pacerStatus(Math.floor(NOW / 1000), req, ack);
                 if (out !== "__NO_UPDATE__") {
-                    if (inFlight) { issuedWhileInFlight++; }
-                    if (out.reason === "stale") { stale++; }
+                    if (out.stale) {
+                        stale++;
+                        if (inFlight) { staleEvictions++; inFlight = null; }
+                        if (stranded && strandReissueAfterMs === null) { strandReissueAfterMs = NOW - stranded.at; }
+                    } else if (inFlight || pendingAck) {
+                        issuedWhileInFlight++;
+                    }
                     req = out; requests++;
-                    inFlight = { seq: out.seq, landsAt: NOW + rtts[rttIdx++ % rtts.length] };
+                    inFlight = launch(out.seq);
                 }
             } else {
                 if (inFlight) { issuedWhileInFlight++; }
                 requests++; disabled = true;
-                inFlight = { seq: requests, landsAt: NOW + rtts[rttIdx++ % rtts.length] };
+                inFlight = launch(requests);
             }
         }
     }
-    return { issuedWhileInFlight: issuedWhileInFlight, stale: stale, requests: requests, falseFires: falseFires };
+    return { issuedWhileInFlight: issuedWhileInFlight, stale: stale, staleEvictions: staleEvictions, requests: requests, falseFires: falseFires, strandReissueAfterMs: strandReissueAfterMs, answeredAfterStrand: answeredAfterStrand };
 }
 
 if (input.cases) { console.log(JSON.stringify(runCases(input.cases))); }
-else { console.log(JSON.stringify(simulate(input.mode, input.minutes, input.rtts, input.watchdogPhase || 0))); }
+else { console.log(JSON.stringify(simulate(input.mode, input.minutes, input.rtts, input.watchdogPhase || 0, input.strandAfterMs))); }
 """
 
 
@@ -366,14 +405,14 @@ class TestPacerRule:
 
     def test_asks_when_acknowledged(self, tmp_path):
         out = self._one(tmp_path, now=50000, n=9, req={"seq": 4, "issued_at": 49000}, ack={"seq": 4})
-        assert out == {"seq": 5, "issued_at": 50000, "reason": "tick", "extra_key": None}
+        assert out == {"seq": 5, "issued_at": 50000, "reason": "tick", "extra_key": None, "stale": False}
 
     def test_waits_while_unacknowledged_and_young(self, tmp_path):
         assert self._one(tmp_path, now=50000, n=9, req={"seq": 4, "issued_at": 50000 - self.STALE + 1}, ack={"seq": 3}) == NU
 
     def test_reissues_once_the_request_is_stale(self, tmp_path):
         out = self._one(tmp_path, now=50000, n=9, req={"seq": 4, "issued_at": 50000 - self.STALE}, ack={"seq": 3})
-        assert out["seq"] == 5 and out["reason"] == "stale"
+        assert out["seq"] == 5 and out["reason"] == "stale" and out["stale"] is True
 
     def test_a_late_ack_of_an_older_request_does_not_count(self, tmp_path):
         """An evicted request's late response must not release the pacer (F-058's chain)."""
@@ -408,6 +447,73 @@ class TestPacerRule:
         )
         assert got[0] == NU and got[1] == NU and got[2]["reason"] == "stale" and got[2]["seq"] == 1
 
+    def test_the_first_metrics_request_after_mount_is_a_mode_fetch(self, tmp_path):
+        """The seq-0 request records no display mode, so the first paced request says the mode
+        changed: a page that switched mode before it is answered still fetches at once."""
+        out = self._one(tmp_path, now=1000, n=1, extra=self.FULL, req={"seq": 0}, ack={"seq": 0}, reset=True)
+        assert out["reason"] == "extra" and out["stale"] is False
+
+    def test_a_mode_change_riding_a_stale_reissue_is_still_a_mode_fetch(self, tmp_path):
+        """Otherwise the handler's full-history modulus could hold the new mode back."""
+        out = self._one(tmp_path, now=50000, n=9, extra=self.FULL, req={"seq": 4, "issued_at": 50000 - self.STALE, "extra_key": self.WIN_KEY}, ack={"seq": 3}, reset=True)
+        assert out["reason"] == "extra" and out["stale"] is True
+
+    def test_the_stale_bound_grows_with_the_longest_round_trip(self, tmp_path):
+        """A slow page must not re-issue over its own legitimate requests (factor 3).
+
+        The round trip is a LOWER bound: request 1 (issued at 1 s) was still unanswered at the
+        run at 21 s and acknowledged by the run at 22 s, so it took at least 20 s."""
+        got = _run_node(
+            tmp_path,
+            {
+                "cases": [
+                    {"now": 21000, "n": 1, "req": {"seq": 1, "issued_at": 1000}, "ack": {"seq": 0}, "reset": True},
+                    {"now": 22000, "n": 2, "req": {"seq": 1, "issued_at": 1000}, "ack": {"seq": 1}},
+                    # request 2, unacknowledged: 40 s old is past the 30 s floor but inside 3 x 20 s
+                    {"now": 62000, "n": 3, "req": {"seq": 2, "issued_at": 22000}, "ack": {"seq": 1}},
+                    {"now": 22000 + 60000, "n": 4, "req": {"seq": 2, "issued_at": 22000}, "ack": {"seq": 1}},
+                ]
+            },
+        )
+        assert got[0] == NU and got[1]["seq"] == 2 and got[2] == NU and got[3]["stale"] is True, got
+
+    def test_a_late_sighting_of_an_ack_does_not_grow_the_bound(self, tmp_path):
+        """Round 1 of the review: a throttled background tab whose next run comes a minute late
+        must not stretch the bound to ~180 s. Request 1 was seen unanswered at 2 s and its ack
+        only at 61 s, so the lower bound is 1 s and the bound stays at the 30 s floor."""
+        got = _run_node(
+            tmp_path,
+            {
+                "cases": [
+                    {"now": 2000, "n": 1, "req": {"seq": 1, "issued_at": 1000}, "ack": {"seq": 0}, "reset": True},
+                    {"now": 61000, "n": 2, "req": {"seq": 1, "issued_at": 1000}, "ack": {"seq": 1}},
+                    {"now": 61000 + self.STALE, "n": 3, "req": {"seq": 2, "issued_at": 61000}, "ack": {"seq": 1}},
+                ]
+            },
+        )
+        assert got[0] == NU and got[1]["seq"] == 2 and got[2]["stale"] is True, got
+
+    def test_the_bound_is_capped(self, tmp_path):
+        """No measurement may push recovery past ``PACER_STALE_CAP_MS``. The bound grows only
+        through requests that survive unacknowledged: 29 s (bound 87 s), then 86 s (3 x 86 s =
+        258 s, capped)."""
+        cap = dm.PACER_STALE_CAP_MS
+        got = _run_node(
+            tmp_path,
+            {
+                "cases": [
+                    {"now": 29000, "n": 1, "req": {"seq": 1, "issued_at": 0}, "ack": {"seq": 0}, "reset": True},
+                    {"now": 30000, "n": 2, "req": {"seq": 1, "issued_at": 0}, "ack": {"seq": 1}},
+                    {"now": 116000, "n": 3, "req": {"seq": 2, "issued_at": 30000}, "ack": {"seq": 1}},
+                    {"now": 117000, "n": 4, "req": {"seq": 2, "issued_at": 30000}, "ack": {"seq": 2}},
+                    {"now": 117000 + cap - 1, "n": 5, "req": {"seq": 3, "issued_at": 117000}, "ack": {"seq": 2}},
+                    {"now": 117000 + cap, "n": 6, "req": {"seq": 3, "issued_at": 117000}, "ack": {"seq": 2}},
+                ]
+            },
+        )
+        assert got[0] == NU and got[1]["seq"] == 2 and got[2] == NU and got[3]["seq"] == 3, got
+        assert got[4] == NU and got[5]["stale"] is True, got
+
     def test_the_mount_ack_releases_the_first_tick(self, tmp_path):
         out = self._one(tmp_path, now=1000, n=1, req={"seq": 0}, ack={"seq": 0}, reset=True)
         assert out["seq"] == 1 and out["reason"] == "tick"
@@ -418,9 +524,10 @@ class TestPacerRule:
 class TestTenIdleMinutes:
     """A healthy lane whose cycle is near the old watchdog's 5 s sampling period.
 
-    Round trips are drawn from Phase 11's measured in-flight range (888 ms to 5,345 ms,
-    median ~2.8 s), seeded, so the cycle (round trip plus up to one 1 s tick) sits near 5 s
-    as it did on canopy ``main``.
+    Round trips are drawn, seeded, from a normal centred on 3.6 s (sd 450 ms) and clipped to
+    Phase 11's measured in-flight range (888 ms to 5,345 ms; its median was ~2.8 s), so the
+    cycle (round trip plus up to one 1 s tick) sits near the old watchdog's 5 s period, as
+    canopy ``main``'s ~4.9 s cycle did.
     """
 
     @staticmethod
@@ -434,6 +541,15 @@ class TestTenIdleMinutes:
         assert got["issuedWhileInFlight"] == 0, got
         assert got["stale"] == 0, got
         assert got["requests"] > 100, got  # the lane kept polling: ~10 min / ~4.6 s
+
+    def test_a_lost_request_is_reissued_once_and_the_lane_resumes(self, tmp_path):
+        """The stale path, in the same simulation: a request that never gets a response is
+        re-issued once, at the 30 s floor (the measured round trips, x3, stay under it), and
+        the lane goes on answering."""
+        got = _run_node(tmp_path, {"mode": "pacer", "minutes": 4, "rtts": self._rtts(1, 3600), "strandAfterMs": 60000})
+        assert got["stale"] == 1 and got["staleEvictions"] == 1, got
+        assert DashboardConstants.POLL_PACER_STALE_MS <= got["strandReissueAfterMs"] <= DashboardConstants.POLL_PACER_STALE_MS + 1000, got
+        assert got["issuedWhileInFlight"] == 0 and got["answeredAfterStrand"] > 20, got
 
     def test_the_simulation_can_fail(self, tmp_path):
         """Non-vacuity: canopy#613's guard and watchdog, simulated on the same lane, fire
