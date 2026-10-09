@@ -1292,7 +1292,7 @@ export JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE=/run/secrets/recurrence_api_key
 
 ✅ **On `retry after`, wait out that window.** A 429 with no `Retry-After` header has no wait clause. The window is still closed.
 
-✅ **A restored snapshot is a model.** `restored` means the service loaded a snapshot (`restored_from` names it). It does not mean the fit you just started succeeded. The model version is read from the service, and no screen shows it yet.
+✅ **A restored snapshot is a model.** `restored` means the service loaded a snapshot (`restored_from` names it). It does not mean the fit you just started succeeded. The model version is read from the service, and the sidebar shows it once the recurrence model is active: `Active: Recurrence (LMU) · version 0.5.0`.
 
 See [AGENTS_REFERENCE.md § Recurrence key, restored model, and service version](AGENTS_REFERENCE.md#recurrence-key-restored-model-and-service-version).
 
@@ -1313,6 +1313,40 @@ and a backend is a different state: the selection and the running backend disagr
 Start is disabled.
 
 **See:** [AGENTS_REFERENCE.md § Sidebar model summary](AGENTS_REFERENCE.md#sidebar-model-summary-x11)
+
+#### 10. Recurrence fit: "Fitting (Upstream)", "Unknown", or busy with another operation
+
+**Symptoms:**
+
+- The status bar reads `Running` with the phase `Fitting (Upstream)`, well after you pressed Start
+- The status bar reads `Unknown — unknown (…): …` in amber
+- Start fails with `recurrence training already in progress (POST /v1/train) — retry when it ends …`
+
+**Causes:**
+
+- **Fitting (Upstream):** the fit outlived canopy's 300 s wait for its reply. The recurrence service cannot cancel a
+  fit, so it is still fitting, and canopy follows it on the service's status every 5 s for up to 30 minutes. The
+  status bar ends at `Completed` or `Failed` when the service says so.
+- **Unknown:** canopy could not establish how that fit ended. The service was unreachable, another operation has run
+  on the service since, the service restarted, or the service is a release that does not say whose operation its
+  status describes (juniper-recurrence 0.5.0). The text after `unknown (…)` says which.
+- **Busy:** another caller holds the service. The message names its operation, since when, and its `requested_by`.
+  An id that starts `juniper-canopy-` is canopy's own earlier fit, still running.
+
+**Solutions:**
+
+✅ **Wait.** A fit cannot be stopped from canopy or from the service. Start again once the status says it ended.
+
+✅ **Read the service's own status for an Unknown outcome:**
+
+```bash
+curl -s -H "X-API-Key: $JUNIPER_CANOPY_RECURRENCE_API_KEY" "$JUNIPER_CANOPY_RECURRENCE_SERVICE_URL/v1/training/status" | python -m json.tool
+```
+
+✅ **Give canopy a recurrence service of its own.** A service is owned by one caller at a time. See
+[juniper-recurrence README § One caller per service](https://github.com/pcalnon/juniper-recurrence/blob/main/juniper-recurrence/README.md#one-caller-per-service).
+
+**See:** [AGENTS_REFERENCE.md § Recurrence fit identity, timeouts, and one caller per service](AGENTS_REFERENCE.md#recurrence-fit-identity-timeouts-and-one-caller-per-service)
 
 ### Diagnostic Commands
 

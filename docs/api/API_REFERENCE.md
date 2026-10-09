@@ -55,12 +55,36 @@ written against **juniper-recurrence 0.5.0**, its documented contract floor (`RE
 - `GET /v1/training/status` reports `idle`, `trained` or `restored`. `restored` is a model loaded from the snapshot
   that `restored_from` names, and it counts as a model being present exactly as `trained` does. It is newer than the
   0.5.0 release, which never sends it.
+- Since juniper-recurrence#192 (on recurrence `main`; no release carries it yet) the status also reports `training`,
+  `restoring` and `failed`, and says which operation it describes: `operation_id`, `operation`, `busy_since`,
+  `dataset_id`, `requested_by`, `model_operation_id` and `failure`. The 0.5.0 release sends none of these.
+- Every `POST /v1/train` carries an `X-Request-ID` naming the request (`juniper-canopy-<uuid4 hex>`). The service
+  records it as the operation's `requested_by`, which is how canopy finds its own fit after a timeout (W1.5).
+- A fit whose reply outlives the adapter's 300 s read timeout is **followed, not failed**: the service cannot cancel
+  it. Canopy keeps the fit running (phase `fitting (upstream)`) and reads the status every 5 s, for up to 30 minutes.
+  A read that fails outright is tried again; three failed reads in a row settle the fit as `unknown`.
+  The fit is `trained` only when the status names canopy's request as the operation that produced the model the
+  service holds. `trained` alone, or a model present, may be another caller's, and `restored` is never a fit. It is
+  `failed` when the status reports canopy's operation failed, and otherwise `unknown`:
+  `/api/status` then carries `outcome_unknown: true`, and `completion_reason` says why. A 0.5.0 service, which names
+  no operations, always gives `unknown` after a timeout.
+- A busy 409 names the operation holding the service: its kind, `operation_id`, `busy_since`, `requested_by` and
+  `dataset_id` (see [Upstream Failures](#upstream-failures)). The 0.5.0 string detail reads as it always has.
+- A service is **exclusively owned by one caller at a time**: one lock, one in-memory model, one snapshot
+  directory. Give canopy a recurrence service no experiment suite or other client shares. The service-side runbook is
+  [juniper-recurrence README § One caller per service](https://github.com/pcalnon/juniper-recurrence/blob/main/juniper-recurrence/README.md#one-caller-per-service).
+- Canopy calls neither `/v1/predict` nor `POST /v1/model/snapshots`, so it sends no `expect_operation_id`. The id a
+  fit returned is kept for when it does: `operation_id` on `/api/status`.
 - A refused key (401 or 403) names the two variables that set it, `JUNIPER_CANOPY_RECURRENCE_API_KEY` and
   `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`. A rate-limited request (429) carries the reply's `Retry-After` wait (see
   [Upstream Failures](#upstream-failures)).
 - The model version is read from the service, never assumed: the `version` in the `GET /v1/health` body when it has
   one, else `info.version` from `GET /openapi.json`. The 0.5.0 health body is `{"status": "ok"}`, so the fallback is
   the path that answers. A failed lookup reads `unknown (version lookup failed)`.
+- Canopy asks for the version at startup when `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL` is set, and again whenever the
+  recurrence model is selected while its backend is live. Both lookups run in the background, so no page, selection
+  or read waits on them. The answer is `version` on [`GET /api/selection`](#get-apiselection) and
+  `POST /api/model/select`, and the sidebar's Active line shows it (`Active: Recurrence (LMU) · version 0.5.0`).
 
 Primary codepaths: `src/backend/recurrence_service_adapter.py`, `src/backend/recurrence_backend.py`, `src/model_registry.py`.
 
@@ -358,6 +382,11 @@ See [AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-
 - `status_class` (string, service mode) - Cache verdict (`ok` / `unreachable` / `indeterminate`)
 - `stale` (boolean, service mode) - Whether the last OK payload is fresh
 - `age_seconds` (number or `null`, service mode) - Age of the last OK payload
+- `outcome_unknown` (boolean, recurrence mode) - Present and `true` only when a fit's reply timed out and the
+  service's status did not establish its outcome; `failed` and `completed` are then both `false`, and
+  `completion_reason` says why (see [Recurrence Service Contract](#recurrence-service-contract-recurrence-mode))
+- `operation_id` (string, recurrence mode) - The service's id for the fit whose result is shown; absent before a fit
+  and from a service predating operation identity
 
 **Status Codes:**
 
@@ -1028,6 +1057,10 @@ The dashboard hydrates both selectors from it once, on page load.
 - The model fields have exactly the `POST /api/model/select` response's shape. `swapped` is always
   `false` (a read swaps nothing). `selected` is `false` until the first `POST /api/model/select`,
   and `nn_model` is then the model the boot backend serves.
+- `version` (optional, both routes) is the version the model's service last reported, for example `"0.5.0"`, or
+  `"unknown (version lookup failed)"` when it was asked and did not say. It is absent for a model served in-process
+  and before any service has answered. Reading it never calls the service; see
+  [Recurrence Service Contract](#recurrence-service-contract-recurrence-mode).
 - `dataset.source` is the field to branch on:
   - `"pending"` — a dataset staged for the next start (it wins, because Start consumes it);
   - `"loaded"` — the dataset the backend holds;
@@ -1606,6 +1639,20 @@ A rate-limited request (429) carries the reply's `Retry-After` wait before its `
 `recurrence service error 429 on POST /v1/train — retry after 30 s: Rate limit exceeded. Try again in 30 seconds.`
 
 A `Retry-After` given as an HTTP-date is shown as sent, and a 429 without the header keeps the plain wording.
+
+A busy 409 names the operation holding the service, after what to do about it. The holder's part is bounded like a
+`detail`, and each field it relays to 64 characters (`requested_by` is whatever header another caller sent):
+
+`recurrence training already in progress (POST /v1/train) — retry when it ends (a fit cannot be cancelled), or give canopy a service of its own: a training run is already in progress (train operation 0f1e2d3c4b5a69788796a5b4c3d2e1f0 since 2026-10-08T17:44:00.123Z, requested by cli-suite-e-h-cell-7, dataset equities_seq-5d0c1f)`
+
+A fit whose reply timed out and that then failed on the service reads as its own error would have, and says how it
+was learned. Only a 4xx `detail` is appended, by the same rule as above:
+
+`recurrence service error 422 on POST /v1/train, reported by GET /v1/training/status after the request timed out: invalid dataset: X_train has non-finite values (NaN/Inf)`
+
+When canopy cannot establish the outcome, `completion_reason` starts with `unknown (…)`. The cases are
+`upstream unreachable`, `upstream status unreadable`, `another operation since`, `no operation on record`,
+`outcome not attributable`, `no operation identity`, `still running upstream` and `no longer followed`.
 
 The transport text of such a failure -- URLs, socket errors, and a header value a client refused to send --
 goes to canopy's logs only.

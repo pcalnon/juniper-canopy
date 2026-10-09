@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The recurrence model's version is shown (W1.7, display half; F-C8).** canopy#722 made the version the service
+  reports, but `refresh_model_versions` had no production caller. Now the lifespan asks a configured recurrence
+  service at startup, and a selection of the recurrence model asks again while its backend is live. Both lookups run
+  in the background (`asyncio.to_thread`), and a refresh in flight is not repeated, so no page, selection or read
+  waits on the service. `GET /api/selection` and `POST /api/model/select` gain an optional `version`, present only
+  when a service reported one. The sidebar's Active line shows it: `Active: Recurrence (LMU) · version 0.5.0`.
+  Tests: `src/tests/regression/test_recurrence_version_display.py` (20). The displayed version comes from a fake
+  service, the selection answers while the lookup is blocked, and the lifespan starts the refresh and abandons an
+  unfinished one at shutdown.
 - **Regression suites harvested from the Cursor flood-3 test PRs** (canopy#699, #701, #704, #707, #715,
   #718, #719, #720, #724, #727, #728): 15 new test files over the replay echo, shape and control-result
   guards; the recurrence 4xx-detail and status-bar cut bounds; version lookup, `Retry-After` and the
@@ -210,6 +219,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   next test's `caplog` (main's own macOS CI failed this way at #702, #708 and #711). An autouse fixture in
   `src/tests/unit/backend/test_recurrence_backend.py` now joins every `recurrence-fit` thread after each
   test. Test-only.
+- **A recurrence fit whose reply times out is followed, not failed, and a busy 409 names its holder (W1.5,
+  canopy half; F-C4, F-CON1, F-CON2).** Plan: juniper-ml
+  `notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md`; the service half is
+  juniper-recurrence#192. A fit that outlived the adapter's 300 s read timeout used to be recorded `failed`
+  (`RecurrenceServiceTimeoutError`). The service cannot cancel a fit, so it kept fitting, often to success, and
+  answered the next Start with a 409 that named nobody.
+  - Every `POST /v1/train` now sends `X-Request-ID: juniper-canopy-<uuid4 hex>`, which the service records as the
+    operation's `requested_by`.
+  - After a read timeout (only `httpx.ReadTimeout` means the request arrived) the backend stays `training`, with
+    the phase `fitting (upstream)`. It reads `GET /v1/training/status` every 5 s for up to 30 minutes. A read that
+    fails outright is tried again; three in a row settle the fit as `unknown`.
+  - The fit is `trained` only when the status names canopy's request as the operation that produced the model the
+    service holds. `trained` alone, a `restored` model, or a service without operation identity (0.5.0) never
+    count. It is `failed`, worded as its own error, when the service says it failed. Otherwise it is `unknown`:
+    `/api/status` gains `outcome_unknown: true`, and the status bar reads `Unknown — …` in amber, not `Stopped`.
+  - A busy 409's object `detail` is parsed into `RecurrenceTrainInProgressError.holder`. The message names the
+    holder's kind, `operation_id`, `busy_since`, `requested_by` and `dataset_id` after a remedy. The published
+    0.5.0's string detail reads exactly as before.
+  - A fit's `operation_id` is kept and reported on `/api/status`. Canopy calls neither `/v1/predict` nor
+    `POST /v1/model/snapshots`, so it has nowhere to send `expect_operation_id` yet.
+  - Runbook: `docs/AGENTS_REFERENCE.md` § Recurrence fit identity, timeouts, and one caller per service, which links
+    the service's own "One caller per service" section rather than repeating it. Also `docs/api/API_REFERENCE.md`,
+    `docs/USER_MANUAL.md` (item 10) and `docs/DEVELOPER_CHEATSHEET.md`.
+  - Tests: `src/tests/unit/test_recurrence_operation_identity.py` (58, including the four races) and
+    `src/tests/unit/backend/test_recurrence_backend_upstream.py` (19), over a fake service shaped after #192
+    (`src/tests/fixtures/recurrence_service_fake.py`). `util/ad-hoc/2026-10-08_w15_w17_mutation_check.py`
+    catches 19 of 19 mutations across both items.
 - **The wheel again carries `outbound_errors`, which `main` imports.** canopy#631's
   `py-modules` list was not updated when #685 added `src/outbound_errors.py` and wired it into
   `main`, `status_cache`, the cascor adapter and the recurrence backend. `packages.find` does not
