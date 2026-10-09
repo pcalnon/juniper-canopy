@@ -76,6 +76,7 @@ import logging
 import threading
 from typing import Any, Dict, List, Mapping, Optional, cast
 
+from backend import recurrence_request
 from backend.protocol import (
     ApplyParamsResult,
     ControlResult,
@@ -87,7 +88,6 @@ from backend.protocol import (
     StatusResult,
     TopologyResult,
 )
-from backend.recurrence_request import NO_DATASET_REF_ERROR, FitRequest, resolve_fit_request, shape_staged_ref
 from backend.recurrence_service_adapter import RecurrenceServiceAdapter, RecurrenceServiceError, RecurrenceTrainResult
 from outbound_errors import outbound_error_text
 
@@ -117,7 +117,7 @@ def dataset_ref_from_staged(cfg: Mapping[str, Any]) -> Dict[str, Any]:
     form rendered for it, so an untouched form stages nothing but the seed (F-C2). A staged fit and an
     un-staged fit of the same dataset therefore differ only by what the operator actually edited.
     """
-    return shape_staged_ref(cfg).dataset_ref
+    return recurrence_request.shape_staged_ref(cfg).dataset_ref
 
 
 class RecurrenceBackend:
@@ -186,7 +186,7 @@ class RecurrenceBackend:
             request = self._resolve_request_locked(kwargs)
             dataset_ref, hyperparams = request.dataset_ref, request.hyperparams
             if not request.has_dataset_ref:
-                return ControlResult(ok=False, error=NO_DATASET_REF_ERROR)
+                return ControlResult(ok=False, error=recurrence_request.NO_DATASET_REF_ERROR)
             if staged and request.start_body_generator not in (None, dataset_ref["generator"]):
                 logger.info("recurrence fit uses the staged dataset %r over the start body's %r", dataset_ref["generator"], request.start_body_generator)
             self._pending_dataset_config = None  # consumed by this start (cascor parity)
@@ -200,7 +200,7 @@ class RecurrenceBackend:
         thread.start()  # outside the lock — never hold it across thread start / the blocking call
         return ControlResult(ok=True, is_training=True, message="recurrence fit started")
 
-    def _resolve_request_locked(self, kwargs: Mapping[str, Any]) -> FitRequest:
+    def _resolve_request_locked(self, kwargs: Mapping[str, Any]) -> recurrence_request.FitRequest:
         """Resolve the next fit's request for these Start kwargs. The caller holds ``self._lock``.
 
         Hyperparameters are whatever :meth:`apply_params` staged, overridden by the kwargs. They are
@@ -212,7 +212,7 @@ class RecurrenceBackend:
         for key in _HYPERPARAM_KEYS:
             if kwargs.get(key) is not None:
                 hyperparams[key] = kwargs[key]
-        return resolve_fit_request(explicit_ref=explicit_ref, staged_cfg=self._pending_dataset_config, hyperparams=hyperparams)
+        return recurrence_request.resolve_fit_request(explicit_ref=explicit_ref, staged_cfg=self._pending_dataset_config, hyperparams=hyperparams)
 
     def preview_train_request(self, **kwargs: Any) -> Dict[str, Any]:
         """Return, without starting anything, the request ``start_training(**kwargs)`` would send.

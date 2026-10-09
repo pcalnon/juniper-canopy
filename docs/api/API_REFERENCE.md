@@ -52,6 +52,14 @@ When `backend_type` is `recurrence`, Canopy talks to the juniper-recurrence serv
 adapter. It does not install `juniper-recurrence-client`, so no package pin can hold a version floor. The adapter is
 written against **juniper-recurrence 0.5.0**, its documented contract floor (`RECURRENCE_SERVICE_CONTRACT_FLOOR`).
 
+- The `POST /v1/train` request carries only parameters the dataset's generator declares, and only what the operator
+  chose. The registry seed is the base. A form value goes into the request only when it differs from what the form
+  showed for that field, and an edited field wins over the seed. The generic `nn_dataset_elements` / `nn_dataset_noise`
+  fields are not sent to a generator that declares no `n_samples` / `noise`; no sequence generator does. This is
+  owner ruling R7's recommended default, applied pending the ruling. The declared parameters are a dated snapshot of
+  juniper-data's own schemas (`dataset_schema.DECLARED_PARAM_DEFAULTS`). The body Start would send can be read first
+  from [`POST /api/recurrence/effective_request`](#post-apirecurrenceeffective_request), and both that preview and
+  the Start log it at INFO.
 - `GET /v1/training/status` reports `idle`, `trained` or `restored`. `restored` is a model loaded from the snapshot
   that `restored_from` names, and it counts as a model being present exactly as `trained` does. It is newer than the
   0.5.0 release, which never sends it.
@@ -61,14 +69,6 @@ written against **juniper-recurrence 0.5.0**, its documented contract floor (`RE
 - The model version is read from the service, never assumed: the `version` in the `GET /v1/health` body when it has
   one, else `info.version` from `GET /openapi.json`. The 0.5.0 health body is `{"status": "ok"}`, so the fallback is
   the path that answers. A failed lookup reads `unknown (version lookup failed)`.
-- The `POST /v1/train` request carries only parameters the dataset's generator declares, and only what the operator
-  chose. The registry seed is the base. A form value goes into the request only when it differs from what the form
-  showed for that field, and an edited field wins over the seed. The generic `nn_dataset_elements` / `nn_dataset_noise`
-  fields are not sent to a generator that declares no `n_samples` / `noise`; no sequence generator does. This is
-  owner ruling R7's recommended default, applied pending the ruling. The declared parameters are a dated snapshot of
-  juniper-data's own schemas (`dataset_schema.DECLARED_PARAM_DEFAULTS`). The body Start would send can be read first
-  from [`POST /api/recurrence/effective_request`](#post-apirecurrenceeffective_request), and both that preview and
-  the Start log it at INFO.
 
 Primary codepaths: `src/backend/recurrence_service_adapter.py`, `src/backend/recurrence_backend.py`, `src/backend/recurrence_request.py`, `src/model_registry.py`.
 
@@ -1083,6 +1083,8 @@ resolved exactly as Start resolves it, so a dataset staged with Apply wins over 
 **Notes:**
 
 - `source` is `"staged"` (a dataset applied with Apply) or `"start_body"` (the dropdown value and its registry defaults).
+- `request` is the JSON body. Request headers are not part of it: the API key, and the per-fit `X-Request-ID` where
+  the adapter sends one, are added when Start runs.
 - `edited` names the form fields sent because they differ from what the form showed. `not_forwarded` names staged
   keys the request does not carry: a parameter the generator does not declare, or a generic field held to the
   registry default.

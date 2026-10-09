@@ -184,7 +184,7 @@ ARMS = [
                 BACKEND,
                 PREVIEW_RESOLVE,
                 "        with self._lock:\n"
-                "            request = resolve_fit_request(explicit_ref={k: kwargs[k] for k in _DATASET_REF_KEYS if kwargs.get(k) is not None}, staged_cfg=None, hyperparams=dict(self._pending_hyperparams))  # mutated\n"
+                "            request = recurrence_request.resolve_fit_request(explicit_ref={k: kwargs[k] for k in _DATASET_REF_KEYS if kwargs.get(k) is not None}, staged_cfg=None, hyperparams=dict(self._pending_hyperparams))  # mutated\n"
                 '            fit_in_progress = self._state == "training"\n',
             )
         ],
