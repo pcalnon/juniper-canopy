@@ -479,6 +479,10 @@ async def lifespan(app: FastAPI):
     # ``settings.demo_mode`` directly would lie about the live state.
     set_demo_mode_active(backend.backend_type == "demo")
 
+    # W1.7 display half (F-C8): the recurrence model's version is what its service reports. Asked now, in the
+    # background -- startup does not wait for the answer.
+    _start_model_version_refresh()
+
     # Phase F heartbeat (server side): the browser client already pongs to
     # server pings, but nothing was sending them, so a quiet but healthy
     # /ws/training stream idled out after idle_timeout_seconds and the client
@@ -506,6 +510,9 @@ async def lifespan(app: FastAPI):
         keepalive_task.cancel()
         with suppress(asyncio.CancelledError):
             await keepalive_task
+
+    # W1.7: an unfinished version refresh is abandoned, not awaited -- it only fills a label.
+    await _stop_model_version_refresh()
 
     # Before ``backend.shutdown()``: the refresher holds that backend's adapter, and a
     # tick landing on a torn-down client logs a spurious unreachable verdict.
@@ -641,6 +648,13 @@ backend = None
 # backend (D5: re-create, not multiplex).
 current_nn_model: Optional[str] = None
 _resolved_service_url: Optional[str] = None
+# W1.7 display half (F-C8): the model registry as its services last reported their versions --
+# ``model_registry.refresh_model_versions``'s returned tuple, which is the cache by design. ``None``
+# until a refresh lands. Loop-confined like ``backend`` and ``current_nn_model``: assigned only by
+# ``_refresh_model_versions`` once its worker-thread lookup returns, read only by handlers.
+_reported_models: Optional[tuple] = None
+# The refresh in flight, so that a burst of selections asks the service once.
+_model_version_refresh: Optional[asyncio.Task] = None
 
 # X7 slice 1c: the cascor status cache. ``None`` outside service mode — demo and
 # recurrence backends answer ``get_status()`` from memory, so there is no upstream call
@@ -3981,17 +3995,96 @@ def _selection_targets_recurrence(nn_model: str) -> bool:
 
 
 def _model_state_response(nn_model: str, *, swapped: bool) -> dict:
-    """Describe the live backend + current selection for the ``/api/model/*`` responses."""
+    """Describe the live backend + current selection for the ``/api/model/*`` responses.
+
+    ``version`` (W1.7 / F-C8) is the version the model's service last reported -- or
+    ``unknown (version lookup failed)`` when it was asked and did not say -- and is present only
+    then: a model served in-process, or a service not asked yet, has no version to report, and
+    the key stays optional for every client that predates it.
+    """
     from model_registry import get_model_spec
 
     spec = get_model_spec(nn_model)
-    return {
+    payload = {
         "nn_model": nn_model,
         "backend": backend.backend_type,
         "execution": backend.execution,
         "status": spec.status if spec is not None else "unknown",
         "swapped": swapped,
     }
+    reported = get_model_spec(nn_model, models=_reported_models) if _reported_models is not None else None
+    if reported is not None and reported.version:
+        payload["version"] = reported.version
+    return payload
+
+
+async def _refresh_model_versions(version_source: Any) -> None:
+    """Ask the recurrence service for its version, off the event loop, and keep the answer (W1.7 / F-C8).
+
+    ``model_registry.refresh_model_versions`` never raises for a version -- a failed lookup is the
+    ``unknown (version lookup failed)`` label, with a WARNING -- and it is two blocking HTTP calls at
+    most (``GET /v1/health``, then ``GET /openapi.json``), so it runs in a worker thread. Plain
+    ``asyncio.to_thread``, not ``offload``: this is not a cascor call, and a refresh started by a
+    request has no caller left to decline for once that request has been answered.
+    """
+    global _reported_models
+    from model_registry import RECURRENCE_PROVIDER, refresh_model_versions
+
+    try:
+        _reported_models = await asyncio.to_thread(refresh_model_versions, {RECURRENCE_PROVIDER: version_source})
+    except Exception as exc:  # noqa: BLE001 -- a background label refresh must never surface as an unretrieved task error
+        system_logger.warning("Model version refresh failed: %s: %s", type(exc).__name__, exc)
+
+
+def _schedule_model_version_refresh(version_source: Any) -> None:
+    """Start a version refresh in the background; nothing waits on it (W1.7 / F-C8).
+
+    No page render, ``/api/selection`` read or selection response waits on the recurrence
+    service: each reads :data:`_reported_models`, the last answer, and the next read carries
+    the new one. A refresh already in flight is not duplicated.
+    """
+    global _model_version_refresh
+    if _model_version_refresh is not None and not _model_version_refresh.done():
+        return
+    _model_version_refresh = asyncio.create_task(_refresh_model_versions(version_source), name="model-version-refresh")
+
+
+def _start_model_version_refresh() -> None:
+    """Startup's version refresh (W1.7 / F-C8): when a recurrence service is configured, ask it in the background.
+
+    So the recurrence model carries the version its service reports by the time anyone selects it. The boot backend
+    is never recurrence, so the adapter is built from the settings ``create_backend`` uses for one. A service not up
+    yet reads ``unknown (version lookup failed)`` until a selection of the recurrence model asks again.
+    """
+    if not settings.recurrence_service_url:
+        return
+    from backend.recurrence_service_adapter import RecurrenceServiceAdapter
+
+    _schedule_model_version_refresh(RecurrenceServiceAdapter(settings.recurrence_service_url, settings.recurrence_api_key).service_version)
+
+
+async def _stop_model_version_refresh() -> None:
+    """Abandon an unfinished version refresh at shutdown (W1.7). It only fills a label, so it is cancelled, not awaited.
+
+    Cancelling releases the task at once; the worker thread under ``asyncio.to_thread`` cannot be interrupted, and ends
+    when its HTTP call does, within the adapter's timeouts. ``asyncio.wait`` returns once the cancellation has landed,
+    without re-raising it here.
+    """
+    refresh = _model_version_refresh
+    if refresh is not None and not refresh.done():
+        refresh.cancel()
+        await asyncio.wait({refresh})
+
+
+def _live_recurrence_version_source() -> Any:
+    """The live recurrence backend's ``service_version``, or ``None`` when the live backend is not recurrence.
+
+    The live backend's own adapter, so the version is that of the very service its fits go to.
+    """
+    if backend is None or backend.backend_type != "recurrence":
+        return None
+    source = getattr(getattr(backend, "_adapter", None), "service_version", None)
+    return source if callable(source) else None
 
 
 def _selection_inactive_reason() -> Optional[str]:
@@ -4129,7 +4222,14 @@ async def api_model_select(body: _ModelSelectBody):
 
     if get_model_spec(body.nn_model) is None:
         raise HTTPException(status_code=422, detail=f"Unknown model: {body.nn_model!r}")
-    return await _swap_backend(body.nn_model)
+    response = await _swap_backend(body.nn_model)
+    # W1.7 (F-C8): selecting the recurrence model re-reads its service's version -- the service may have been
+    # restarted or upgraded since startup asked, or not been up then. In the background: this response carries the
+    # version already known, and the next read carries the new one.
+    version_source = _live_recurrence_version_source()
+    if version_source is not None:
+        _schedule_model_version_refresh(version_source)
+    return response
 
 
 def _backend_dataset_selection(status: Any) -> dict:
