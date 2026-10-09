@@ -293,6 +293,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   imports it. `demo_mode` stays out of the bare smoke: it needs torch.
   `src/tests/unit/test_wheel_import_smoke.py` pins both lists, the cwd guard, and that a module
   resolved from the checkout is a failure.
+- **A recurrence fit sends the registry seed plus what the operator edited, and only parameters the
+  generator declares. A preview above Start shows the request (W1.2; plan findings F-C2, F-C3).** The
+  plan is juniper-ml's
+  `notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md`
+  (v1.4.1). **Owner ruling R7 is still open.** This applies its recommended default pending the
+  ruling, as the wave-1 PRs did for R2, R3 and R8. The alternatives touch one function,
+  `backend/recurrence_request.shape_staged_ref`.
+  - **F-C2.** The schema-driven form renders every field, and Apply posts every rendered value. An
+    untouched `equities_seq` form therefore staged seven keys beside the seed, and the fit request
+    carried all of them: `start_date`, `purchase_date`, `basis_price_field`, `week52_window`,
+    `normalize_features`, `max_symbols: 14` and `lookback: 64`. Under R7 the seed is the base. A
+    form value is sent only when it differs from what the form showed for that field: the seed's
+    value where the seed sets the key, juniper-data's default otherwise. An edited field wins over
+    the seed. Nothing in the form records "edited", since Dash inputs carry no dirty flag, so it is
+    read from the value. A field set back to what the form showed is not sent, which asks
+    juniper-data for exactly that value.
+  - **F-C3.** `nn_dataset_elements` / `nn_dataset_noise` became `n_samples` / `noise` for every
+    generator. No sequence generator declares either. The restart modal re-stages them for every
+    dataset type, which is how they reached one. **juniper-data did not refuse them, contrary to the
+    plan's expectation.** Its params models keep pydantic's default `extra` handling and drop unknown
+    keys, both on `main` (`462da218`) and at v0.16.0 (measured: `EquitiesSeqParams(n_samples=40,
+    noise=0.1, …)` constructs, and `n_samples` is absent from `model_dump()`). So the operator's
+    value vanished downstream while canopy reported it staged. Only declared parameters are
+    forwarded now, on the staged path and the Start-body path alike. A generic field is never sent
+    over a key the seed sets.
+  - **The declaration** is `dataset_schema.DECLARED_PARAM_DEFAULTS`: names and defaults for the six
+    rank-3 generators. It is a dated snapshot, as `KNOWN_UPSTREAM_GENERATORS` is, because canopy does
+    not depend on juniper-data and the test env's copy is 0.6.0. The snapshot was captured from
+    juniper-data `462da218` by `util/ad-hoc/2026-10-08_capture_sequence_generator_schemas.py`, which
+    also wrote `src/tests/fixtures/juniper_data_sequence_generator_schemas.json`, the exact
+    `GET /v1/generators` schemas. The field set and defaults are identical at v0.16.0. A rank-3 seed
+    without a declaration fails a test. A parameter juniper-data adds is withheld with a WARNING at
+    Start and named in the preview.
+  - **The preview.** `POST /api/recurrence/effective_request` returns the body the next Start would
+    send. It is computed by the same code Start runs, and it is read-only. The new
+    `frontend/components/recurrence_request_preview.py` shows it above Start for a one-shot model. It
+    lists where the request came from, the edited fields and the staged keys not sent. It refreshes
+    on events only, never on an interval; a clientside edge detector keeps the 5 s banner poll from
+    dispatching it. The preview and the Start both log the body at INFO with sorted keys. The JSON
+    the real adapter posts is pinned to the preview's body by `httpx.MockTransport`.
+  - `start_training` now reads the pending hyperparameters under its lock. It used to copy them
+    before taking it, while `apply_params` writes them inside it.
+  - Tests: `src/tests/regression/test_recurrence_staging.py` (+10: the plan's three, kept separate,
+    plus seven for the preview route and the restart-modal path).
+    `src/tests/unit/test_recurrence_request.py` (new, 68: the declaration against the capture,
+    including every `equities_seq` field; the rules one at a time; the body against the real
+    adapter). `src/tests/unit/frontend/test_recurrence_request_preview.py` (new, 18). One manifest row
+    in `src/tests/ui_contract/control_manifest.py`. `test_operator_edits_override_the_seed` asserted
+    `"n_samples": 40` for `equities_seq`, which was F-C3 itself. It now asserts the key is absent;
+    the rest of the test is unchanged. The component inventories count 16 components, the new panel
+    included: `src/tests/unit/frontend/test_dashboard_manager.py`,
+    `src/tests/unit/frontend/test_dashboard_manager_coverage.py` and
+    `src/tests/integration/test_dashboard_enhancements.py`. The hand-built manager in
+    `src/tests/unit/frontend/test_meta_parameters_layout.py` gains the panel's mock.
+  - `util/ad-hoc/2026-10-08_w12_mutation_check.py` puts each pre-change behaviour back at one site,
+    one arm at a time, on a copy of the tree. All 17 arms fail the tests they name, including the
+    pre-change merge (F-C2), the pre-change translation (F-C3), a preview that ignores the staged
+    dataset, and a declaration missing one `equities_seq` field (the plan's risk row). The unmutated
+    control runs 119 tests, the three files plus the harness's binding probe. 118 pass, and the
+    opt-in juniper-data source check skips, because the harness clears `JUNIPER_DATA_SRC`.
 - **A refused recurrence request now says what to do, and a restored model counts as a model (W1.6;
   plan findings F-C5, F-C6, F-C7).** The plan is juniper-ml's
   `notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md`

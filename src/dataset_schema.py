@@ -11,7 +11,7 @@
 # File Path:     ${HOME}/Development/python/Juniper/juniper-canopy/src/
 #
 # Date Created:  2026-07-21
-# Last Modified: 2026-07-21
+# Last Modified: 2026-10-08
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -65,6 +65,8 @@
 # COMPLETED:
 #     - N7: parse_schema_fields / availability_map / is_generator_available /
 #       generator_name_for_type / apply_availability_gate / unavailable_reason.
+#     - W1.2 (F-C2 / F-C3, ruling R7): DECLARED_PARAM_DEFAULTS / declared_param_defaults --
+#       the dated snapshot of what each recurrence-reachable generator declares.
 #
 #####################################################################################################################################################################################################
 """Schema-driven dataset-panel helpers (N7): JSON-Schema -> field descriptors + availability.
@@ -78,6 +80,7 @@ UI-friendly reason. Both are pure so they can be exercised without Dash or a liv
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Sequence
@@ -505,3 +508,66 @@ def apply_availability_gate(options: Sequence[Mapping[str, Any]], generators: Se
             out["disabled"] = True
         gated.append(out)
     return gated
+
+
+# --- W1.2 / ruling R7: the parameters each recurrence-reachable generator DECLARES ------------------
+#
+# juniper-ml plan ``notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md``,
+# findings F-C2 and F-C3. ``backend/recurrence_request.py`` shapes the recurrence ``POST /v1/train``
+# request from this table, and needs both halves of each entry:
+#
+# * the NAMES, because it forwards only a parameter the generator declares. canopy translated its
+#   generic ``nn_dataset_elements`` / ``nn_dataset_noise`` into ``n_samples`` / ``noise`` for every
+#   generator, and no rank-3 generator declares either: the synthetics size by ``n_steps`` and add
+#   noise through ``noise_std`` / ``sigma`` / ``init_noise_std``, ``equities_seq`` by its universe and
+#   date range (F-C3).
+# * the DEFAULTS, because a form value equal to what the form rendered for that field is not an
+#   operator's edit. The schema-driven panel renders every field and Apply posts every rendered value,
+#   so an untouched ``equities_seq`` form used to stage seven keys beside the registry seed --
+#   ``start_date``, ``purchase_date``, ``basis_price_field``, ``week52_window``,
+#   ``normalize_features``, ``max_symbols: 14`` and ``lookback: 64`` -- and the fit request carried
+#   them all (F-C2). A field renders the registry seed when the seed sets it
+#   (``apply_seeded_defaults``) and juniper-data's default otherwise -- which is this table.
+#
+# A DATED SNAPSHOT, for the reason ``model_registry.KNOWN_UPSTREAM_GENERATORS`` is one: canopy talks to
+# juniper-data over HTTP and does not depend on it, and the copy installed in the test env is 0.6.0,
+# which predates ``equities_seq``. Captured 2026-10-08 from juniper-data ``462da218`` (main) as
+# ``params_class.model_json_schema()`` -- the ``schema`` field ``GET /v1/generators`` serves -- by
+# ``util/ad-hoc/2026-10-08_capture_sequence_generator_schemas.py``, which also wrote the fixture
+# ``tests/fixtures/juniper_data_sequence_generator_schemas.json`` that
+# ``tests/unit/test_recurrence_request.py`` pins this table against, name for name and default for
+# default. The field set and every default are identical at the published v0.16.0 (diffed: only the R3
+# validator and descriptions moved), where ``equities_seq`` is ``5.0.0`` rather than ``6.0.0``.
+#
+# Keyed by juniper-data generator NAME. Every rank-3 seed in ``model_registry.DATASET_TYPES`` must have
+# an entry (``TestEveryRecurrenceSeedIsDeclared``): a generator missing here is forwarded UNFILTERED,
+# which is the pre-W1.2 behaviour, and logged as a WARNING.
+#
+# Drift has two directions, and neither is silent. A parameter juniper-data adds is withheld from the
+# request and named in the preview's "not forwarded" line and a WARNING. A default juniper-data changes
+# makes an untouched field read as an edit, so it is sent at the producer's own default: the same
+# dataset, one more key in the body, visible in the preview.
+DECLARED_PARAM_DEFAULTS: dict[str, dict[str, Any]] = {
+    "multi_sine": {"n_steps": 2000, "lookback": 32, "horizon": 1, "sample_dt": 1.0, "train_ratio": 0.8, "val_ratio": 0.1, "seed": 0, "scaling": "identity", "n_components": 3, "frequencies": None, "amplitudes": None, "phases": None, "noise_std": 0.0},
+    "mackey_glass": {"n_steps": 2000, "lookback": 32, "horizon": 1, "sample_dt": 1.0, "train_ratio": 0.8, "val_ratio": 0.1, "seed": 0, "scaling": "identity", "tau": 17.0, "beta": 0.2, "gamma": 0.1, "n_exp": 10.0, "x0": 0.5, "init_noise_std": 0.0, "discard": 250},
+    "irregular_sine": {"n_steps": 2000, "lookback": 32, "horizon": 1, "sample_dt": 1.0, "train_ratio": 0.8, "val_ratio": 0.1, "seed": 0, "scaling": "identity", "jitter": 0.5, "n_components": 3, "frequencies": None, "amplitudes": None, "phases": None, "noise_std": 0.0},
+    "ar_p": {"n_steps": 2000, "lookback": 32, "horizon": 1, "sample_dt": 1.0, "train_ratio": 0.8, "val_ratio": 0.1, "seed": 0, "scaling": "identity", "coefficients": [0.5, -0.3], "const": 0.0, "sigma": 0.1, "burn_in": 100},
+    "delay_product": {"n_steps": 2000, "lookback": 32, "horizon": 1, "sample_dt": 1.0, "train_ratio": 0.8, "val_ratio": 0.1, "seed": 0, "scaling": "identity", "lag1": 2, "lag2": 8, "jitter": 0.5, "n_components": 3, "frequencies": None, "amplitudes": None, "phases": None, "noise_std": 0.0},
+    "equities_seq": {"symbols": None, "start_date": "2000-01-01", "end_date": None, "purchase_date": "2000-01-03", "basis_price_field": "close", "fundamentals_fill": "nan", "regression_target": "next_close", "week52_window": 252, "normalize_features": False, "max_symbols": 14, "incomplete_rows": None, "allow_truncation": None, "use_cache": True, "train_ratio": 0.8, "val_ratio": 0.1, "test_ratio": 0.1, "seed": 42, "lookback": 64},
+}
+
+# Where the table above came from, quoted in the preview so an operator can tell which producer contract
+# canopy is filtering against.
+DECLARED_PARAMS_SOURCE: str = "juniper-data 462da218 (main, 2026-10-08); identical at v0.16.0"
+
+
+def declared_param_defaults(generator_name: str | None) -> dict[str, Any] | None:
+    """Return ``{param: juniper-data default}`` for ``generator_name``, or None when canopy declares none.
+
+    A deep copy: ``ar_p``'s ``coefficients`` default is a list, and a shallow copy would hand every
+    caller the table's own list object (the aliasing hole ``model_registry.dataset_default_params``
+    closes for the seeds). ``None`` -- not ``{}`` -- for an undeclared generator, so a caller can tell
+    "declares nothing" from "not declared here" and forward unfiltered rather than drop everything.
+    """
+    declared = DECLARED_PARAM_DEFAULTS.get(generator_name or "")
+    return copy.deepcopy(declared) if declared is not None else None

@@ -29,15 +29,20 @@ endpoint on juniper-recurrence. Both premises were wrong, and this module pins t
   ``RecurrenceBackend`` stages in-process and ``start_training`` consumes it.
 """
 
+import json
+import logging
 import time
+from pathlib import Path
 from unittest import mock
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 import main
 from backend.recurrence_backend import RecurrenceBackend, dataset_ref_from_staged
-from backend.recurrence_service_adapter import RecurrenceTrainResult
+from backend.recurrence_service_adapter import RecurrenceServiceAdapter, RecurrenceTrainResult
+from dataset_schema import DECLARED_PARAM_DEFAULTS
 from frontend.dashboard_manager import DashboardManager
 from model_registry import dataset_default_params
 
@@ -124,9 +129,15 @@ class TestTheStagedConfigTranslation:
 
     def test_operator_edits_override_the_seed(self):
         ref = dataset_ref_from_staged({"nn_dataset_type": "equities_seq", "nn_dataset_elements": 40, "nn_dataset_params": {"symbols": ["AAPL"], "fundamentals_fill": "zero"}})
-        # Registry defaults seeded, the typed field added, and BOTH overridden keys replaced --
-        # including ``fundamentals_fill``, so an operator who wants the zero-filled variant gets it.
-        assert ref["params"] == {"symbols": ["AAPL"], "regression_target": "return", "fundamentals_fill": "zero", "n_samples": 40}
+        # Registry defaults seeded and BOTH overridden keys replaced -- including ``fundamentals_fill``,
+        # so an operator who wants the zero-filled variant gets it.
+        #
+        # W1.2 (plan finding F-C3) corrected the rest of this assertion. It used to expect
+        # ``"n_samples": 40`` as well: the generic typed field, translated into a generator that
+        # declares no ``n_samples``. juniper-data did not refuse it -- its params model drops unknown
+        # keys -- so the operator's 40 vanished downstream while canopy reported it staged.
+        assert ref["params"] == {"symbols": ["AAPL"], "regression_target": "return", "fundamentals_fill": "zero"}
+        assert "n_samples" not in ref["params"]
 
     def test_spiral_only_typed_fields_never_reach_a_sequence_generator(self):
         ref = dataset_ref_from_staged({"nn_dataset_type": "equities_seq", "nn_spiral_rotations": 2.0, "nn_spiral_number": 3})
@@ -317,3 +328,186 @@ class TestApplyDatasetIsGatedLikeStart:
         text = _text_of(DashboardManager._train_gate_notice_handler("recurrence", model_state=INACTIVE_STATE))
         assert "Start and Apply Dataset are disabled" in text
         assert "demo" in text
+
+
+# --------------------------------------------------------------------------------------------------
+# W1.2 / ruling R7 -- juniper-ml plan
+# notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md, W1.2
+# (findings F-C2, F-C3). R7's recommended default, applied pending the owner's ruling: generic-form
+# defaults never override the registry seed; an explicitly edited recurrence-aware field wins over
+# it; the effective request is previewed before Start and logged at INFO.
+#
+# Every test below runs the whole path an operator runs. The form is RENDERED from juniper-data's own
+# schema for the generator (the captured ``GET /v1/generators`` entries in
+# ``tests/fixtures/juniper_data_sequence_generator_schemas.json``), Apply's real payload builder posts
+# it to the real ``/api/stage_dataset`` route, Start goes through ``/api/train/start``, and the
+# request is read off the wire: the backend runs the REAL ``RecurrenceServiceAdapter``, whose httpx
+# transport records the JSON it POSTs to ``/v1/train``. "Body" below means that JSON.
+# --------------------------------------------------------------------------------------------------
+
+_SCHEMA_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "juniper_data_sequence_generator_schemas.json"
+GENERATORS = json.loads(_SCHEMA_FIXTURE.read_text(encoding="utf-8"))["generators"]
+EQUITIES_SEQ_SEED = dataset_default_params("equities_seq")
+_TRAIN_OK = {"final_metrics": {"r2": 0.1, "mse": 1.0, "loss": 1.0}, "n_epochs": 1, "stopped_reason": "fit_complete", "dataset": {"name": "equities_seq", "n_windows": 3, "n_features": 15, "output_dim": 1}}
+
+
+def _rendered_form(manager, dataset_value):
+    """The schema-driven form for ``dataset_value`` as the browser would post it untouched: ``(values, ids)``."""
+    _title, _style, children = manager._render_dataset_params_handler(dataset_value, generators=GENERATORS)
+    controls = [child for child in children if isinstance(getattr(child, "id", None), dict) and child.id.get("type") == "nn-gen-param"]
+    assert controls, f"the {dataset_value!r} form rendered no controls -- every check below would be vacuous"
+    return [control.value for control in controls], [control.id for control in controls]
+
+
+@pytest.fixture
+def wire(monkeypatch):
+    """A live recurrence selection over the REAL adapter; returns ``(backend, sent)``, ``sent`` = POSTed JSON bodies."""
+    sent = []
+
+    def handler(request):
+        sent.append({"method": request.method, "path": request.url.path, "json": json.loads(request.content or b"null")})
+        return httpx.Response(200, json=_TRAIN_OK)
+
+    rb = RecurrenceBackend(RecurrenceServiceAdapter("http://rec.test:8210", transport=httpx.MockTransport(handler)))
+    monkeypatch.setattr(main, "backend", rb, raising=False)
+    monkeypatch.setattr(main, "current_nn_model", "recurrence", raising=False)
+    return rb, sent
+
+
+@pytest.fixture
+def client():
+    with TestClient(main.app) as test_client:
+        yield test_client
+
+
+def _start_and_read_the_wire(client, rb, sent):
+    """Click Start with the body the sidebar resolves for equities_seq; return the JSON POSTed to /v1/train."""
+    start_body = DashboardManager._resolve_oneshot_start_body_handler("one_shot", "equities_seq")
+    resp = client.post("/api/train/start", json=start_body)
+    assert resp.status_code == 200, resp.text
+    assert _wait_until(lambda: bool(sent) and not rb.is_training_active()), "the fit never reached the adapter"
+    assert len(sent) == 1 and sent[0]["method"] == "POST" and sent[0]["path"] == "/v1/train", sent
+    return sent[0]["json"]
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestR7RequestPrecedence:
+    """The plan's three acceptance tests for W1.2, kept separate as the plan asks."""
+
+    def test_an_untouched_form_sends_exactly_the_seed(self, client, wire, manager):
+        # (1) Untouched generic form -> the body equals the seed exactly.
+        rb, sent = wire
+        values, ids = _rendered_form(manager, "equities_seq")
+        payload = DashboardManager._dataset_stage_payload("equities_seq", gen_values=values, gen_ids=ids, nn_model="recurrence")
+        # Non-vacuity: Apply really does post more than the seed -- every rendered field's default.
+        # That surplus is F-C2: before W1.2 all of it reached the service.
+        assert set(payload["nn_dataset_params"]) > set(EQUITIES_SEQ_SEED), payload
+        assert client.post("/api/stage_dataset", json=payload).status_code == 200
+        body = _start_and_read_the_wire(client, rb, sent)
+        assert body == {"dataset": {"split": "train", "generator": "equities_seq", "params": EQUITIES_SEQ_SEED}}
+
+    def test_a_staged_n_samples_beside_untouched_equities_fields_sends_schema_keys_only(self, client, wire, manager):
+        # (2) Staged ``n_samples`` (with ``noise``) + untouched equities fields -> schema keys only,
+        # still the seed. The generic fields are the ones the restart modal re-stages for every type.
+        rb, sent = wire
+        values, ids = _rendered_form(manager, "equities_seq")
+        payload = DashboardManager._dataset_stage_payload("equities_seq", gen_values=values, gen_ids=ids, nn_model="recurrence")
+        payload.update(nn_dataset_elements=40, nn_dataset_noise=0.25)
+        assert client.post("/api/stage_dataset", json=payload).status_code == 200
+        preview = client.post("/api/recurrence/effective_request", json={}).json()
+        assert {"nn_dataset_elements", "nn_dataset_noise"} <= set(preview["not_forwarded"]), preview
+        body = _start_and_read_the_wire(client, rb, sent)
+        params = body["dataset"]["params"]
+        assert set(params) <= set(DECLARED_PARAM_DEFAULTS["equities_seq"]), f"keys equities_seq does not declare: {sorted(set(params) - set(DECLARED_PARAM_DEFAULTS['equities_seq']))}"
+        assert "n_samples" not in params and "noise" not in params
+        assert params == EQUITIES_SEQ_SEED
+
+    def test_an_edited_regression_target_is_sent_and_the_preview_matches(self, client, wire, manager):
+        # (3) Explicitly edited ``regression_target: next_close`` -> the body carries it and the preview matches.
+        rb, sent = wire
+        values, ids = _rendered_form(manager, "equities_seq")
+        position = [control_id["name"] for control_id in ids].index("regression_target")
+        # The form rendered the SEED's value (``apply_seeded_defaults``), not juniper-data's ``next_close``
+        # default -- so choosing ``next_close`` is an edit the operator made, not a default they left.
+        assert values[position] == EQUITIES_SEQ_SEED["regression_target"] == "return"
+        values[position] = "next_close"
+        payload = DashboardManager._dataset_stage_payload("equities_seq", gen_values=values, gen_ids=ids, nn_model="recurrence")
+        assert client.post("/api/stage_dataset", json=payload).status_code == 200
+        start_body = DashboardManager._resolve_oneshot_start_body_handler("one_shot", "equities_seq")
+        preview = client.post("/api/recurrence/effective_request", json=start_body).json()
+        assert preview["ok"] is True and preview["source"] == "staged" and preview["edited"] == ["regression_target"], preview
+        body = _start_and_read_the_wire(client, rb, sent)
+        assert body["dataset"]["params"] == {**EQUITIES_SEQ_SEED, "regression_target": "next_close"}
+        assert preview["request"] == body, "the preview shown before Start is not the request Start sent"
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestTheEffectiveRequestRoute:
+    """``POST /api/recurrence/effective_request``: read-only, logged, and refused where Start would be."""
+
+    def test_the_start_body_is_previewed_when_nothing_is_staged(self, client, wire):
+        start_body = DashboardManager._resolve_oneshot_start_body_handler("one_shot", "equities_seq")
+        preview = client.post("/api/recurrence/effective_request", json=start_body).json()
+        assert preview["source"] == "start_body"
+        assert preview["request"] == {"dataset": {"split": "train", "generator": "equities_seq", "params": EQUITIES_SEQ_SEED}}
+        assert preview["not_forwarded"] == [] and preview["edited"] == [] and preview["fit_in_progress"] is False
+
+    def test_a_preview_consumes_nothing(self, client, wire):
+        rb, sent = wire
+        assert client.post("/api/stage_dataset", json=STAGED).status_code == 200
+        assert client.post("/api/recurrence/effective_request", json={}).status_code == 200
+        assert rb.get_pending_dataset()["pending"] == STAGED
+        assert sent == [] and rb.is_training_active() is False
+
+    def test_no_reference_at_all_says_what_start_would_say(self, client, wire):
+        preview = client.post("/api/recurrence/effective_request").json()
+        assert preview["ok"] is False and preview["request"] is None
+        assert "no dataset reference" in preview["error"]
+
+    def test_the_preview_and_the_start_are_both_logged_at_info(self, client, wire, caplog):
+        rb, sent = wire
+        caplog.set_level(logging.INFO, logger="juniper_canopy.backend.recurrence_request")
+        start_body = DashboardManager._resolve_oneshot_start_body_handler("one_shot", "equities_seq")
+        client.post("/api/recurrence/effective_request", json=start_body)
+        body = _start_and_read_the_wire(client, rb, sent)
+        lines = [record.getMessage() for record in caplog.records if record.name == "juniper_canopy.backend.recurrence_request" and record.levelno == logging.INFO]
+        expected = json.dumps(body, sort_keys=True)
+        assert any("(preview, source=start_body)" in line and expected in line for line in lines), lines
+        assert any("(start, source=start_body)" in line and expected in line for line in lines), lines
+
+    def test_a_non_recurrence_backend_has_nothing_to_preview(self, client, monkeypatch):
+        fake = mock.MagicMock()
+        fake.backend_type = "demo"
+        monkeypatch.setattr(main, "backend", fake, raising=False)
+        monkeypatch.setattr(main, "current_nn_model", "cascor", raising=False)
+        resp = client.post("/api/recurrence/effective_request", json={})
+        assert resp.status_code == 409
+        assert "not the recurrence backend" in resp.json()["error"]
+        fake.preview_train_request.assert_not_called()
+
+    def test_an_inactive_selection_is_refused_as_start_refuses_it(self, client, monkeypatch):
+        # Recurrence recorded over the demo backend (N5): Start answers 409, so the preview does too.
+        fake = mock.MagicMock()
+        fake.backend_type = "demo"
+        monkeypatch.setattr(main, "backend", fake, raising=False)
+        monkeypatch.setattr(main, "current_nn_model", "recurrence", raising=False)
+        resp = client.post("/api/recurrence/effective_request", json={})
+        assert resp.status_code == 409
+        assert resp.json()["error"].startswith("Training could not be started: ")
+        fake.preview_train_request.assert_not_called()
+
+    def test_the_restart_modal_restage_reaches_the_service_as_the_seed(self, client, wire, manager):
+        # F-C3 on the path that actually carries the generic fields: the restart modal re-stages
+        # ``n_samples`` / ``noise`` for every dataset type (``_restage_dataset``).
+        rb, sent = wire
+        with mock.patch("frontend.dashboard_manager.requests.post") as post:
+            post.return_value = mock.MagicMock(status_code=200, text="{}")
+            ok, _detail = manager._restage_dataset({"dataset_type": "equities_seq", "n_samples": 100, "noise": 0.1}, nn_model="recurrence")
+        assert ok is True
+        payload = post.call_args.kwargs["json"]
+        assert payload["nn_dataset_elements"] == 100 and payload["nn_dataset_noise"] == 0.1, "the modal no longer sends the generic fields -- this test would be vacuous"
+        assert client.post("/api/stage_dataset", json=payload).status_code == 200
+        body = _start_and_read_the_wire(client, rb, sent)
+        assert body["dataset"]["params"] == EQUITIES_SEQ_SEED

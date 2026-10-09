@@ -138,11 +138,11 @@ class TestDashboardManagerInitialization:
     def test_dashboard_manager_registers_default_components(self, minimal_config):
         """Test that DashboardManager registers all default components."""
         dm = DashboardManager(minimal_config)
-        # 15 default components: metrics, candidate_metrics, network, dataset,
+        # 16 default components: metrics, candidate_metrics, network, dataset,
         # decision, about, hdf5_snapshots, replay_player (CAN-015f),
         # network_editor (CAN-015h-5), redis, cassandra, parameters, tutorial,
-        # network_evolution, worker
-        assert len(dm.components) == 15
+        # network_evolution, worker, recurrence_request_preview (W1.2)
+        assert len(dm.components) == 16
 
     def test_dashboard_manager_components_initialized(self, minimal_config):
         """Test that all default components are initialized."""
