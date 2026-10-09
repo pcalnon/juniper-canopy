@@ -3655,6 +3655,11 @@ class DashboardManager:
         ``"Selected:"`` and says the backend's status is unknown. "Active" is a claim about the
         backend, and nothing has asked it. The unknown state is not the ``False`` one: it names no
         backend, and neither the Start gate nor the train-gate notice treats it as disagreement.
+
+        **W1.7 / F-C8: the Active line names the version the model's service reports** (the
+        payload's optional ``version``), so ``Active: Recurrence (LMU) · version 0.5.0`` is the
+        running service's own word, never a seed. Only the Active line: a version describes the
+        service a live backend talks to, and the other two lines describe no live service.
         """
         spec = get_model_spec(data.get("nn_model", ""))
         label = spec.label if spec is not None else data.get("nn_model", "?")
@@ -3665,7 +3670,9 @@ class DashboardManager:
             return f"Selected: {label}{note} · NOT ACTIVE — the {data.get('backend')} backend is running"
         if live is None:
             return f"Selected: {label}{note} · {DashboardManager.UNKNOWN_LIVENESS_NOTE}"
-        return f"Active: {label}{note}"
+        version = data.get("version")
+        version_note = f" · version {' '.join(version.split())}" if isinstance(version, str) and version.strip() else ""
+        return f"Active: {label}{version_note}{note}"
 
     def _initial_model_summary(self):
         """Seed text for the sidebar model summary at first paint (A1b-1).
@@ -7578,6 +7585,10 @@ class DashboardManager:
             status = "Running"
         elif is_paused:
             status = "Paused"
+        elif status_data.get("outcome_unknown", False):
+            # W1.5 / F-C4: a recurrence fit whose reply timed out and whose outcome the service's status did not
+            # establish. Not "Failed" (it may have succeeded upstream), not "Stopped" (canopy cannot say that either).
+            status = "Unknown"
         else:
             status = "Stopped"
 
@@ -7597,9 +7608,10 @@ class DashboardManager:
             "Stopped": "#6c757d",  # Gray
             "Completed": "#17a2b8",  # Cyan
             "Failed": "#dc3545",  # Red
+            "Unknown": "#fd7e14",  # Amber -- W1.5: an outcome canopy could not establish
         }
         status_color = status_colors.get(status, "#6c757d")
-        # Set only by the Failed branch below (W0.5 / F-C1): the whole reason, when the label cut it.
+        # Set only by the Failed / Unknown branch below (W0.5 / F-C1): the whole reason, when the label cut it.
         status_tooltip = None
 
         # Issue #3 follow-up: on a completed run, append cascor's grow_network
@@ -7610,7 +7622,7 @@ class DashboardManager:
             completion_label = self._completion_reason_label(status_data.get("completion_reason"))
             if completion_label:
                 status = f"{status} — {completion_label}"
-        elif status == "Failed":
+        elif status in ("Failed", "Unknown"):  # W1.5: an unknown outcome's reason is free text too
             # There was no Failed branch here at all, and that — not the mapper — is why a
             # failed recurrence run showed no reason. ``completion_reason`` carries a
             # completion OUTCOME from cascor and a failure ERROR from recurrence; only the

@@ -865,6 +865,10 @@ def _reset_all_singletons():
     main_module = sys.modules.get("main")
     if main_module is not None:
         main_module.current_nn_model = None
+        # W1.7: the versions the model services last reported. A refresh one test lands must not hand the next a
+        # ``version`` in its ``/api/selection`` payload; a refresh still in flight is simply forgotten here.
+        main_module._reported_models = None
+        main_module._model_version_refresh = None
 
     # Reset callback context adapter
     with contextlib.suppress(ImportError):
