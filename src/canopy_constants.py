@@ -422,9 +422,10 @@ class DashboardConstants:
     # connection reset: the renderer's ``handleError`` path), or whose non-OK reply carries
     # no ack, is re-issued after this long. Re-issuing evicts the request in flight, so the
     # bound must stay well above any legitimate round trip. Measured from entering
-    # ``watched``: at most 5.4 s on canopy ``main`` at a host load average of 2-4 (juniper-ml
+    # ``watched``: at most 5.4 s on canopy ``main`` at host load averages of 1.9-4.6 (juniper-ml
     # evidence ledger, Phase 11), but up to 16.4 s and 17.3 s (p90 12.2 s and 11.7 s) in two
-    # runs on the pacer's own verify leg at a load average of ~14-33 (2026-10-08). So this is a
+    # runs on the pacer's own verify leg, on a host loaded by other work (post-run load averages
+    # 13.8-32.7; not sampled during the runs; 2026-10-08). So this is a
     # FLOOR: the pacer raises it to ``PACER_STALE_RTT_FACTOR`` (3) times the longest round trip
     # its page has seen on that lane, measured as a lower bound, and caps it at
     # ``PACER_STALE_CAP_MS`` (120 s); both live beside ``poll_pacer_js`` in

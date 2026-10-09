@@ -123,7 +123,7 @@ class TestF035MetricsPollHasItsOwnGuardedLane:
     completion too, so a mid-fetch re-enable could start a chain of evictions. The poll
     is now paced by request/ack: its ONLY Input is ``metrics-store-request``, written by
     a clientside pacer on ``metrics-store-interval`` once the last request is
-    acknowledged. Asserted here: the lane still exists and the feeder is off the shared
+    acknowledged, or past its stale bound. Asserted here: the lane still exists and the feeder is off the shared
     lanes; the full suite of pacer properties is in
     ``test_f055_f058_f068_request_ack_pacer.py``.
     """

@@ -19,7 +19,7 @@ Findings: juniper-ml ``notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EV
 The fix: each paced poll's feeder has ONE Input, a request store written only by a
 clientside pacer, and a second Output, an ack store echoing the request's ``seq``. The
 pacer writes the next request only when the ack has caught up, or when the outstanding
-request is older than ``POLL_PACER_STALE_MS``.
+request is past its stale bound (``POLL_PACER_STALE_MS``, raised on a slow page; ``poll_pacer_js``).
 
 What these tests prove:
   * WIRING (everywhere): each feeder's only Input is its request store; nothing else writes
@@ -184,14 +184,14 @@ class TestWiring:
         for store in ("metrics-store-ack", "status-bar-ack"):
             assert ids[store].data is None, store
 
-    @pytest.mark.parametrize("lane, extra", [(METRICS_LANE, True), (FAST_LANE, False)])
-    def test_the_registered_pacer_is_the_function_under_test(self, dashboard, lane, extra):
-        js = poll_pacer_js(lane, DashboardConstants.POLL_PACER_STALE_MS, extra_input=extra).strip()
+    @pytest.mark.parametrize("key, extra", [("metrics-store-request", True), ("status-bar-request", False)])
+    def test_the_registered_pacer_is_the_function_under_test(self, dashboard, key, extra):
+        js = poll_pacer_js(key, DashboardConstants.POLL_PACER_STALE_MS, extra_input=extra).strip()
         scripts = getattr(dashboard.app, "_inline_scripts", []) or []
         assert any(js in s for s in scripts), "the node tests would run a function canopy does not register"
 
     def test_the_stale_bound_is_interpolated(self):
-        js = poll_pacer_js(METRICS_LANE, DashboardConstants.POLL_PACER_STALE_MS, extra_input=True)
+        js = poll_pacer_js("metrics-store-request", DashboardConstants.POLL_PACER_STALE_MS, extra_input=True)
         assert str(DashboardConstants.POLL_PACER_STALE_MS) in js
         assert "POLL_PACER_STALE_MS" not in js
 
@@ -300,6 +300,7 @@ function runCases(cases) {
     return cases.map(function (c) {
         NOW = c.now;
         if (c.reset) { delete window.__junPollPacerFirstSeen; delete window.__junPollPacerMaxRtt; delete window.__junPollPacerLastUnacked; }
+        if (c.perf !== undefined) { window.performance = { now: function () { return c.perf; } }; } else { delete window.performance; }
         return c.extra === undefined ? pacerStatus(c.n, c.req, c.ack) : pacerMetrics(c.n, c.extra, c.req, c.ack);
     });
 }
@@ -384,7 +385,7 @@ else { console.log(JSON.stringify(simulate(input.mode, input.minutes, input.rtts
 
 def _run_node(tmp_path, payload):
     stale = DashboardConstants.POLL_PACER_STALE_MS
-    src = _HARNESS.replace("__METRICS__", poll_pacer_js(METRICS_LANE, stale, extra_input=True)).replace("__STATUS__", poll_pacer_js(FAST_LANE, stale, extra_input=False)).replace("__STALE__", str(stale))
+    src = _HARNESS.replace("__METRICS__", poll_pacer_js("metrics-store-request", stale, extra_input=True)).replace("__STATUS__", poll_pacer_js("status-bar-request", stale, extra_input=False)).replace("__STALE__", str(stale))
     driver = tmp_path / "pacer.js"
     driver.write_text(src, encoding="utf-8")
     proc = subprocess.run([NODE, str(driver), json.dumps(payload)], capture_output=True, text=True, timeout=120, check=False)  # nosec B603 - fixed interpreter, test-authored script
@@ -513,6 +514,44 @@ class TestPacerRule:
         )
         assert got[0] == NU and got[1]["seq"] == 2 and got[2] == NU and got[3]["seq"] == 3, got
         assert got[4] == NU and got[5]["stale"] is True, got
+
+    def test_a_lost_mode_fetch_is_reissued_as_a_mode_fetch(self, tmp_path):
+        """Round 2 of the review: if the ``extra`` request itself is lost, its stale re-issue
+        must still say the mode changed, or the full-history modulus can hold it back."""
+        full_key = json.dumps(self.FULL, separators=(",", ":"))
+        out = self._one(tmp_path, now=50000, n=9, extra=self.FULL, req={"seq": 4, "issued_at": 50000 - self.STALE, "reason": "extra", "extra_key": full_key}, ack={"seq": 3}, reset=True)
+        assert out["reason"] == "extra" and out["stale"] is True
+
+    def test_the_two_pacers_keep_separate_state(self, tmp_path):
+        """Round 2 of the review: state is keyed by request store, so the metrics poll's slow
+        round trips cannot stretch the status bar's bound (both share one ``window``)."""
+        got = _run_node(
+            tmp_path,
+            {
+                "cases": [
+                    {"now": 29000, "n": 1, "req": {"seq": 1, "issued_at": 0}, "ack": {"seq": 0}, "reset": True},
+                    {"now": 29500, "n": 1, "extra": self.WIN, "req": {"seq": 1, "issued_at": 0, "extra_key": self.WIN_KEY}, "ack": {"seq": 0}},
+                    {"now": 29600, "n": 2, "extra": self.WIN, "req": {"seq": 1, "issued_at": 0, "extra_key": self.WIN_KEY}, "ack": {"seq": 1}},
+                    # status bar: its own request 1, never answered, is stale at 30 s
+                    {"now": 30000, "n": 3, "req": {"seq": 1, "issued_at": 0}, "ack": {"seq": 0}},
+                ]
+            },
+        )
+        assert got[0] == NU and got[1] == NU and got[2]["seq"] == 2 and got[3]["stale"] is True, got
+
+    def test_a_wall_clock_step_does_not_fire_a_false_reissue(self, tmp_path):
+        """Round 2 of the review: times come from ``performance.now()``, so a forward step of
+        ``Date.now()`` while a request is legitimately in flight does not re-issue over it."""
+        got = _run_node(
+            tmp_path,
+            {
+                "cases": [
+                    {"now": 1000, "perf": 1000, "n": 1, "req": {"seq": 4, "issued_at": 900}, "ack": {"seq": 3}, "reset": True},
+                    {"now": 1000 + 10 * self.STALE, "perf": 3000, "n": 2, "req": {"seq": 4, "issued_at": 900}, "ack": {"seq": 3}},
+                ]
+            },
+        )
+        assert got == [NU, NU], got
 
     def test_the_mount_ack_releases_the_first_tick(self, tmp_path):
         out = self._one(tmp_path, now=1000, n=1, req={"seq": 0}, ack={"seq": 0}, reset=True)

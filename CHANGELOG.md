@@ -195,8 +195,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POLL_PACER_STALE_MS` (30 s) or three times the longest round trip the page has seen on that lane,
   whichever is longer, capped at 120 s. Each round trip is a lower bound (to the last pacer run that still
   saw the request unanswered), so a throttled background tab cannot inflate it. On the fix's own verify leg,
-  at host load averages of ~14–33, requests stayed in flight up to 17.3 s, which a fixed 30 s would have
-  cleared by under 2x. So the pacer never re-requests a feeder while its request is in flight,
+  on a host loaded by other work, requests stayed in flight up to 17.3 s, which a fixed 30 s would have
+  cleared by under 2x. Because it waits for the ack, the pacer never re-requests a feeder while its
+  request is in flight,
   except for that deliberate stale re-issue. Two other paths can still re-request one, each costing at most
   one response with no chain: the renderer's initial call after a live/one-shot model switch rebuilds the
   tab container, and a pacer write that lands during that call.
@@ -210,9 +211,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     let the next request be made before the in-flight response landed could start a chain of evictions.
     Two 25-minute census runs on `main` found 29 of 611 responses evicted, in runs of up to 11 and 34.8 s.
     The display mode, the feeder's second Input until now, is now State of the feeder and an Input of the
-    pacer, compared by value, and a mode change always reaches the handler as one. Its mid-flight change
+    pacer, compared by value, and a mode change reaches the handler as one even when its own request is lost. Its mid-flight change
     evicted the fetch in a synthetic app with this wiring; it was not observed in mid-request on canopy.
-    The full-history modulus (`FULL_HISTORY_POLL_TICK_MODULUS`, 5) now counts acknowledged requests rather
+    The full-history modulus (`FULL_HISTORY_POLL_TICK_MODULUS`, 5) now counts requests rather
     than ticks of the guarded Interval, so `full` / `hidden_units` refetch on every fifth request
     (expected every ~5–10 s; not measured).
   - **F-CANOPY-068.** The strand watchdog is removed, with `METRICS_STORE_STRAND_TIMEOUT_MS`.

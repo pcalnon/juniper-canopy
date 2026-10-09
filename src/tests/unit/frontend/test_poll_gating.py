@@ -207,10 +207,10 @@ class TestNoSecondWriterOfTheMetricsLane:
     """F-CANOPY-068: the strand watchdog is gone, and nothing has taken its place.
 
     canopy#614's watchdog sampled ``metrics-store-interval.disabled`` every 5 s and
-    re-enabled the lane after 30 s of samples that all found it disabled. Against the
-    feeder's ~4.9 s cycle its samples kept phase with the cycle's disabled part, so it
-    fired 13 and 15 times in two 25-minute runs on canopy ``main``, every time mid-fetch,
-    and 7 fires evicted a response (juniper-ml evidence ledger, Phase 11). Its tests
+    re-enabled the lane after 30 s of samples that all found it disabled. It fired 13 and
+    15 times in two 25-minute runs on canopy ``main``, every time mid-fetch, and 7 fires
+    evicted a response (juniper-ml evidence ledger, Phase 11). That its samples kept phase
+    with the feeder's ~4.9 s cycle is the ledger's inference from a replay. Its tests
     passed throughout, because they read its source and never ran its predicate.
 
     The request/ack pacer bounds a lost request by that request's own age

@@ -509,7 +509,7 @@ _STATUS_BAR_REQUEST: Final[str] = "status-bar-request"
 _STATUS_BAR_ACK: Final[str] = "status-bar-ack"
 # The stale bound grows with the page: a request is re-issued over only once it is older
 # than ``POLL_PACER_STALE_MS`` AND this many times the longest round trip (a lower bound) seen
-# on its lane. On the branch's own verify leg, at host load averages of ~14-33, requests
+# on its lane. On the branch's own verify leg, on a host loaded by other work, requests
 # stayed in flight up to 16.4 s and 17.3 s in two runs, so a fixed 30 s would leave a margin under 2x.
 PACER_STALE_RTT_FACTOR: Final[int] = 3
 # ...and never beyond this, so no measurement can push recovery out indefinitely.
@@ -522,8 +522,12 @@ _PACED_POLLS: Final[Tuple[Tuple[str, str], ...]] = (
 )
 
 
-def poll_pacer_js(lane: str, stale_ms: int, extra_input: bool) -> str:
+def poll_pacer_js(key: str, stale_ms: int, extra_input: bool) -> str:
     """Return the clientside pacer for one request/ack-paced poll (F-055/F-058/F-068).
+
+    ``key`` names the poll's per-page pacer state in ``window`` (its first sighting, its
+    longest round trip, its last unacknowledged sighting). Pass the REQUEST store's id, so
+    two paced polls never share state even if they ride one Interval.
 
     Arguments, in registration order: the lane Interval's ``n_intervals``, then (when
     ``extra_input``) the poll's other Input, then the REQUEST and ACK stores as State.
@@ -533,53 +537,59 @@ def poll_pacer_js(lane: str, stale_ms: int, extra_input: bool) -> str:
 
     * ``reason`` is ``"extra"`` when the other Input's VALUE differs from the one the last
       request was issued with (or the last request recorded none, as the layout's seq-0
-      request does), else ``"tick"`` when the last request was acknowledged, else
-      ``"stale"``. A display-mode change therefore always reaches the handler as one, even
-      when it rides a stale re-issue. The extra Input is compared by value, not by trigger,
-      because the renderer replaces a queued request with a newer one of the same callback
-      and loses its trigger.
+      request does), or when the last request was itself an unacknowledged ``"extra"``
+      that this one re-issues; else ``"tick"`` when the last request was acknowledged,
+      else ``"stale"``. So a display-mode change reaches the handler as one even when its
+      own request is lost. (A handler that raises still acks it with ``no_update``; the
+      next request is then a ``"tick"``.) The extra Input is compared by value, not by
+      trigger, because the renderer replaces a queued request with a newer one of the same
+      callback and loses its trigger.
     * ``stale`` is true when the request is re-issued over an unacknowledged one. That
       re-issue evicts the request in flight, deliberately: it is the recovery for a request
-      that never gets a response.
+      that never gets a response. The server reads ``reason`` only; ``stale`` is for
+      instruments and logs.
     * The stale bound is ``min(PACER_STALE_CAP_MS, max(stale_ms, PACER_STALE_RTT_FACTOR x
-      the longest round trip this page has seen on this lane))``, so a slow page does not
+      the longest round trip this page has seen on this poll))``, so a slow page does not
       re-issue over its own legitimate requests. Each round trip is a LOWER bound: from
       ``issued_at`` to the last pacer run that still saw the request unacknowledged, so a
-      run delayed by a throttled background tab or a sleep cannot inflate it (round 1 of
-      the review measured the bound at ~180 s after one throttled tick when it was read at
-      the run that saw the ack).
+      run delayed by a throttled background tab or a sleep cannot inflate it. (A review
+      lane probed a draft that read it at the run that saw the ack: one throttled tick
+      stretched the bound to ~180 s.)
 
     A request with no ``issued_at`` (the layout's seq-0 request, answered by the feeder's
-    mount call) is aged from the first time this page's pacer sees it. Ages use
-    ``Date.now()``, so a backward step of the wall clock delays a stale re-issue by that step.
+    mount call) is aged from the first time this page's pacer sees it. Times are
+    ``performance.now()``, monotonic and per page, so a step of the wall clock neither
+    fires a false re-issue nor inflates the bound; ``Date.now()`` is the fallback where
+    ``performance`` is missing.
     """
     params = "n, extra, req, ack" if extra_input else "n, req, ack"
     extra_key = "JSON.stringify(extra === undefined ? null : extra)" if extra_input else "null"
-    lane_js = json.dumps(lane)
+    key_js = json.dumps(key)
     return f"""
             function({params}) {{
                 var NU = window.dash_clientside.no_update;
-                var now = Date.now();
+                var perf = window.performance;
+                var now = (perf && typeof perf.now === 'function') ? perf.now() : Date.now();
                 var seq = (req && typeof req.seq === 'number') ? req.seq : 0;
                 var acked = Boolean(ack) && ack.seq === seq;
                 var firstSeen = window.__junPollPacerFirstSeen || (window.__junPollPacerFirstSeen = {{}});
                 var maxRtt = window.__junPollPacerMaxRtt || (window.__junPollPacerMaxRtt = {{}});
                 var lastUnacked = window.__junPollPacerLastUnacked || (window.__junPollPacerLastUnacked = {{}});
-                var issuedAt = (req && typeof req.issued_at === 'number') ? req.issued_at : (firstSeen[{lane_js}] || (firstSeen[{lane_js}] = now));
-                var seen = lastUnacked[{lane_js}];
+                var issuedAt = (req && typeof req.issued_at === 'number') ? req.issued_at : (firstSeen[{key_js}] || (firstSeen[{key_js}] = now));
+                var seen = lastUnacked[{key_js}];
                 if (acked && seen && seen.seq === seq && typeof req.issued_at === 'number') {{
                     // A LOWER bound on this round trip: the request was still unanswered at
                     // the last run that saw it. A late run (a throttled background tab, a
                     // sleep) cannot inflate it, as the time of this run would.
-                    maxRtt[{lane_js}] = Math.max(maxRtt[{lane_js}] || 0, seen.t - req.issued_at);
+                    maxRtt[{key_js}] = Math.max(maxRtt[{key_js}] || 0, seen.t - req.issued_at);
                 }}
-                var staleMs = Math.min({int(PACER_STALE_CAP_MS)}, Math.max({int(stale_ms)}, {int(PACER_STALE_RTT_FACTOR)} * (maxRtt[{lane_js}] || 0)));
+                var staleMs = Math.min({int(PACER_STALE_CAP_MS)}, Math.max({int(stale_ms)}, {int(PACER_STALE_RTT_FACTOR)} * (maxRtt[{key_js}] || 0)));
                 if (!acked && now - issuedAt < staleMs) {{
-                    lastUnacked[{lane_js}] = {{seq: seq, t: now}};
+                    lastUnacked[{key_js}] = {{seq: seq, t: now}};
                     return NU;
                 }}
                 var extraKey = {extra_key};
-                var changed = extraKey !== null && !(req && req.extra_key === extraKey);
+                var changed = extraKey !== null && (!(req && req.extra_key === extraKey) || (!acked && req.reason === 'extra'));
                 var reason = changed ? 'extra' : (acked ? 'tick' : 'stale');
                 return {{seq: seq + 1, issued_at: now, reason: reason, extra_key: extraKey, stale: !acked}};
             }}
@@ -2658,7 +2668,7 @@ class DashboardManager:
         """
         stale_ms = DashboardConstants.POLL_PACER_STALE_MS
         self.app.clientside_callback(
-            poll_pacer_js(_METRICS_STORE_INTERVAL, stale_ms, extra_input=True),
+            poll_pacer_js(_METRICS_STORE_REQUEST, stale_ms, extra_input=True),
             Output(_METRICS_STORE_REQUEST, "data"),
             [
                 Input(_METRICS_STORE_INTERVAL, "n_intervals"),
@@ -2671,7 +2681,7 @@ class DashboardManager:
             prevent_initial_call=True,
         )
         self.app.clientside_callback(
-            poll_pacer_js("fast-update-interval", stale_ms, extra_input=False),
+            poll_pacer_js(_STATUS_BAR_REQUEST, stale_ms, extra_input=False),
             Output(_STATUS_BAR_REQUEST, "data"),
             Input("fast-update-interval", "n_intervals"),
             [
@@ -4878,7 +4888,7 @@ class DashboardManager:
         # ``reason="extra"`` request once the fetch in flight is acknowledged.
         #
         # The ack is written on EVERY return path, including a raised handler: without it
-        # the pacer waits out ``POLL_PACER_STALE_MS`` before it asks again.
+        # the pacer waits out its stale bound (``poll_pacer_js``) before it asks again.
         @self.app.callback(
             Output("metrics-panel-metrics-store", "data"),
             Output(_METRICS_STORE_ACK, "data"),
@@ -4901,7 +4911,7 @@ class DashboardManager:
                     trigger=self._metrics_store_trigger(request),
                     ws_live=ws_live,
                 )
-            except Exception as exc:  # the ack must land, or the pacer waits out POLL_PACER_STALE_MS
+            except Exception as exc:  # the ack must land, or the pacer waits out its stale bound
                 self.logger.warning("metrics store poll failed: %s", exc)
                 data = dash.no_update
             return data, {"seq": seq}
