@@ -4067,12 +4067,13 @@ async def _stop_model_version_refresh() -> None:
     """Abandon an unfinished version refresh at shutdown (W1.7). It only fills a label, so it is cancelled, not awaited.
 
     Cancelling releases the task at once; the worker thread under ``asyncio.to_thread`` cannot be interrupted, and ends
-    when its HTTP call does, within the adapter's timeouts.
+    when its HTTP call does, within the adapter's timeouts. ``asyncio.wait`` returns once the cancellation has landed,
+    without re-raising it here.
     """
-    if _model_version_refresh is not None and not _model_version_refresh.done():
-        _model_version_refresh.cancel()
-        with suppress(asyncio.CancelledError):
-            await _model_version_refresh
+    refresh = _model_version_refresh
+    if refresh is not None and not refresh.done():
+        refresh.cancel()
+        await asyncio.wait({refresh})
 
 
 def _live_recurrence_version_source() -> Any:

@@ -250,7 +250,7 @@ ARMS = [
     Arm(
         "shutdown-waits-on-the-refresh",
         "W1.7: shutdown awaits an unfinished lookup instead of abandoning it",
-        [Edit(MAIN, "        _model_version_refresh.cancel()\n", "        pass\n")],
+        [Edit(MAIN, "        refresh.cancel()\n", "        pass\n")],
         [f"{STARTUP}::test_shutdown_abandons_an_unfinished_refresh"],
     ),
     Arm(

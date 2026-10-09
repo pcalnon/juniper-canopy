@@ -41,7 +41,6 @@ import pytest
 
 import backend.recurrence_service_adapter as adapter_module
 import main
-import model_registry as model_registry_module
 from backend.recurrence_backend import RecurrenceBackend
 from frontend.dashboard_manager import DashboardManager
 from model_registry import MODELS, RECURRENCE_PROVIDER, SERVICE_VERSION_UNAVAILABLE, get_model_spec, refresh_model_versions
@@ -193,7 +192,7 @@ class TestStartupAsksTheConfiguredService:
         async def boot():
             main._start_model_version_refresh()
             assert main._model_version_refresh is not None, "startup scheduled nothing"
-            await main._model_version_refresh
+            await asyncio.wait({main._model_version_refresh})
 
         asyncio.run(boot())
 
@@ -250,7 +249,7 @@ class TestStartupAsksTheConfiguredService:
         def failing_refresh(*_args, **_kwargs):
             raise RuntimeError("cannot schedule new futures after shutdown")
 
-        monkeypatch.setattr(model_registry_module, "refresh_model_versions", failing_refresh)
+        monkeypatch.setattr("model_registry.refresh_model_versions", failing_refresh)
 
         asyncio.run(main._refresh_model_versions(lambda: _SERVICE_VERSION))
 
