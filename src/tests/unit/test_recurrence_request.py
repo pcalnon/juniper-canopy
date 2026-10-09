@@ -39,7 +39,6 @@ from pathlib import Path
 import httpx
 import pytest
 
-import dataset_schema
 from backend import recurrence_request
 from backend.recurrence_backend import RecurrenceBackend
 from backend.recurrence_request import (
@@ -239,7 +238,9 @@ class TestShapeStagedRef:
 
     def test_a_generic_field_is_forwarded_where_declared_and_edited(self, monkeypatch):
         # No shipped rank-3 generator declares n_samples or noise; a fake one exercises the rule.
-        monkeypatch.setitem(dataset_schema.DECLARED_PARAM_DEFAULTS, "fake_gen", {"n_samples": 100, "noise": 0.0})
+        # ``DECLARED_PARAM_DEFAULTS`` is the module's own dict object, so this patches what
+        # ``declared_param_defaults`` reads.
+        monkeypatch.setitem(DECLARED_PARAM_DEFAULTS, "fake_gen", {"n_samples": 100, "noise": 0.0})
         at_default = shape_staged_ref({"nn_dataset_type": "fake_gen", "nn_dataset_elements": 100, "nn_dataset_noise": 0})
         assert at_default.dataset_ref["params"] == {} and at_default.edited == ()
         edited = shape_staged_ref({"nn_dataset_type": "fake_gen", "nn_dataset_elements": 40, "nn_dataset_noise": 0.3})
@@ -247,7 +248,7 @@ class TestShapeStagedRef:
         assert edited.edited == ("n_samples", "noise")
 
     def test_a_generic_field_never_overrides_the_seed(self, monkeypatch):
-        monkeypatch.setitem(dataset_schema.DECLARED_PARAM_DEFAULTS, "fake_gen", {"noise": 0.0})
+        monkeypatch.setitem(DECLARED_PARAM_DEFAULTS, "fake_gen", {"noise": 0.0})
         monkeypatch.setattr(recurrence_request, "dataset_default_params", lambda value: {"noise": 0.05})
         shaped = shape_staged_ref({"nn_dataset_type": "fake_gen", "nn_dataset_noise": 0.3})
         assert shaped.dataset_ref["params"] == {"noise": 0.05}
