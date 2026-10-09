@@ -11,7 +11,7 @@
 # File Path:     JuniperCanopy/juniper_canopy/src/backend/
 #
 # Date Created:  2026-06-22
-# Last Modified: 2026-10-05
+# Last Modified: 2026-10-08
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -23,8 +23,9 @@
 #     Thin SYNCHRONOUS REST client for the juniper-recurrence model service. The
 #     recurrence service exposes a one-shot fit: ``POST /v1/train`` BLOCKS until the LMU
 #     is fitted (a juniper-data fetch + a single ridge/lstsq solve — there are no epochs
-#     to stream), and ``GET /v1/training/status`` returns the terminal state (idle |
-#     trained | restored) instantly. There is no background job and no WebSocket, so — unlike the
+#     to stream), and ``GET /v1/training/status`` returns the current or last operation's
+#     state instantly: idle | training | trained | restored | failed since juniper-recurrence#192
+#     (W1.5), idle | trained on the 0.5.0 contract floor. There is no background job and no WebSocket, so — unlike the
 #     cascor adapter — this adapter needs neither an async event loop nor a streaming
 #     relay. A plain ``httpx.Client`` per call is the honest, simplest fit; the backend
 #     wrapper (A1-ii) backgrounds the blocking ``train`` on a worker thread so the Dash
@@ -44,6 +45,12 @@
 #     - Scope (A1-i, per the ratified slice cadence): ``train`` + ``training_status``
 #       only. ``/v1/predict`` and ``/v1/crossval`` are deferred (enabler-doc OQ-2).
 #       ``service_version`` (W1.7) reads the version the service reports.
+#     - Operation identity (W1.5 / F-C4, F-CON1, F-CON2; juniper-recurrence#192): ``train``
+#       sends canopy's ``X-Request-ID`` and reads the ``operation_id`` the service mints;
+#       ``train_outcome`` reads ``GET /v1/training/status`` after a train request timed out
+#       and says whose operation the status describes; a busy 409 names its holder. canopy
+#       calls neither ``/v1/predict`` nor ``POST /v1/model/snapshots``, so it has nowhere to
+#       send ``expect_operation_id`` yet; ``RecurrenceTrainResult.operation_id`` is the id to send.
 #     - Contract floor: ``RECURRENCE_SERVICE_CONTRACT_FLOOR`` (W1.7 / F-C8). canopy speaks
 #       the service's REST contract here over raw httpx and imports no recurrence client
 #       package, so no pin in pyproject.toml can carry a floor; the constant and
@@ -80,18 +87,29 @@ record for the full A1 program.
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Optional, cast
 
 import httpx
 
+from outbound_errors import outbound_error_text
+
 logger = logging.getLogger("juniper_canopy.backend.recurrence")
 
 __all__ = [
     "MODEL_PRESENT_STATES",
+    "OUTCOME_FAILED",
+    "OUTCOME_RUNNING",
+    "OUTCOME_SUCCEEDED",
+    "OUTCOME_UNKNOWN",
     "RECURRENCE_SERVICE_CONTRACT_FLOOR",
+    "REQUEST_ID_HEADER",
+    "RecurrenceBusyHolder",
+    "RecurrenceOperationFailure",
     "RecurrenceServiceAdapter",
+    "RecurrenceTrainOutcome",
     "RecurrenceTrainResult",
     "RecurrenceStatus",
     "RecurrenceServiceError",
@@ -100,6 +118,7 @@ __all__ = [
     "RecurrenceServiceRateLimited",
     "RecurrenceServiceTimeoutError",
     "RecurrenceServiceUnavailableError",
+    "new_request_id",
 ]
 
 # The juniper-recurrence release this adapter is written and verified against: its documented contract floor (W1.7 /
@@ -137,6 +156,79 @@ _DETAIL_MAX_CHARS = 300
 # an HTTP-date, which RFC 9110 also allows, is 29 characters. Bounded for the reason the detail is.
 _RETRY_AFTER_MAX_CHARS = 64
 
+# W1.5 (F-C4 / F-CON2): the header that names canopy's ``POST /v1/train`` request. juniper-recurrence records it verbatim
+# as the operation's ``requested_by`` (juniper-recurrence#192), so a caller whose request timed out -- and so never
+# received the ``operation_id`` its reply carried -- can still find its own operation in ``GET /v1/training/status``.
+# A service that predates #192 ignores the header.
+REQUEST_ID_HEADER = "X-Request-ID"
+
+# canopy's request ids name canopy, so whoever reads one -- in the service's status, in a busy 409 another caller gets,
+# in the service's log -- can tell whose request it was without asking: ``juniper-canopy-<uuid4 hex>``.
+_REQUEST_ID_PREFIX = "juniper-canopy-"
+
+# ``RecurrenceTrainOutcome.state``: what ``GET /v1/training/status`` says became of a train request whose reply never
+# arrived (W1.5). The operator-facing ``reason`` of each starts with the plan's label for it -- ``running (upstream)``,
+# ``unknown (upstream unreachable)`` and so on -- and ``failed`` reads as the failed request's own error would have.
+OUTCOME_RUNNING = "running"
+OUTCOME_SUCCEEDED = "succeeded"
+OUTCOME_FAILED = "failed"
+OUTCOME_UNKNOWN = "unknown"
+
+# What a refused ``POST /v1/train`` can do about a busy service (W1.5 / F-CON1). The service runs one operation at a time
+# under one lock, and nothing -- not canopy, not the caller that started it -- can cancel a fit, so the choices are to
+# wait it out or to stop sharing the service (juniper-recurrence's README, § One caller per service).
+_BUSY_REMEDY = "retry when it ends (a fit cannot be cancelled), or give canopy a service of its own"
+
+# The most one service-supplied field (another caller's ``requested_by``, a ``dataset_id``, a state name ...) may add
+# to a message or a reason. ``requested_by`` is whatever ``X-Request-ID`` another caller chose to send; the status and
+# the 409 relay it verbatim. A uuid4 hex ``operation_id`` is 32 characters.
+_FIELD_MAX_CHARS = 64
+
+# Where in ``GET /v1/training/status``'s ``state`` an operation holds the service's lock right now (W1.5).
+_IN_FLIGHT_STATES: frozenset[str] = frozenset({"training", "restoring"})
+
+
+@dataclass(frozen=True)
+class RecurrenceBusyHolder:
+    """The operation holding the service when a ``POST /v1/train`` was refused: the busy 409's object ``detail`` (W1.5).
+
+    juniper-recurrence#192 names the holder (F-CON1 was a 409 that said nothing about who held the lock): its
+    ``operation_id``, its kind (``operation``: ``train`` or ``restore``), ``busy_since`` (ISO-8601 UTC), the
+    ``requested_by`` its request carried as ``X-Request-ID``, and its ``dataset_id`` as far as that has resolved.
+    ``message`` is the service's refusal (``a training run is already in progress``, or ``a snapshot restore is in
+    progress``). Every other field may be ``None``: the service nulls them when its lock was taken outside the API,
+    which only its tests do. Values are kept as sent; :meth:`describe` flattens and bounds them for a message.
+    """
+
+    message: str
+    operation_id: Optional[str] = None
+    operation: Optional[str] = None
+    busy_since: Optional[str] = None
+    requested_by: Optional[str] = None
+    dataset_id: Optional[str] = None
+
+    def describe(self) -> str:
+        """The holder on one line: ``<message> (<operation> operation <id> since <time>, requested by <id>, dataset <id>)``.
+
+        Absent fields are left out, and the parentheses with them when nothing is known beyond the message. Each field
+        is flattened and bounded (``_FIELD_MAX_CHARS``) and the whole is bounded as any service ``detail`` is
+        (``_DETAIL_MAX_CHARS``), so the line fits wherever a 4xx detail fits.
+        """
+        facts = []
+        since = f"since {_bounded_line(self.busy_since, _FIELD_MAX_CHARS)}" if self.busy_since else ""
+        if self.operation_id or self.operation:
+            kind = _bounded_line(self.operation, _FIELD_MAX_CHARS) if self.operation else "an"
+            identity = f" {_bounded_line(self.operation_id, _FIELD_MAX_CHARS)}" if self.operation_id else ""
+            facts.append(f"{kind} operation{identity}{f' {since}' if since else ''}")
+        elif since:
+            facts.append(since)
+        if self.requested_by:
+            facts.append(f"requested by {_bounded_line(self.requested_by, _FIELD_MAX_CHARS)}")
+        if self.dataset_id:
+            facts.append(f"dataset {_bounded_line(self.dataset_id, _FIELD_MAX_CHARS)}")
+        message = _bounded_line(self.message, _DETAIL_MAX_CHARS) or "the service is busy"
+        return _bounded_line(f"{message} ({', '.join(facts)})" if facts else message, _DETAIL_MAX_CHARS)
+
 
 class RecurrenceServiceError(RuntimeError):
     """Base error for any failed juniper-recurrence service interaction.
@@ -166,7 +258,22 @@ class RecurrenceServiceError(RuntimeError):
 
 
 class RecurrenceTrainInProgressError(RecurrenceServiceError):
-    """A ``/v1/train`` run is already in progress (HTTP 409 — the service's train_lock)."""
+    """A ``/v1/train`` run is already in progress (HTTP 409 — the service's train_lock).
+
+    Since juniper-recurrence#192 (W1.5) the busy 409's ``detail`` is an object naming the operation that holds the
+    lock. :attr:`holder` carries it parsed, and the message names the holder and what to do about it (F-CON1). The
+    published 0.5.0 still sends the bare string ``a training run is already in progress``: that is appended as any
+    4xx ``detail`` is, and :attr:`holder` is ``None``, as it is for any 409 whose detail is not that object.
+    """
+
+    def __init__(self, message: str, status_code: Optional[int] = None, body: Optional[str] = None, holder: Optional[RecurrenceBusyHolder] = None) -> None:
+        # A fourth positional value, so the exception still rebuilds from ``self.args`` (pickle / copy) as the base's does.
+        super().__init__(message, status_code, body, holder)
+
+    @property
+    def holder(self) -> Optional[RecurrenceBusyHolder]:
+        """The operation holding the service, from the 409's object ``detail``; ``None`` for a string detail."""
+        return cast(Optional[RecurrenceBusyHolder], self.args[3])
 
 
 class RecurrenceServiceAuthError(RecurrenceServiceError):
@@ -199,7 +306,22 @@ class RecurrenceServiceRateLimited(RecurrenceServiceError):
 
 
 class RecurrenceServiceTimeoutError(RecurrenceServiceError):
-    """The request exceeded its timeout (the blocking fit ran too long, or a network stall)."""
+    """The request exceeded its timeout (the blocking fit ran too long, or a network stall).
+
+    :attr:`reply_pending` says whether the request reached the service (W1.5 / F-C4). It is ``True`` after httpx's
+    ``ReadTimeout``: the request was sent whole and its reply did not arrive in time, so the service may still be
+    working on it -- and a ``POST /v1/train`` fit is not cancelled by canopy giving up. It is ``False`` after a
+    connect, write or pool timeout, when the request never got that far.
+    """
+
+    def __init__(self, message: str, status_code: Optional[int] = None, body: Optional[str] = None, reply_pending: bool = False) -> None:
+        # A fourth positional value, so the exception still rebuilds from ``self.args`` (pickle / copy) as the base's does.
+        super().__init__(message, status_code, body, reply_pending)
+
+    @property
+    def reply_pending(self) -> bool:
+        """``True`` when the request reached the service and only its reply timed out (``httpx.ReadTimeout``)."""
+        return bool(self.args[3])
 
 
 class RecurrenceServiceUnavailableError(RecurrenceServiceError):
@@ -219,17 +341,43 @@ class RecurrenceTrainResult:
     n_epochs: int
     stopped_reason: Optional[str]
     dataset: dict[str, Any]
+    # W1.5 / F-CON2: the id the service minted for this fit when it took its lock -- what ``GET /v1/training/status``
+    # reports as ``model_operation_id`` while this model is loaded, and what ``expect_operation_id`` takes on
+    # ``/v1/predict`` and ``POST /v1/model/snapshots``. ``None`` from a service predating #192 (juniper-recurrence 0.5.0).
+    operation_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class RecurrenceOperationFailure:
+    """Why the service's most recent operation failed: ``StatusResponse.failure`` under ``state == "failed"`` (W1.5).
+
+    ``detail`` is the error detail the failing request returned -- for an unexpected exception, its type and message --
+    and ``status_code`` the HTTP status it returned (500 for that exception). Both are as the service sent them. A 5xx
+    ``detail`` is never rendered onto an operator surface, for the reason :meth:`RecurrenceServiceAdapter._parse` gives.
+    """
+
+    detail: str
+    status_code: Optional[int] = None
 
 
 @dataclass(frozen=True)
 class RecurrenceStatus:
-    """Parsed ``GET /v1/training/status`` response (terminal state, never per-epoch).
+    """Parsed ``GET /v1/training/status`` response (one operation's state, never per-epoch).
 
-    ``state`` is ``"idle"`` (no model), ``"trained"`` (fitted by the service process) or ``"restored"`` (loaded from
-    the snapshot ``restored_from`` names; W1.6 / F-C6). ``final_metrics`` / ``stopped_reason`` describe the last
-    completed run and are ``None`` when idle -- and when restored, because no run produced that model. ``events`` is
-    the ordered training-event buffer recorded during the (already-finished) run. ``restored_from`` is ``None`` unless
-    the state is ``restored``, and always ``None`` from a service that predates the state.
+    ``state`` is ``"idle"`` (no operation yet), ``"training"`` / ``"restoring"`` (an operation holds the service's lock
+    now; W1.5), ``"trained"`` (fitted by the service process), ``"restored"`` (loaded from the snapshot
+    ``restored_from`` names; W1.6 / F-C6) or ``"failed"`` (the last operation took the lock and did not complete;
+    ``failure`` says why; W1.5). ``final_metrics`` / ``stopped_reason`` describe the last completed fit and are ``None``
+    otherwise -- including when restored, because no fit produced that model. ``events`` is the ordered training-event
+    buffer of that fit. ``restored_from`` is ``None`` unless the state is ``restored``.
+
+    Operation identity (W1.5 / F-CON2; juniper-recurrence#192): ``operation_id`` is the operation the state describes
+    and ``operation`` its kind (``train`` / ``restore``); ``busy_since`` is set while it holds the lock; ``requested_by``
+    is the ``X-Request-ID`` its request carried; ``dataset_id`` its dataset; ``model_operation_id`` the operation that
+    produced the in-memory model -- the model ``/v1/predict`` would score, which is not always the operation the state
+    describes. ``reports_operations`` is ``False`` from a service that sends none of these fields (the 0.5.0 contract
+    floor, and every service before #192): such a status cannot say whose operation it describes, and every identity
+    field is then ``None``.
     """
 
     state: str
@@ -237,6 +385,14 @@ class RecurrenceStatus:
     stopped_reason: Optional[str]
     events: list[dict[str, Any]] = field(default_factory=list)
     restored_from: Optional[str] = None
+    operation_id: Optional[str] = None
+    operation: Optional[str] = None
+    busy_since: Optional[str] = None
+    dataset_id: Optional[str] = None
+    requested_by: Optional[str] = None
+    model_operation_id: Optional[str] = None
+    failure: Optional[RecurrenceOperationFailure] = None
+    reports_operations: bool = False
 
     @property
     def model_present(self) -> bool:
@@ -246,6 +402,34 @@ class RecurrenceStatus:
         service reports ``restored`` for a model it never fitted.
         """
         return self.state in MODEL_PRESENT_STATES
+
+
+@dataclass(frozen=True)
+class RecurrenceTrainOutcome:
+    """What became of a ``POST /v1/train`` whose reply never arrived, as ``GET /v1/training/status`` tells it (W1.5).
+
+    ``state`` is :data:`OUTCOME_RUNNING` (the service is still fitting canopy's request), :data:`OUTCOME_SUCCEEDED`
+    (the fit finished and the model the service holds is the one that request produced; ``result`` is set),
+    :data:`OUTCOME_FAILED` (that request failed; ``failure`` is set) or :data:`OUTCOME_UNKNOWN` (canopy cannot tell).
+
+    ``reason`` is one line for the operator, led by the outcome's label -- ``running (upstream)``, ``succeeded
+    (upstream)``, ``unknown (upstream unreachable)`` and the other ``unknown (...)`` labels -- or, for a failure, worded
+    as the failed request's own error would have been. It is built from canopy's words and the service's answer only,
+    never from transport text, so it may go wherever ``outbound_error_text`` output goes. ``status`` is the status that
+    was read; when none could be, it is ``None`` and ``error`` holds the exception, whose full text is for the log.
+    """
+
+    state: str
+    reason: str
+    result: Optional[RecurrenceTrainResult] = None
+    failure: Optional[RecurrenceOperationFailure] = None
+    status: Optional[RecurrenceStatus] = None
+    error: Optional[RecurrenceServiceError] = None
+
+
+def new_request_id() -> str:
+    """A fresh ``X-Request-ID`` naming one canopy request: ``juniper-canopy-<uuid4 hex>`` (W1.5)."""
+    return f"{_REQUEST_ID_PREFIX}{uuid.uuid4().hex}"
 
 
 def _validation_error_text(item: Any) -> str:
@@ -330,6 +514,129 @@ def _render_detail(payload: Any) -> Optional[str]:
     return collapsed
 
 
+def _bounded_line(text: Any, max_chars: int) -> str:
+    """``text`` on one line -- whitespace runs collapsed -- cut to ``max_chars`` with an ellipsis; ``""`` for ``None``."""
+    if text is None:
+        return ""
+    collapsed = " ".join(str(text).split())
+    if len(collapsed) > max_chars:
+        return collapsed[: max_chars - 1].rstrip() + "…"
+    return collapsed
+
+
+def _wire_text(value: Any) -> Optional[str]:
+    """A string field of a reply exactly as sent, or ``None`` when it is absent, blank or not a string.
+
+    Not stripped: ``requested_by`` must compare equal to the ``X-Request-ID`` canopy sent, character for character.
+    """
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
+def _operation_failure(value: Any) -> Optional[RecurrenceOperationFailure]:
+    """``StatusResponse.failure`` parsed, or ``None`` when the reply carries none (or carries something else)."""
+    if not isinstance(value, Mapping):
+        return None
+    detail = value.get("detail")
+    code = value.get("status_code")
+    return RecurrenceOperationFailure(detail="" if detail is None else str(detail), status_code=code if isinstance(code, int) and not isinstance(code, bool) else None)
+
+
+def _busy_holder(response: httpx.Response) -> Optional[RecurrenceBusyHolder]:
+    """The busy 409's object ``detail`` (juniper-recurrence#192) as a :class:`RecurrenceBusyHolder`, else ``None``.
+
+    Recognised by shape: an object with a ``busy_since`` key, which every ``BusyDetail`` carries (null when unknown)
+    and no other 409 detail does. The bare string juniper-recurrence 0.5.0 sends is not a holder, nor is the
+    ``expect_operation_id`` mismatch of ``/v1/predict``, which names ``expected_operation_id`` instead. Never raises,
+    for the reason :func:`_service_detail` gives.
+    """
+    try:
+        payload = response.json()
+    except Exception:  # noqa: BLE001 -- a describer must not raise: the typed error stands whatever the body holds
+        return None
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if not isinstance(detail, dict) or "busy_since" not in detail:
+        return None
+    message = detail.get("message")
+    return RecurrenceBusyHolder(
+        message=message if isinstance(message, str) else "",
+        operation_id=_wire_text(detail.get("operation_id")),
+        operation=_wire_text(detail.get("operation")),
+        busy_since=_wire_text(detail.get("busy_since")),
+        requested_by=_wire_text(detail.get("requested_by")),
+        dataset_id=_wire_text(detail.get("dataset_id")),
+    )
+
+
+def _result_from_status(status: RecurrenceStatus) -> RecurrenceTrainResult:
+    """The fit's result as ``GET /v1/training/status`` reports it, for a fit whose ``POST /v1/train`` reply never came (W1.5).
+
+    The status carries the ``final_metrics`` and ``stopped_reason`` the reply would have carried, and the resolved
+    ``dataset_id``. It carries no epoch count and no dataset descriptor, so ``n_epochs`` is read from the fit's last
+    ``epoch_end`` event -- juniper-recurrence-model numbers its ``epoch`` from 0 -- and is 0 without one, as for a
+    reply without the key; ``dataset`` holds the id alone.
+    """
+    n_epochs = 0
+    for event in status.events:
+        payload = event.get("payload") if isinstance(event, Mapping) else None
+        if isinstance(payload, Mapping) and event.get("type") == "epoch_end":
+            epoch = payload.get("epoch")
+            if isinstance(epoch, int) and not isinstance(epoch, bool) and epoch >= 0:
+                n_epochs = epoch + 1
+    return RecurrenceTrainResult(
+        final_metrics=dict(status.final_metrics or {}),
+        n_epochs=n_epochs,
+        stopped_reason=status.stopped_reason,
+        dataset={"dataset_id": status.dataset_id} if status.dataset_id else {},
+        operation_id=status.operation_id,
+    )
+
+
+def _failure_reason(failure: Optional[RecurrenceOperationFailure]) -> str:
+    """A failed fit's reason, worded as its own ``POST /v1/train`` error would have been, and saying how it was learned.
+
+    The status code, method and path, then -- on a 4xx only -- the service's ``detail``, flattened and bounded exactly as
+    :meth:`RecurrenceServiceAdapter._parse` renders it. A 5xx ``detail`` is left off for the reason ``_parse`` gives.
+    """
+    code = failure.status_code if failure is not None else None
+    head = f"recurrence service error {code} on POST /v1/train" if code is not None else "recurrence fit failed on POST /v1/train"
+    head = f"{head}, reported by GET /v1/training/status after the request timed out"
+    detail = _render_detail({"detail": failure.detail}) if failure is not None and code is not None and httpx.codes.is_client_error(code) else None
+    return f"{head}: {detail}" if detail else head
+
+
+def _classify_train_outcome(status: RecurrenceStatus, request_id: str) -> RecurrenceTrainOutcome:
+    """Read ``status`` against the train request canopy named ``request_id``; see :meth:`RecurrenceServiceAdapter.train_outcome`."""
+    if not status.reports_operations:
+        reason = "unknown (no operation identity): the service does not say which request its status describes (juniper-recurrence 0.5.0 and older), so canopy cannot tell whether its fit finished"
+        return RecurrenceTrainOutcome(OUTCOME_UNKNOWN, reason, status=status)
+    operation_id = _bounded_line(status.operation_id, _FIELD_MAX_CHARS)
+    state = _bounded_line(status.state, _FIELD_MAX_CHARS)
+    if status.requested_by != request_id or status.operation not in (None, "train"):
+        if status.operation_id is None:
+            reason = "unknown (no operation on record): the service reports no operation since it started, so it restarted after canopy's request or never received it; canopy cannot tell whether its fit finished"
+        else:
+            kind = _bounded_line(status.operation, _FIELD_MAX_CHARS) or "an"
+            by = f", requested by {_bounded_line(status.requested_by, _FIELD_MAX_CHARS)}" if status.requested_by else ""
+            reason = f"unknown (another operation since): the status describes {kind} operation {operation_id} ({state}{by}), not canopy's request {_bounded_line(request_id, _FIELD_MAX_CHARS)}; canopy cannot tell whether its fit finished"
+        return RecurrenceTrainOutcome(OUTCOME_UNKNOWN, reason, status=status)
+    if status.state in _IN_FLIGHT_STATES:
+        since = f" since {_bounded_line(status.busy_since, _FIELD_MAX_CHARS)}" if status.busy_since else ""
+        return RecurrenceTrainOutcome(OUTCOME_RUNNING, f"running (upstream): the service is still fitting canopy's request (operation {operation_id}{since}); a fit cannot be cancelled", status=status)
+    if status.state == "failed":
+        return RecurrenceTrainOutcome(OUTCOME_FAILED, _failure_reason(status.failure), failure=status.failure, status=status)
+    # The one way to succeed: the operation canopy's request started is the one that produced the model the service now
+    # holds. ``model_present`` alone also holds for a restored model and for another caller's fit; ``trained`` alone
+    # also holds for another caller's fit; neither says whose model it is.
+    if status.model_present and status.operation_id is not None and status.model_operation_id == status.operation_id:
+        reason = f"succeeded (upstream): the service finished canopy's fit after the request timed out (operation {operation_id})"
+        return RecurrenceTrainOutcome(OUTCOME_SUCCEEDED, reason, result=_result_from_status(status), status=status)
+    held = f"holds a model from operation {_bounded_line(status.model_operation_id, _FIELD_MAX_CHARS)}" if status.model_operation_id else "holds no model"
+    reason = f"unknown (outcome not attributable): the service reports canopy's operation {operation_id} as {state} and {held}; canopy cannot tell whether its fit finished"
+    return RecurrenceTrainOutcome(OUTCOME_UNKNOWN, reason, status=status)
+
+
 class RecurrenceServiceAdapter:
     """Thin synchronous REST client for the juniper-recurrence model service.
 
@@ -383,6 +690,7 @@ class RecurrenceServiceAdapter:
         d: Optional[int] = None,
         theta: Optional[float] = None,
         ridge: Optional[float] = None,
+        request_id: Optional[str] = None,
     ) -> RecurrenceTrainResult:
         """Synchronously fit the LMU on a dataset split via ``POST /v1/train``.
 
@@ -392,11 +700,18 @@ class RecurrenceServiceAdapter:
         one MUST be supplied (validated client-side before the HTTP call). Unset
         hyperparameters fall back to the service defaults.
 
+        ``request_id`` (W1.5) goes out as ``X-Request-ID``, which the service records as the
+        operation's ``requested_by``: if the reply never arrives, :meth:`train_outcome` can
+        still find the fit by it. :func:`new_request_id` mints one. The result's
+        ``operation_id`` is the id the service minted for the fit.
+
         Raises:
             ValueError: no dataset reference supplied.
-            RecurrenceTrainInProgressError: a run is already in progress (409).
+            RecurrenceTrainInProgressError: another operation holds the service (409); its
+                ``holder`` names it when the service says.
             RecurrenceServiceAuthError: rejected for auth (401 / 403).
-            RecurrenceServiceTimeoutError: the blocking fit exceeded the read timeout.
+            RecurrenceServiceTimeoutError: the blocking fit exceeded the read timeout. With
+                ``reply_pending`` the fit may still be running: ask :meth:`train_outcome`.
             RecurrenceServiceUnavailableError: the service was unreachable.
             RecurrenceServiceError: any other non-2xx response.
         """
@@ -421,21 +736,26 @@ class RecurrenceServiceAdapter:
         if ridge is not None:
             body["ridge"] = ridge
 
-        data = self._call("POST", "/v1/train", self._train_timeout, json_body=body)
+        headers = {REQUEST_ID_HEADER: request_id} if request_id else None
+        data = self._call("POST", "/v1/train", self._train_timeout, json_body=body, headers=headers)
         return RecurrenceTrainResult(
             final_metrics=dict(data.get("final_metrics") or {}),
             n_epochs=int(data.get("n_epochs", 0)),
             stopped_reason=data.get("stopped_reason"),
             dataset=dict(data.get("dataset") or {}),
+            operation_id=_wire_text(data.get("operation_id")),
         )
 
     def training_status(self) -> RecurrenceStatus:
-        """Return the last training status via ``GET /v1/training/status`` (instant).
+        """Return the current or last operation's status via ``GET /v1/training/status`` (instant).
 
-        This is terminal state (idle | trained | restored) plus the recorded event buffer —
-        there is nothing to poll *during* a fit (the fit blocks ``/v1/train``). Whether the
-        service holds a model is :attr:`RecurrenceStatus.model_present`, which counts a
-        restored model exactly as a trained one (W1.6 / F-C6).
+        The state (idle | training | restoring | trained | restored | failed), the recorded event
+        buffer, and -- since juniper-recurrence#192 (W1.5) -- which operation the state describes,
+        whose request it was, and which operation produced the model the service holds. A service
+        that predates #192 reports ``idle`` / ``trained`` only and no identity, which parses as
+        ``reports_operations=False``. Whether the service holds a model is
+        :attr:`RecurrenceStatus.model_present`, which counts a restored model exactly as a trained
+        one (W1.6 / F-C6).
         """
         data = self._call("GET", "/v1/training/status", self._status_timeout)
         return RecurrenceStatus(
@@ -444,7 +764,42 @@ class RecurrenceServiceAdapter:
             stopped_reason=data.get("stopped_reason"),
             events=list(data.get("events") or []),
             restored_from=data.get("restored_from"),
+            operation_id=_wire_text(data.get("operation_id")),
+            operation=_wire_text(data.get("operation")),
+            busy_since=_wire_text(data.get("busy_since")),
+            dataset_id=_wire_text(data.get("dataset_id")),
+            requested_by=_wire_text(data.get("requested_by")),
+            model_operation_id=_wire_text(data.get("model_operation_id")),
+            failure=_operation_failure(data.get("failure")),
+            # Key presence, not value: #192 sends ``operation_id`` on every status (null while idle), 0.5.0 never does.
+            reports_operations="operation_id" in data,
         )
+
+    def train_outcome(self, request_id: str) -> RecurrenceTrainOutcome:
+        """What became of the ``POST /v1/train`` that sent ``X-Request-ID: <request_id>`` and timed out (W1.5 / F-C4).
+
+        One ``GET /v1/training/status``, read against the request id. The service does not cancel a fit when canopy
+        stops waiting for it, so how the fit ended is the service's to say, and canopy must not guess: recording
+        ``failed`` on the timeout -- canopy's old behaviour -- was wrong whenever the fit went on to succeed, and left
+        the next Start to meet a 409 from a lock canopy believed free.
+
+        The status speaks for canopy's fit only when it names canopy's request as its ``requested_by``. That fit
+        **succeeded** only when it produced the model the service holds (``model_operation_id == operation_id``):
+        ``trained`` alone may be another caller's fit, and ``restored`` is never a fit at all, though both count as a
+        model being present (:attr:`RecurrenceStatus.model_present`). Anything less is :data:`OUTCOME_UNKNOWN`, never
+        :data:`OUTCOME_SUCCEEDED` -- including every status from a service that reports no operation identity.
+
+        Never raises: an unreachable or unreadable status is an unknown outcome carrying the exception as ``error``.
+        """
+        try:
+            status = self.training_status()
+        except (RecurrenceServiceTimeoutError, RecurrenceServiceUnavailableError) as exc:
+            # canopy's own words: a transport failure's text can quote a header value (#683), and this reason is shown.
+            reason = "unknown (upstream unreachable): canopy could not reach GET /v1/training/status after its POST /v1/train timed out, so it cannot tell whether the fit finished"
+            return RecurrenceTrainOutcome(OUTCOME_UNKNOWN, reason, error=exc)
+        except RecurrenceServiceError as exc:
+            return RecurrenceTrainOutcome(OUTCOME_UNKNOWN, f"unknown (upstream status unreadable): {outbound_error_text(exc)}", error=exc)
+        return _classify_train_outcome(status, request_id)
 
     def service_version(self) -> str:
         """The version the recurrence service reports about itself (W1.7 / F-C8), read over the wire.
@@ -477,7 +832,7 @@ class RecurrenceServiceAdapter:
             headers["X-API-Key"] = self._api_key
         return headers
 
-    def _call(self, method: str, path: str, timeout: httpx.Timeout, *, json_body: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    def _call(self, method: str, path: str, timeout: httpx.Timeout, *, json_body: Optional[dict[str, Any]] = None, headers: Optional[Mapping[str, str]] = None) -> dict[str, Any]:
         """Issue one request and map transport / HTTP failures onto the typed hierarchy.
 
         Named ``_call`` (deliberately NOT ``_request`` / ``_get`` / ``_post``): the static
@@ -488,12 +843,15 @@ class RecurrenceServiceAdapter:
         raw ``httpx`` against a plain ``base_url``, and the recurrence routes genuinely are
         ``/v1/...`` (the service's own tests POST ``/v1/train``), so the prefix is correct
         here and the helper must sit outside that guarded name-set.
+
+        ``headers`` are added to the adapter's own for this request only (``X-Request-ID`` on a train, W1.5).
         """
         try:
             with httpx.Client(base_url=self._base_url, headers=self._headers(), timeout=timeout, transport=self._transport) as client:
-                response = client.request(method, path, json=json_body)
+                response = client.request(method, path, json=json_body, headers=headers)
         except httpx.TimeoutException as exc:
-            raise RecurrenceServiceTimeoutError(f"recurrence service timed out on {method} {path}: {exc}") from exc
+            # A ReadTimeout is the one timeout after which the request has reached the service (W1.5 / F-C4).
+            raise RecurrenceServiceTimeoutError(f"recurrence service timed out on {method} {path}: {exc}", reply_pending=isinstance(exc, httpx.ReadTimeout)) from exc
         except httpx.RequestError as exc:
             raise RecurrenceServiceUnavailableError(f"recurrence service unreachable on {method} {path}: {exc}") from exc
         return self._parse(response, method, path)
@@ -517,11 +875,18 @@ class RecurrenceServiceAdapter:
         A 401 / 403 names the variables that set the key (W1.6 / F-C5). A 429 raises
         :class:`RecurrenceServiceRateLimited`, whose message carries the reply's ``Retry-After`` before the detail
         (W1.6 / F-C7); without the header its message is the generic 4xx wording, unchanged.
+
+        A busy 409 whose ``detail`` is the object juniper-recurrence#192 sends names the operation holding the service
+        (W1.5 / F-CON1): the message carries what to do (``_BUSY_REMEDY``) before the holder, as a 429 carries its wait,
+        and the error's ``holder`` has it parsed. A string detail -- the published 0.5.0's -- is appended unchanged.
         """
         code = response.status_code
         detail = _service_detail(response) if httpx.codes.is_client_error(code) else None
         suffix = f": {detail}" if detail else ""
         if code == httpx.codes.CONFLICT:  # 409
+            holder = _busy_holder(response)
+            if holder is not None:
+                raise RecurrenceTrainInProgressError(f"recurrence training already in progress ({method} {path}) — {_BUSY_REMEDY}: {holder.describe()}", status_code=code, body=response.text, holder=holder)
             raise RecurrenceTrainInProgressError(f"recurrence training already in progress ({method} {path}){suffix}", status_code=code, body=response.text)
         if code in (httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN):  # 401 / 403
             raise RecurrenceServiceAuthError(f"recurrence service rejected the request ({code} on {method} {path}) — {_AUTH_REMEDY}{suffix}", status_code=code, body=response.text)

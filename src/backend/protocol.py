@@ -11,7 +11,7 @@
 # File Path:     JuniperCanopy/juniper_canopy/src/backend/
 #
 # Date Created:  2026-02-26
-# Last Modified: 2026-02-26
+# Last Modified: 2026-10-08
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -84,6 +84,13 @@ class StatusResult(TypedDict, total=False):
     # (a cascor predating cascor#676), and that absence is itself the answer "unknown";
     # ``main._backend_dataset_selection`` branches on it, so never default it to ``None``.
     current_dataset: Optional[Dict[str, Any]]
+    # W1.5 / F-C4 (recurrence): the latest fit's outcome could not be established -- its reply timed out and the
+    # service's status did not attribute a result to canopy's request. ``completion_reason`` says why. Present, and
+    # ``True``, only then; ``failed`` and ``completed`` are both ``False``. Every other backend omits it.
+    outcome_unknown: bool
+    # W1.5 / F-CON2 (recurrence): the service's ``operation_id`` for the fit whose result the backend holds -- the id
+    # ``expect_operation_id`` takes. Absent before a fit, and from a service predating operation identity.
+    operation_id: str
 
 
 class MetricsResult(TypedDict, total=False):

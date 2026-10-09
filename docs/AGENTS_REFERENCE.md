@@ -29,6 +29,7 @@ pointer only helps an agent that already knows to look.
 - [Replay index contract](#replay-index-contract)
 - [Recurrence fit refusal and in-sample scores](#recurrence-fit-refusal-and-in-sample-scores)
 - [Recurrence key, restored model, and service version](#recurrence-key-restored-model-and-service-version)
+- [Recurrence fit identity, timeouts, and one caller per service](#recurrence-fit-identity-timeouts-and-one-caller-per-service)
 - [Start-fresh refusal (F1, F2)](#start-fresh-refusal-f1-f2)
 - [Further Reading](#further-reading)
 
@@ -633,7 +634,7 @@ The same predicate (canopy#601, N5) gates Start and **Apply Dataset** (`_update_
 
 | Answer | When | Sidebar text |
 | --- | --- | --- |
-| `True` | The payload's `backend` serves the selection | `Active: <label>` |
+| `True` | The payload's `backend` serves the selection | `Active: <label>`, then `· version <v>` when the payload carries `version` (W1.7) |
 | `False` | The payload names a backend that does not serve the selection | `Selected: <label> · NOT ACTIVE — the <backend> backend is running` |
 | `None` | No model key, or no `backend` | `Selected: <label> · backend status unknown` |
 
@@ -1626,10 +1627,12 @@ not copied into either.
 
 `RecurrenceBackend._run_fit` (`src/backend/recurrence_backend.py`) stores `outbound_error_text(exc)` (`src/outbound_errors.py`) as `completion_reason` and logs `recurrence fit failed (status=<code>): <message>`.
 A status-bearing error passes as `str(exc)`, which includes a 4xx `detail`. A transport failure has no integer `status_code`, so `completion_reason` is the exception type name (`RecurrenceServiceUnavailableError` or `RecurrenceServiceTimeoutError`) and the WARNING logs `status=None`. The log line can still carry the transport text.
+A read timeout on `POST /v1/train` is the exception. Since W1.5 that fit is followed on the service's status, and `completion_reason` is the outcome's reason: see [Recurrence fit identity, timeouts, and one caller per service](#recurrence-fit-identity-timeouts-and-one-caller-per-service).
 
 ### Status bar
 
 Visible text is `Failed — <label>`. The label is the reason on one line, cut at 120 characters with `…` (`DashboardManager._COMPLETION_REASON_MAX_CHARS`).
+A fit whose outcome canopy could not establish (W1.5, `outcome_unknown` on `/api/status`) reads `Unknown — <label>` in amber, cut and hovered the same way.
 
 When that cut drops the tail, `top-status-display` renders an `html.Span` whose `title`
 is the same reason, flattened the same way and cut at 480 characters
@@ -1725,7 +1728,7 @@ The dashboard polls canopy, not the recurrence service, and canopy calls the ser
 
 A restored model is present and predictable. It does not mean a fit canopy asked for landed. The service reports no `final_metrics`, `stopped_reason`, or `events` for that model. The published juniper-recurrence 0.5.0 never sends `restored`. Those replies parse with `restored_from=None`.
 
-No production caller reads `training_status()` yet. The property is the rule for a later status poll. The backend's own `trained` flag belongs to its fit state machine and is never filled from this route.
+Since W1.5, `RecurrenceServiceAdapter.train_outcome` reads `training_status()` after a train read timeout, and `model_present` alone is never its success rule. The backend's own `trained` flag is filled from this route only when the status names canopy's request as the producer of the model the service holds. See [Recurrence fit identity, timeouts, and one caller per service](#recurrence-fit-identity-timeouts-and-one-caller-per-service).
 
 ### The version is whatever the service reports
 
@@ -1735,7 +1738,7 @@ The recurrence seed in `MODELS` leaves `version` blank. `RecurrenceServiceAdapte
 
 A source that raises, times out, or returns anything but a non-blank string yields `unknown (version lookup failed)` (`SERVICE_VERSION_UNAVAILABLE`) and a WARNING that names the failure. A model whose provider has no source keeps its spec. That is the blank seed when no service is configured. The lookup is HTTP. Call it with `asyncio.to_thread`, off the single-worker event loop.
 
-No surface renders `ModelSpec.version`. The model table, the picker, and `/api/selection` do not read it. Wiring a refreshed registry into one of them is still open.
+Since W1.7's display half, startup and a recurrence selection refresh it in the background. `GET /api/selection` and `POST /api/model/select` carry it as `version`, and the sidebar's Active line shows it. See [The service's version is shown](#the-services-version-is-shown). The model table still does not read it.
 
 Canopy imports no `juniper-recurrence-client`. The documented floor is `RECURRENCE_SERVICE_CONTRACT_FLOOR = "0.5.0"` in the adapter, and [`docs/api/API_REFERENCE.md` § Recurrence Service Contract (Recurrence Mode)](api/API_REFERENCE.md#recurrence-service-contract-recurrence-mode) names it.
 
@@ -1766,6 +1769,111 @@ pytest tests/unit/test_recurrence_service_adapter.py \
 - A 429 with no `Retry-After` still means the window is closed. The message simply has no wait clause.
 
 The 4xx `detail` suffix, the 5xx omission, the status-bar hover, and the in-sample regression card are in [Recurrence fit refusal and in-sample scores](#recurrence-fit-refusal-and-in-sample-scores).
+
+---
+
+## Recurrence fit identity, timeouts, and one caller per service
+
+Landed with W1.5's canopy half (plan findings F-C4, F-CON1 and F-CON2) and W1.7's display half (F-C8). The plan is juniper-ml `notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md`. It builds on the service half, juniper-recurrence#192, which gives every lock-taking request an `operation_id`.
+
+Before it, a fit whose reply outlived the adapter's 300 s read timeout was recorded `failed`, with the reason `RecurrenceServiceTimeoutError`. The service cannot cancel a fit, so it went on fitting, often to success, and it answered the next Start with a 409 that named nobody.
+
+Primary code:
+
+- `src/backend/recurrence_service_adapter.py`: `train`, `train_outcome` and `_parse`
+- `src/backend/recurrence_backend.py`: `_run_fit`, `_follow_upstream` and `_settle`
+- `src/main.py`: `_refresh_model_versions`, `_start_model_version_refresh` and `api_model_select`
+- `src/frontend/dashboard_manager.py`: the `Unknown` status and the summary's version
+
+### Every fit is named
+
+`RecurrenceBackend._run_fit` mints `juniper-canopy-<uuid4 hex>` (`new_request_id`) and sends it as `X-Request-ID` on `POST /v1/train`. The service records it verbatim as the operation's `requested_by`. A reply that arrives carries the fit's `operation_id`, and `/api/status` reports it as `operation_id` while that result is shown.
+
+### A timed-out fit is followed
+
+Only `httpx.ReadTimeout` means the request reached the service (`RecurrenceServiceTimeoutError.reply_pending`). A connect, write or pool timeout never got that far, and it fails as before.
+
+After a read timeout the backend stays `training`, with the phase `fitting (upstream)`. The status bar shows `Running`, phase `Fitting (Upstream)`. The backend calls `RecurrenceServiceAdapter.train_outcome(request_id)` every 5 s (`_RECONCILE_INTERVAL_S`) for up to 30 minutes (`_RECONCILE_TIMEOUT_S`). Start, reset and a model swap are refused meanwhile, as the service would refuse a second fit.
+
+A read that fails outright, with no status at all, settles nothing on its own. Only the third such read in a row (`_RECONCILE_READ_ATTEMPTS`) settles the fit `unknown`, and any read that answers resets the count. One network blip during a long fit is no evidence that its outcome cannot be known.
+
+| What one status read says | Outcome | `/api/status` | Status bar |
+| --- | --- | --- | --- |
+| `requested_by` is canopy's, state `training` | running | `training`, phase `fitting (upstream)` | `Running` |
+| canopy's, and its operation produced the model the service holds (`model_operation_id == operation_id`) | succeeded | `trained`; metrics and `operation_id` from the status | `Completed — converged` |
+| canopy's, state `failed` | failed | `failed`; worded as the request's own error, `reported by GET /v1/training/status after the request timed out` | `Failed — …` |
+| unreachable (a transport failure), three reads in a row | unknown | `outcome_unknown: true`; `unknown (upstream unreachable): …` | `Unknown — …` (amber) |
+| an HTTP error, or a body that is not JSON, three reads in a row | unknown | `unknown (upstream status unreadable): <the answer>` | `Unknown — …` |
+| another operation, or another caller's `requested_by` | unknown | `unknown (another operation since): …` | `Unknown — …` |
+| `idle`, with no operation on record | unknown | `unknown (no operation on record): …` | `Unknown — …` |
+| canopy's, but the model held is not from it | unknown | `unknown (outcome not attributable): …` | `Unknown — …` |
+| a service without operation identity (0.5.0) | unknown | `unknown (no operation identity): …` | `Unknown — …` |
+| still running when the window closes, or at shutdown | unknown | `unknown (still running upstream): …` or `unknown (no longer followed): …` | `Unknown — …` |
+
+The success rule lives in one place, `_classify_train_outcome`. `trained` alone may be another caller's fit. `RecurrenceStatus.model_present` is also true for a restored model, and a restore is never a fit: its `operation` is `restore`, and its id is its own. Neither is evidence that canopy's fit landed.
+
+`unknown` is neither `failed` nor `completed`, and `has_network()` is false. Reset returns the backend to `idle`.
+
+The reasons carry no transport text (#683). A failure's 5xx `detail` is left off, by the same rule as a direct failure. The exception behind an unreadable status goes to the log only.
+
+### A busy 409 names its holder
+
+juniper-recurrence#192 sends a busy 409's `detail` as an object (`BusyDetail`). The adapter parses it into `RecurrenceTrainInProgressError.holder`, and the message carries a remedy and then the holder, the way a 429 carries its wait:
+
+`recurrence training already in progress (POST /v1/train) — retry when it ends (a fit cannot be cancelled), or give canopy a service of its own: a training run is already in progress (train operation … since …, requested by …, dataset …)`
+
+Each relayed field is flattened and cut at 64 characters, and the holder part at 300. The longest message is 444 characters, inside the 480-character hover.
+
+The published 0.5.0 sends the bare string `a training run is already in progress`. That reads exactly as before, and `holder` is `None`. A 409 object that names no holder, such as `/v1/predict`'s `expect_operation_id` mismatch, is not parsed as one.
+
+### One caller per service
+
+A recurrence service is exclusively owned by one caller at a time. It has one process-wide lock, one in-memory model and one snapshot directory. Canopy and a CLI experiment suite pointed at the same listener get each other's 409s and score each other's models.
+
+The runbook, with the port ranges that keep callers apart, is the service's own: [juniper-recurrence README § One caller per service](https://github.com/pcalnon/juniper-recurrence/blob/main/juniper-recurrence/README.md#one-caller-per-service). On canopy's side:
+
+- Point `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL` at a service that no suite or other client uses. The juniper-ml experiment launcher's per-run services (ports 8260–8289) belong to the suites.
+- Read a 409's `requested_by`. An id starting `juniper-canopy-` is canopy's own earlier fit, still running on the service. Anything else is another caller.
+- Canopy calls neither `/v1/predict` nor `POST /v1/model/snapshots`, so it sends no `expect_operation_id`. The `operation_id` on `/api/status` is the id to send when it does.
+
+### The service's version is shown
+
+`refresh_model_versions` has two production callers (W1.7):
+
+- `_start_model_version_refresh`, from the lifespan, when `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL` is set. The adapter is built from the same settings `create_backend` uses.
+- `api_model_select`, when the recurrence backend is live after the selection. It uses that backend's own adapter, so the version is that of the service the fits go to.
+
+Both run in the background (`asyncio.create_task` over `asyncio.to_thread`), and a refresh in flight is not duplicated. It is `asyncio.to_thread`, not `offload`: this is not a cascor call, and a refresh started by a request has no caller left to decline for. At shutdown the lifespan cancels an unfinished refresh rather than waiting on it (`_stop_model_version_refresh`).
+
+The answer is held in `main._reported_models`. `_model_state_response` reads it and adds `version` to `GET /api/selection` and `POST /api/model/select`, only when a service reported one. The sidebar's Active line shows it, as `Active: Recurrence (LMU) · version 0.5.0`. A lookup that failed reads `version unknown (version lookup failed)`.
+
+Startup is the common case, so a selection response normally carries the version already. A service that was not up at boot, or was restarted or upgraded since, is asked again on the next selection, and the read after that shows the answer.
+
+### Tests
+
+| File | What it pins |
+| --- | --- |
+| `src/tests/unit/test_recurrence_operation_identity.py` | `TestTheFourRaces` (the plan's four races), `TestNeverSucceededBlindly`, `TestTheBusy409`, `TestTheRequestIsNamed`, `TestTheStatusSaysWhoseOperation` |
+| `src/tests/unit/backend/test_recurrence_backend_upstream.py` | the four races as `/api/status` and the status bar show them; following a fit, the three-read tolerance, the window, shutdown, and a connect timeout |
+| `src/tests/regression/test_recurrence_version_display.py` | the displayed version comes from the fake service; nothing waits on the lookup; startup and shutdown, and the lifespan's calls |
+| `src/tests/fixtures/recurrence_service_fake.py` | the fake service, shaped after juniper-recurrence#192 |
+
+```bash
+cd src
+pytest tests/unit/test_recurrence_operation_identity.py \
+       tests/unit/backend/test_recurrence_backend_upstream.py \
+       tests/regression/test_recurrence_version_display.py -q
+```
+
+`util/ad-hoc/2026-10-08_w15_w17_mutation_check.py` puts each defect back on a copy of the tree, and requires the tests that name it to fail.
+
+### Pitfalls
+
+- Do not read `state == "trained"`, or `model_present`, as canopy's success. Read `train_outcome`.
+- Do not record `failed` on a read timeout. The fit is still running on the service, and the next Start would meet its 409.
+- Do not put an exception's text into an outcome's reason. The reason reaches `completion_reason`, which an anonymous caller reads.
+- Do not await the version lookup on a request path. It is two blocking HTTP calls to a service that may be down.
+- Do not send `version` when nothing was reported. Clients that predate the key must keep seeing the shape they know.
 
 ---
 

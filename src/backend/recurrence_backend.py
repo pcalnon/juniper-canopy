@@ -47,6 +47,11 @@
 #       accuracy->regression switch is A1-iii.
 #     - ``completion_reason`` (an existing ``StatusResult`` field) carries the failure
 #       message on failure and the service's ``stopped_reason`` on success.
+#     - A fit whose reply times out is FOLLOWED, not failed (W1.5 / F-C4): the service does
+#       not cancel it, so the backend stays ``training`` (phase ``fitting (upstream)``) and
+#       polls ``GET /v1/training/status`` by its ``X-Request-ID`` until the service says how
+#       it ended -- ``trained``, ``failed``, or ``unknown`` when canopy cannot tell. Never
+#       ``trained`` unless the service names canopy's request as the model's producer.
 #
 #####################################################################################################################################################################################################
 # References:
@@ -74,6 +79,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import Any, Dict, List, Mapping, Optional, cast
 
 from backend import recurrence_request
@@ -88,7 +94,18 @@ from backend.protocol import (
     StatusResult,
     TopologyResult,
 )
-from backend.recurrence_service_adapter import RecurrenceServiceAdapter, RecurrenceServiceError, RecurrenceTrainResult
+from backend.recurrence_service_adapter import (
+    OUTCOME_FAILED,
+    OUTCOME_RUNNING,
+    OUTCOME_SUCCEEDED,
+    OUTCOME_UNKNOWN,
+    RecurrenceServiceAdapter,
+    RecurrenceServiceError,
+    RecurrenceServiceTimeoutError,
+    RecurrenceTrainOutcome,
+    RecurrenceTrainResult,
+    new_request_id,
+)
 from outbound_errors import outbound_error_text
 
 logger = logging.getLogger("juniper_canopy.backend.recurrence_backend")
@@ -96,8 +113,21 @@ logger = logging.getLogger("juniper_canopy.backend.recurrence_backend")
 # Keys extracted from ``start_training(**kwargs)`` and forwarded to ``adapter.train``.
 _DATASET_REF_KEYS = ("dataset_id", "name", "generator", "params", "split")
 _HYPERPARAM_KEYS = ("d", "theta", "ridge")
-# Internal fit state -> the dashboard "phase" label.
-_PHASE_BY_STATE = {"idle": "idle", "training": "fitting", "trained": "complete", "failed": "error"}
+# Internal fit state -> the dashboard "phase" label. ``unknown`` (W1.5) is a fit whose outcome canopy could not
+# establish: its reply timed out and the service's status did not attribute the result to canopy's request.
+_PHASE_BY_STATE = {"idle": "idle", "training": "fitting", "trained": "complete", "failed": "error", "unknown": "unknown"}
+# W1.5 / F-C4: the phase while canopy follows a fit whose reply timed out. The service is still fitting -- the plan's
+# ``running (upstream)`` -- and the status bar renders a phase it does not map as ``.title()``: ``Fitting (Upstream)``.
+_UPSTREAM_PHASE = "fitting (upstream)"
+# How often a followed fit's status is read, and for how long. The status route is an in-memory read; one call per
+# interval is well inside juniper-service-core's default 60 requests a minute. The window bounds the follower thread:
+# a fit still running when it closes is reported ``unknown``, with the service's status as the place to look.
+_RECONCILE_INTERVAL_S = 5.0
+_RECONCILE_TIMEOUT_S = 1800.0
+# A status read that fails outright -- unreachable, refused, unreadable -- is tried this many times in a row before the
+# fit is settled ``unknown``: one network blip during a long fit is no evidence that its outcome cannot be known. A read
+# that answers resets the count; one that answers with a verdict settles the fit at once.
+_RECONCILE_READ_ATTEMPTS = 3
 
 
 def dataset_ref_from_staged(cfg: Mapping[str, Any]) -> Dict[str, Any]:
@@ -126,15 +156,24 @@ class RecurrenceBackend:
     A one-shot execution paradigm: ``start_training`` backgrounds the blocking
     ``POST /v1/train`` and the backend reports a binary status until the fit completes.
     The cascade-specific protocol methods (topology / decision boundary) return ``None``.
+
+    ``reconcile_interval`` / ``reconcile_timeout`` (seconds) pace and bound the following of a
+    fit whose reply timed out (W1.5; see :meth:`_follow_upstream`).
     """
 
-    def __init__(self, adapter: RecurrenceServiceAdapter) -> None:
+    def __init__(self, adapter: RecurrenceServiceAdapter, *, reconcile_interval: float = _RECONCILE_INTERVAL_S, reconcile_timeout: float = _RECONCILE_TIMEOUT_S) -> None:
         self._adapter = adapter
         self._lock = threading.Lock()
-        self._state = "idle"  # "idle" | "training" | "trained" | "failed"
+        self._state = "idle"  # "idle" | "training" | "trained" | "failed" | "unknown"
         self._thread: Optional[threading.Thread] = None
         self._result: Optional[RecurrenceTrainResult] = None
         self._error: Optional[str] = None
+        # W1.5 / F-C4: whether the latest fit's reply timed out and canopy is following it on the service's status
+        # (True only while ``_state`` is ``training``), and the event that stops the following at shutdown.
+        self._upstream = False
+        self._stopping = threading.Event()
+        self._reconcile_interval = reconcile_interval
+        self._reconcile_timeout = reconcile_timeout
         self._pending_hyperparams: Dict[str, Any] = {}
         # X6 / §4.9: the canopy-dialect dataset config staged for the NEXT fit (see the
         # "Dataset staging" section). Consumed by ``start_training``; surfaced on ``get_status``
@@ -234,14 +273,27 @@ class RecurrenceBackend:
 
     def _run_fit(self, dataset_ref: Dict[str, Any], hyperparams: Dict[str, Any]) -> None:
         """Daemon-thread target: run the blocking fit, then record terminal state."""
+        # W1.5 / F-C4: name the request, so that if its reply never arrives the service's status can
+        # still say what became of it -- the id comes back there as ``requested_by``.
+        request_id = new_request_id()
+        with self._lock:
+            self._upstream = False
         # ``_error`` becomes ``completion_reason`` on /api/status, which an anonymous caller
         # reads: the service's answer, or the exception's type -- never transport text, which
         # quoted the recurrence key when httpx refused to send it (#683 validation). The
         # service's answer includes its ``detail`` -- the adapter folds it into the message
         # (W0.5 / F-C1) -- so the reason a 422 gives reaches the operator, not just its code.
         try:
-            result = self._adapter.train(**dataset_ref, **hyperparams)
+            result = self._adapter.train(**dataset_ref, **hyperparams, request_id=request_id)
         except RecurrenceServiceError as exc:
+            if isinstance(exc, RecurrenceServiceTimeoutError) and exc.reply_pending:
+                # The request reached the service; only its reply is late, and the service does not
+                # cancel a fit because canopy stopped waiting. Recording ``failed`` here was F-C4: the
+                # fit often went on to succeed, and the next Start met a 409 from a lock canopy
+                # believed free. Follow it on the service's status instead.
+                logger.warning("recurrence fit: no reply to POST /v1/train within its read timeout (request %s); the service keeps fitting, so canopy follows GET /v1/training/status: %s", request_id, exc)
+                self._follow_upstream(request_id)
+                return
             with self._lock:
                 self._error = outbound_error_text(exc)
                 self._state = "failed"
@@ -260,6 +312,74 @@ class RecurrenceBackend:
             self._result = result
             self._state = "trained"
         logger.info("recurrence fit complete (final_metrics=%s)", result.final_metrics)
+
+    def _follow_upstream(self, request_id: str) -> None:
+        """Follow a fit whose reply timed out until the service says how it ended (W1.5 / F-C4). Runs on the fit thread.
+
+        The backend stays ``training`` meanwhile, so Start, reset and a model swap are refused here just as the service
+        would refuse a second fit with a 409, and ``get_status`` reports the phase ``fitting (upstream)``. Every
+        ``reconcile_interval`` seconds :meth:`RecurrenceServiceAdapter.train_outcome` reads ``GET /v1/training/status``
+        against the request id; the first outcome other than running settles the fit (:meth:`_settle`) -- except a read
+        that failed outright (no status at all), which settles it only on the ``_RECONCILE_READ_ATTEMPTS``-th in a row.
+        The ``reconcile_timeout`` window and shutdown end the following early, as ``unknown``: canopy stopped watching,
+        which says nothing about how the fit ended.
+        """
+        with self._lock:
+            self._upstream = True
+        deadline = time.monotonic() + self._reconcile_timeout
+        unread = 0
+        try:
+            while True:
+                outcome = self._adapter.train_outcome(request_id)
+                if outcome.status is None and outcome.state == OUTCOME_UNKNOWN:
+                    unread += 1
+                    if unread >= _RECONCILE_READ_ATTEMPTS:
+                        self._settle(outcome)
+                        return
+                elif outcome.state != OUTCOME_RUNNING:
+                    self._settle(outcome)
+                    return
+                else:
+                    unread = 0
+                if time.monotonic() >= deadline:
+                    if unread:  # the last read failed: say that, not "still running"
+                        self._settle(outcome)
+                        return
+                    reason = f"unknown (still running upstream): the service was still fitting canopy's request {request_id} when canopy stopped following it after {self._reconcile_timeout:g} s; the service's GET /v1/training/status has the outcome"
+                    self._settle(RecurrenceTrainOutcome(OUTCOME_UNKNOWN, reason))
+                    return
+                if self._stopping.wait(self._reconcile_interval):
+                    reason = f"unknown (no longer followed): canopy's recurrence backend shut down before the service reported how its request {request_id} ended"
+                    self._settle(RecurrenceTrainOutcome(OUTCOME_UNKNOWN, reason))
+                    return
+        except Exception:  # defensive: never leave the state stuck in "training"
+            logger.exception("recurrence fit: following request %s on the service's status crashed", request_id)
+            self._settle(RecurrenceTrainOutcome(OUTCOME_UNKNOWN, f"unknown (follow-up failed): canopy could not follow its request {request_id} on the service's status"))
+
+    def _settle(self, outcome: RecurrenceTrainOutcome) -> None:
+        """Record how a followed fit ended (W1.5). ``trained`` only on a succeeded outcome that carries its result.
+
+        A failed outcome's ``reason`` reads as the request's own error would have, and an unknown one says why canopy
+        cannot tell; either becomes ``completion_reason``. Both are built from canopy's words and the service's answer,
+        so they may go where ``outbound_error_text`` output goes. The exception behind an unreadable status can carry
+        transport text, and goes to the log only.
+        """
+        if outcome.state == OUTCOME_SUCCEEDED and outcome.result is not None:
+            with self._lock:
+                self._result = outcome.result
+                self._state = "trained"
+                self._upstream = False
+            logger.info("recurrence fit complete upstream (operation_id=%s, final_metrics=%s)", outcome.result.operation_id, outcome.result.final_metrics)
+            return
+        state = "failed" if outcome.state == OUTCOME_FAILED else "unknown"
+        with self._lock:
+            self._error = outcome.reason
+            self._state = state
+            self._upstream = False
+        if outcome.error is not None:
+            logger.warning("recurrence fit %s after its reply timed out: %s (%s: %s)", state, outcome.reason, type(outcome.error).__name__, outcome.error)
+        else:
+            logger.warning("recurrence fit %s after its reply timed out: %s", state, outcome.reason)
 
     def stop_training(self) -> ControlResult:
         # A one-shot ridge/lstsq solve is not interruptible.
@@ -294,6 +414,7 @@ class RecurrenceBackend:
             error = self._error
             pending = self._pending_dataset_config
             fit_ref = self._fit_dataset_ref
+            upstream = self._upstream
         status: Dict[str, Any] = {
             "is_training": state == "training",
             "is_running": state == "training",
@@ -313,12 +434,23 @@ class RecurrenceBackend:
             # ``{"dataset_type": None}`` reading: something is loaded, canopy cannot say what.
             "current_dataset": {"dataset_type": fit_ref.get("generator"), **dict(fit_ref.get("params") or {})} if fit_ref else None,
         }
-        if state == "failed" and error is not None:
+        if state in ("failed", "unknown") and error is not None:
             status["completion_reason"] = error
         elif result is not None:
             status["current_epoch"] = result.n_epochs
             if result.stopped_reason:
                 status["completion_reason"] = result.stopped_reason
+        # W1.5 / F-C4. A fit whose reply timed out and that canopy now follows on the service's status: still running
+        # (``is_training``), and said to be running there rather than here.
+        if state == "training" and upstream:
+            status["phase"] = _UPSTREAM_PHASE
+        # A fit whose outcome canopy could not establish is neither ``failed`` nor ``completed``, and "Stopped" would
+        # not be true of it either: ``outcome_unknown`` lets the status bar say "Unknown", with ``completion_reason``.
+        if state == "unknown":
+            status["outcome_unknown"] = True
+        # F-CON2: which service operation produced the result shown -- the id ``expect_operation_id`` takes.
+        if result is not None and result.operation_id:
+            status["operation_id"] = result.operation_id
         return cast(StatusResult, status)
 
     def get_metrics(self) -> MetricsResult:
@@ -519,6 +651,7 @@ class RecurrenceBackend:
 
     async def shutdown(self) -> None:
         """Join an in-flight fit thread (bounded) so shutdown does not race the worker."""
+        self._stopping.set()  # W1.5: a fit followed on the service's status stops at its next wait
         with self._lock:
             thread = self._thread
         if thread is not None and thread.is_alive():
