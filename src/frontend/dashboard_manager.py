@@ -2667,11 +2667,14 @@ class DashboardManager:
           the life of the page.
         """
         stale_ms = DashboardConstants.POLL_PACER_STALE_MS
+        # Each pacer's lane comes from ``_PACED_POLLS``, the registry the F-027 poller census
+        # counts, so the census cannot drift from what is wired here.
+        lane_of = dict(_PACED_POLLS)
         self.app.clientside_callback(
             poll_pacer_js(_METRICS_STORE_REQUEST, stale_ms, extra_input=True),
             Output(_METRICS_STORE_REQUEST, "data"),
             [
-                Input(_METRICS_STORE_INTERVAL, "n_intervals"),
+                Input(lane_of[_METRICS_STORE_REQUEST], "n_intervals"),
                 Input("metrics-panel-display-mode-store", "data"),
             ],
             [
@@ -2683,7 +2686,7 @@ class DashboardManager:
         self.app.clientside_callback(
             poll_pacer_js(_STATUS_BAR_REQUEST, stale_ms, extra_input=False),
             Output(_STATUS_BAR_REQUEST, "data"),
-            Input("fast-update-interval", "n_intervals"),
+            Input(lane_of[_STATUS_BAR_REQUEST], "n_intervals"),
             [
                 State(_STATUS_BAR_REQUEST, "data"),
                 State(_STATUS_BAR_ACK, "data"),
