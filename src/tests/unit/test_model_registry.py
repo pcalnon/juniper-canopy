@@ -414,8 +414,8 @@ def test_rank3_seeds_make_recurrence_trainable():
     """The rank-3 seeds give the recurrence (LMU) model compatible datasets (was [] before iv-3b).
 
     ``equities_seq`` alone held this open from A1-iv-3b until §12, and it was a thin thread:
-    it is unavailable in the deployed container (juniper-deploy pins juniper-data 0.15.0, whose
-    image lacks ``yfinance``; juniper-data#421 adds it on main, unreleased as of 2026-09-22), so
+    it was unavailable in the deployed container through juniper-deploy's juniper-data 0.15.0 pin
+    (no juniper-data image before 0.16.0 carries ``yfinance``; juniper-data#421 added it), so
     in the deployment that matters the LMU had ZERO available datasets and picking it raised
     §4.7's empty-set alert. The five synthetics are numpy-only.
     """
