@@ -934,6 +934,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **canopy picks up the two shared security patches**: `requirements.lock` moves
+  `juniper-observability` 0.4.0 -> 0.4.1 and `juniper-service-core` 0.7.0 -> 0.7.1, and nothing
+  else. observability 0.4.1's `configure_sentry`, which canopy calls, no longer sends frame-local
+  variables to Sentry, and they could hold the real API key. service-core 0.7.1 fixes `APIKeyAuth`
+  and `FailedAuthThrottle`; canopy's own copies live in `src/security.py`, so that pin is
+  consistency with the sibling services. The lock was regenerated with `--upgrade-package` for the
+  two packages only (60 pins; the freshness gate's constraint-mode resolution reproduces them).
 - **`APIKeyAuth` now carries the blank-key filter and the non-short-circuiting compare that its
   sibling copies carry (APD-ECO-008).** `src/security.py` is the fourth copy of the ecosystem's
   `APIKeyAuth`. `validate` used `any(hmac.compare_digest(...))`, which stops at the first match,
