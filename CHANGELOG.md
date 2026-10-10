@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-10
+
 ### Added
 
 - **The recurrence model's version is shown (W1.7, display half; F-C8).** canopy#722 made the version the service
