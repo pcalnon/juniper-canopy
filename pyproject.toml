@@ -105,8 +105,10 @@ dependencies = [
     # is consistent across services. 0.4.0 adds optional ``git_sha`` /
     # ``build_date`` passthrough on ``set_build_info`` + the shared
     # ``ReadinessResponse`` model for build provenance (juniper-ml
-    # notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md).
-    "juniper-observability>=0.4.0,<0.5.0",
+    # notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md). 0.4.1 (2026-10-10) is
+    # the security patch: ``configure_sentry``, which canopy calls, no longer
+    # sends frame-local variables, which could hold the real API key.
+    "juniper-observability>=0.4.1,<0.5.0",
     # E-8 boot-time dependency-floor self-check. canopy calls
     # ``enforce_dependency_floors(distribution="juniper-canopy")`` in its FastAPI
     # lifespan (``src/main.py``) to fail loud before binding if any installed
@@ -116,7 +118,13 @@ dependencies = [
     # dead app" class at first boot. Unconditional (the check must always run).
     # 0.5.0 floor: adds ``enforce_auth_posture`` (SEC-F01 / HO-2), the boot-time
     # auth-posture self-check the lifespan calls right after the floor check.
-    "juniper-service-core>=0.5.0,<0.8.0",
+    # 0.7.1 floor (2026-10-10): the security patch (non-ASCII X-API-Key is a 401;
+    # bounded FailedAuthThrottle.check()). canopy's own key compare and throttle
+    # live in src/security.py, so this is consistency with the lock and the
+    # sibling services rather than a fix to canopy's auth path. The floor check
+    # reads the INSTALLED metadata, so an existing editable install keeps
+    # booting until it is reinstalled, and the reinstall upgrades the wheel.
+    "juniper-service-core>=0.7.1,<0.8.0",
     # METRICS-MON R2.2.5 / seed-05: WS frame schema validation. Pinned
     # at the first stable release; pulled in transitively by
     # juniper-cascor-client too, but pinned explicitly here so the
@@ -189,7 +197,13 @@ juniper-data = [
     # tests and what the published metadata permits a consumer to install.
     # Verified from the published wheel, not a checkout: 0.5.0 exports
     # ``validate_npz_contract``; 0.4.x does not. Ceiling left at <0.6.0.
-    "juniper-data-client>=0.5.0,<0.6.0",
+    #
+    # 2026-10-10: ceiling raised <0.6.0 -> <0.7.0 to admit juniper-data-client 0.6.0 (W1.13 of the
+    # juniper-ml recurrence × equities plan). 0.6.0 tightens ``validate_npz_contract`` (W1.4:
+    # finite ``dt``, ``target_dt`` / ``seq_lengths`` checks, float32 ``X`` / ``y`` / ``y_reg``);
+    # the W1.4 downstream census found canopy's fake-vs-real agreement test still passing. The
+    # release train's propagation did not list canopy as a consumer: this pin is in an extra.
+    "juniper-data-client>=0.5.0,<0.7.0",
     "requests>=2.28.0",
 ]
 juniper-cascor = [
