@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, Mock, patch
 import dash
 import pytest
 
+from canopy_constants import DashboardConstants
 from frontend.dashboard_manager import DashboardManager
 
 
@@ -39,32 +40,34 @@ def dashboard_manager():
 class TestThemeToggleHandlers:
     """Test theme toggle callback handlers."""
 
+    # F-CANOPY-001: the toggle returns the FLAG only; the glyph is derived from the
+    # store by ``update_theme_state`` so it is also correct on mount after a reload.
     def test_toggle_dark_mode_handler_light_to_dark(self, dashboard_manager):
-        """Test dark mode toggle returns (True, sun icon) when current is light."""
+        """Toggle from light returns dark; the glyph derives to the sun."""
         result = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=False)
-        assert result[0] is True
-        assert result[1] == "☀️"
+        assert result is True
+        assert dashboard_manager._dark_mode_icon(result) == "☀️"
 
     def test_toggle_dark_mode_handler_dark_to_light(self, dashboard_manager):
-        """Test dark mode toggle returns (False, moon icon) when current is dark."""
+        """Toggle from dark returns light; the glyph derives to the moon."""
         result = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=True)
-        assert result[0] is False
-        assert result[1] == "🌙"
+        assert result is False
+        assert dashboard_manager._dark_mode_icon(result) == "🌙"
 
     def test_toggle_dark_mode_handler_none_to_dark(self, dashboard_manager):
-        """Test dark mode toggle returns (True, sun icon) when current is None."""
+        """An unset store toggles to dark."""
         result = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=None)
-        assert result[0] is True
-        assert result[1] == "☀️"
+        assert result is True
+        assert dashboard_manager._dark_mode_icon(result) == "☀️"
 
     def test_toggle_dark_mode_handler_roundtrip(self, dashboard_manager):
         """Test dark mode toggle roundtrip: False -> True -> False."""
         result1 = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=False)
-        assert result1[0] is True
-        assert result1[1] == "☀️"
-        result2 = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=result1[0])
-        assert result2[0] is False
-        assert result2[1] == "🌙"
+        assert result1 is True
+        assert dashboard_manager._dark_mode_icon(result1) == "☀️"
+        result2 = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=result1)
+        assert result2 is False
+        assert dashboard_manager._dark_mode_icon(result2) == "🌙"
 
     def test_update_theme_state_handler_dark(self, dashboard_manager):
         """Test theme state update for dark mode returns 'dark'."""
@@ -112,14 +115,22 @@ class TestNetworkInfoHandlers:
 
     @patch("requests.get")
     def test_update_network_info_handler_failure(self, mock_get, dashboard_manager):
-        """Test network info update with API failure."""
+        """A generic exception bubbles up through the diagnosable-error
+        path (PR for B.1) → "Network Info: Error" with the exception
+        type embedded in the gray-text detail line. Pre-PR this was the
+        opaque "Unable to fetch network info" message; consumers should
+        now read the panel-prefixed label so a transient rate limit
+        isn't confused with a real backend outage.
+        """
         mock_get.side_effect = Exception("Connection error")
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_network_info_handler(n=1)
 
         assert result is not None
-        assert "Unable to fetch" in str(result)
+        rendered = str(result)
+        assert "Network Info: Error" in rendered
+        assert "Connection error" in rendered  # detail line carries the exception message
 
     @patch("requests.get")
     def test_update_network_info_details_handler_success(self, mock_get, dashboard_manager):
@@ -139,14 +150,18 @@ class TestNetworkInfoHandlers:
 
     @patch("requests.get")
     def test_update_network_info_details_handler_failure(self, mock_get, dashboard_manager):
-        """Test network info details update with failure."""
+        """Generic-exception path for the Network Stats panel — same
+        diagnosable-label contract as the Network Info panel (panel-
+        prefixed label + exception-message detail line)."""
         mock_get.side_effect = Exception("API error")
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_network_info_details_handler(n=1)
 
         assert result is not None
-        assert "Unable to fetch" in str(result)
+        rendered = str(result)
+        assert "Network Stats: Error" in rendered
+        assert "API error" in rendered
 
 
 # =============================================================================
@@ -174,7 +189,7 @@ class TestStatusBarHandlers:
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_unified_status_bar_handler(n_intervals=1)
 
-        assert len(result) == 9
+        assert len(result) == 11  # Stage 2 + F-CANOPY-025: +training-status-store and +live-switch-gate elements
         assert result[3] == "Running"
         assert result[5] == "Output Training"
 
@@ -231,8 +246,8 @@ class TestStatusBarHandlers:
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_unified_status_bar_handler(n_intervals=1)
 
-        assert len(result) == 9
-        assert result[3] == "Error"
+        assert len(result) == 11  # Stage 2 + F-CANOPY-025: +training-status-store and +live-switch-gate elements
+        assert result[3] == "Backend Error"
 
     @patch("requests.get")
     def test_update_unified_status_bar_handler_exception(self, mock_get, dashboard_manager):
@@ -748,9 +763,9 @@ class TestButtonAppearanceHandlers:
             "reset": {"disabled": False, "loading": False, "timestamp": 0},
         }
 
-        result = dashboard_manager._update_button_appearance_handler(button_states=button_states)
+        result = dashboard_manager._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
 
-        assert len(result) == 10  # 5 buttons x 2 (disabled, text)
+        assert len(result) == 11  # 5 buttons x 2 (disabled, text) + apply-dataset disabled
         assert result[0] is False  # start disabled
         assert "▶ Start Training" in result[1]
 
@@ -764,16 +779,16 @@ class TestButtonAppearanceHandlers:
             "reset": {"disabled": False, "loading": False, "timestamp": 0},
         }
 
-        result = dashboard_manager._update_button_appearance_handler(button_states=button_states)
+        result = dashboard_manager._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
 
         assert result[0] is True  # start disabled
         assert "⏳" in result[1]  # loading indicator
 
     def test_update_button_appearance_handler_empty_states(self, dashboard_manager):
         """Test button appearance with empty states."""
-        result = dashboard_manager._update_button_appearance_handler(button_states={})
+        result = dashboard_manager._update_button_appearance_handler(button_states={}, model_key="cascor", dataset_value="spirals")
 
-        assert len(result) == 10
+        assert len(result) == 11  # 5 buttons x 2 (disabled, text) + apply-dataset disabled
         # All should have default values
         assert result[0] is False
 
@@ -1145,7 +1160,13 @@ class TestParameterHandlers:
         assert result == (dash.no_update, dash.no_update)
 
     def test_apply_parameters_handler_with_none_values(self, dashboard_manager):
-        """Test apply parameters handler with None values uses defaults."""
+        """None numeric States refuse the apply — they do NOT become defaults.
+
+        Previously asserted the default-substitution that turned out to be
+        F-CANOPY-017: a numeric input failing HTML5 validity hands Dash
+        ``None``, and defaulting it silently overwrote the operator's live
+        value. See src/tests/integration/test_apply_params_invalid_refused.py.
+        """
         with patch("requests.post") as mock_post:
             mock_response = Mock()
             mock_response.status_code = 200
@@ -1180,11 +1201,101 @@ class TestParameterHandlers:
                     cn_random_cands=None,
                 )
 
-            assert result[0]["nn_learning_rate"] == 0.01  # default
-            assert result[0]["nn_max_hidden_units"] == 1000  # default (TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)
-            assert result[0]["nn_max_total_epochs"] == 1000000  # default (TrainingConstants.DEFAULT_TRAINING_EPOCHS)
-            assert result[0]["nn_multi_node_layers"] is False  # None -> empty list -> False
-            assert result[0]["nn_growth_convergence_threshold"] == 0.001  # default
+            assert result[0] is dash.no_update, "an all-None apply must not write the applied-params store"
+            assert mock_post.call_count == 0, "an all-None apply must not POST /api/set_params"
+            assert "Nothing applied" in result[1], result[1]
+            assert "Learning Rate" in result[1], result[1]
+
+    # ── #2a: 429 Retry-After backoff (the half #345 deferred) ────────────
+    # Before #2a the 429 branch returned immediately, ignoring both the retry
+    # budget and the limiter's ``Retry-After`` header. These pin the new
+    # back-off-and-retry behavior and the bounded/fallback sleep.
+    _APPLY_KW = {
+        "n_clicks": 1,
+        "nn_max_iter": 1000,
+        "nn_max_epochs": 300,
+        "nn_lr": 0.02,
+        "nn_max_hu": 15,
+        "nn_multi_node": [],
+        "nn_growth_trigger": "convergence",
+        "nn_growth_epochs": 50,
+        "nn_growth_conv_thresh": 0.001,
+        "nn_patience": 50,
+        "nn_spiral_rot": 1.5,
+        "nn_spiral_num": 2,
+        "nn_dataset_elem": 1000,
+        "nn_dataset_noise": 0.25,
+        "cn_pool_size": 100,
+        "cn_corr_thresh": 0.001,
+        "cn_selected": 1,
+        "cn_training_complete": "preset_epochs",
+        "cn_training_iter": 500,
+        "cn_training_conv_thresh": 0.0001,
+        "cn_patience": 30,
+        "cn_multi_cand": [],
+        "cn_cand_selection": None,
+        "cn_top_cands": 1,
+        "cn_random_cands": 1,
+    }
+
+    @patch("frontend.dashboard_manager.time.sleep")
+    @patch("requests.post")
+    def test_apply_parameters_handler_429_backs_off_then_succeeds(self, mock_post, mock_sleep, dashboard_manager):
+        """A 429 is retried within the budget (not returned immediately); the next 200 succeeds.
+
+        Also pins the safety cap: even with ``Retry-After: 60`` the sleep is
+        capped at ``DASHBOARD_RETRY_AFTER_MAX_SLEEP_S`` (never the raw value, as
+        this runs on a Dash callback thread).
+        """
+        resp_429 = Mock()
+        resp_429.status_code = 429
+        resp_429.headers = {"Retry-After": "60"}  # far above the cap
+        resp_200 = Mock()
+        resp_200.status_code = 200
+        mock_post.side_effect = [resp_429, resp_200]
+
+        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
+            result = dashboard_manager._apply_parameters_handler(**self._APPLY_KW)
+
+        assert mock_post.call_count == 2  # retried — did NOT bail on the first 429
+        assert result[0]["nn_learning_rate"] == 0.02
+        assert "applied" in result[1].lower()
+        mock_sleep.assert_called_once_with(DashboardConstants.DASHBOARD_RETRY_AFTER_MAX_SLEEP_S)
+
+    @patch("frontend.dashboard_manager.time.sleep")
+    @patch("requests.post")
+    def test_apply_parameters_handler_429_exhausts_retries(self, mock_post, mock_sleep, dashboard_manager):
+        """Persistent 429 returns the rate-limited message only AFTER exhausting retries, not immediately."""
+        resp_429 = Mock()
+        resp_429.status_code = 429
+        resp_429.headers = {"Retry-After": "60"}
+        mock_post.return_value = resp_429
+
+        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
+            result = dashboard_manager._apply_parameters_handler(**self._APPLY_KW)
+
+        assert mock_post.call_count == DashboardConstants.DASHBOARD_SET_PARAMS_MAX_RETRIES  # used the full budget
+        assert mock_sleep.call_count == DashboardConstants.DASHBOARD_SET_PARAMS_MAX_RETRIES - 1  # slept between attempts only
+        assert result[0] is dash.no_update
+        assert "rate limited" in result[1].lower()
+
+    @patch("frontend.dashboard_manager.time.sleep")
+    @patch("requests.post")
+    def test_apply_parameters_handler_429_missing_header_uses_fallback(self, mock_post, mock_sleep, dashboard_manager):
+        """A 429 with no ``Retry-After`` header backs off by the fallback delay, then succeeds."""
+        resp_429 = Mock()
+        resp_429.status_code = 429
+        resp_429.headers = {}  # no Retry-After
+        resp_200 = Mock()
+        resp_200.status_code = 200
+        mock_post.side_effect = [resp_429, resp_200]
+
+        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
+            result = dashboard_manager._apply_parameters_handler(**self._APPLY_KW)
+
+        assert mock_post.call_count == 2
+        assert "applied" in result[1].lower()
+        mock_sleep.assert_called_once_with(DashboardConstants.DASHBOARD_RETRY_AFTER_FALLBACK_S)
 
     @patch("requests.get")
     def test_init_params_from_backend_handler_success(self, mock_get, dashboard_manager):
@@ -1215,10 +1326,10 @@ class TestParameterHandlers:
         assert result[1] == 200  # nn_max_total_epochs
         assert result[5] == "convergence"  # nn_growth_trigger
         assert result[7] == 0.001  # nn_growth_convergence_threshold
-        # NUM_OUTPUTS=28 since canopy#204/205/206; applied dict is the
-        # last element at index 27.
-        assert result[27]["nn_learning_rate"] == 0.01
-        assert result[27]["nn_growth_trigger"] == "convergence"
+        # NUM_OUTPUTS=29 since canopy#204/205/206 + the D-2 dropdown; applied dict is the
+        # last element at index 28.
+        assert result[28]["nn_learning_rate"] == 0.01
+        assert result[28]["nn_growth_trigger"] == "convergence"
 
     def test_init_params_from_backend_handler_already_set(self, dashboard_manager):
         """Test init params from backend when already set."""
@@ -1226,9 +1337,9 @@ class TestParameterHandlers:
 
         result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=current_applied)
 
-        # 28-tuple after canopy#204/205/206 (output_epochs / optimizer_type
+        # 29-tuple after canopy#204/205/206 (output_epochs / optimizer_type
         # / activation_function); mirrors NUM_OUTPUTS in the handler.
-        assert result == (dash.no_update,) * 28
+        assert result == (dash.no_update,) * 29
 
     @patch("requests.get")
     def test_init_params_from_backend_handler_failure(self, mock_get, dashboard_manager):
@@ -1238,7 +1349,7 @@ class TestParameterHandlers:
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-        assert result == (dash.no_update,) * 28
+        assert result == (dash.no_update,) * 29
 
 
 # =============================================================================
@@ -1270,8 +1381,8 @@ class TestInitParamsFromBackendHandlers:
         assert result[1] == 300  # nn_max_epochs
         assert result[4] == []  # nn_multi_node_layers=False -> empty checklist
         assert result[7] == 0.01  # nn_growth_conv_thresh
-        # NUM_OUTPUTS=28 since canopy#204/205/206; applied dict at index 27.
-        assert result[27]["nn_multi_node_layers"] is False
+        # NUM_OUTPUTS=29 (D-2 dropdown at 27); applied dict at index 28.
+        assert result[28]["nn_multi_node_layers"] is False
 
     @patch("requests.get")
     def test_init_params_from_backend_with_partial_state(self, mock_get, dashboard_manager):

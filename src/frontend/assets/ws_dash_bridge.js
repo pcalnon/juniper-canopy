@@ -22,37 +22,61 @@
     var MAX_METRICS = 1000;
     var MAX_CASCADE_ADD = 500;
     var MAX_CANDIDATE_PROGRESS = 500;
-    // CAN-015g (g-4): weight payloads piggyback on metrics events
-    // emitted by g-3's replay session. Each carries base64-encoded
-    // float32 tensors (output + per-unit) so the per-event payload
-    // can be tens of MB on large networks. Cap aggressively so the
-    // browser doesn't OOM on a long replay session — 100 events
-    // covers most playback windows; older entries fall off LRU-style.
+    // CAN-015g (g-4): weight payloads were designed to piggyback on
+    // metrics events emitted by g-3's replay session. None arrive
+    // today: cascor's replay frames carry no weights and canopy's
+    // metrics relay drops the key (F-CANOPY-057). As designed, each
+    // payload carries base64-encoded float32 tensors (output +
+    // per-unit), so one event can be tens of MB on large networks.
+    // Cap aggressively so the browser doesn't OOM on a long replay
+    // session — 100 events covers most playback windows; older
+    // entries fall off LRU-style.
     var MAX_REPLAY_WEIGHTS = 100;
+    // P2-7 follow-up: live dataset-swap events from cascor's
+    // EventEnvelope(type="event", data.event="dataset_swap"). Swaps
+    // are user-initiated and seconds-apart at most; the bound here
+    // is for pathological edge cases (replay storm, stuck drain).
+    // The slow-poll fallback still populates dataset-swap-events-store
+    // every slow-update-interval tick, so a dropped frame here is
+    // recoverable within a few seconds — push is a latency win, not
+    // a correctness contract.
+    var MAX_DATASET_SWAPS = 100;
 
     window._juniperWsDrain = {
         // Bounded ring buffers
         _metricsBuffer: [],           // max MAX_METRICS
-        _stateBuffer: null,           // latest only (single object)
+        _stateBuffer: null,           // latest only (single object); drainState re-wired to ws-state-buffer by N8
         _topologyBuffer: null,        // latest only
         _cascadeAddBuffer: [],        // max MAX_CASCADE_ADD
-        _candidateProgressBuffer: [], // max MAX_CANDIDATE_PROGRESS
+        _candidateProgressBuffer: [], // max MAX_CANDIDATE_PROGRESS; server-side drain removed by N1 — N8 (wave 4) re-wires it
         _replayWeightBuffer: [],      // CAN-015g (g-4): max MAX_REPLAY_WEIGHTS
+        _datasetSwapBuffer: [],       // P2-7 follow-up: max MAX_DATASET_SWAPS
         _connectionStatus: {connected: false, reconnecting: false, mode: "live"},
         // GAP-WS-16: metricsReceived flips true when initial_metrics or the
-        // first metrics frame is delivered, so the REST /api/metrics/history
-        // poll can stay quiet until WS metrics are actually flowing instead
-        // of switching off the moment the socket reports connected. Stored
-        // outside _connectionStatus because websocket_client.js replaces
+        // first metrics frame is delivered. N1 removed the server-side REST
+        // gate that consumed this flag (the sticky gate starved long-lived
+        // tabs when WS frames stopped); the flag stays as connection-state
+        // bookkeeping for N8's liveness-gated fallback. Stored outside
+        // _connectionStatus because websocket_client.js replaces
         // _connectionStatus wholesale on every status change; peekConnectionStatus
         // merges this flag back in so it survives reconnects.
         _metricsReceived: false,
         // GAP-WS-25: same pattern for topology. Cascor only broadcasts
-        // `topology` on cascade_add (network grow events) — a fresh tab opened
-        // mid-training could wait minutes for one. Until the first topology
-        // frame arrives, the REST /api/topology poll keeps running so the
-        // network visualizer paints something. Once a frame arrives, REST quiets.
+        // `topology` on cascade_add (network grow events). N1 removed the
+        // server-side REST gate here too — the tab-gated slow-interval poll
+        // now always runs; this flag stays for N8.
         _topologyReceived: false,
+        // N8 (training-runtime defects plan §4 I-1, posture O1): LIVE frame-arrival
+        // clocks for the liveness-gated poll fallback. Each is set to Date.now()
+        // ONLY when a real frame of that class arrives (metrics/initial_metrics for
+        // _lastMetricsFrameMs, state for _lastStateFrameMs). Unlike the sticky
+        // _metricsReceived / _topologyReceived flags above (set once, never reset —
+        // the N1-retired starvation gate), these are timestamps that AGE: peekLiveness
+        // reports the age, and when it exceeds WS_LIVENESS_WINDOW_MS the stream reads
+        // stale and the REST poll resumes. 0 = "no frame of this class seen yet"
+        // (treated as stale → poll runs), so a fresh tab is never starved.
+        _lastMetricsFrameMs: 0,
+        _lastStateFrameMs: 0,
         _gen: 0,                      // drain generation counter
 
         // ── Drain methods (called by Dash clientside callbacks) ──
@@ -87,9 +111,11 @@
             return events;
         },
 
-        // CAN-015g (g-4): Drain replay weight payloads. Each entry is
-        // a Phase 6E V2 ``weights`` block extracted from a replay
-        // ``epoch_end`` event (see g-3 emitter):
+        // CAN-015g (g-4): Drain replay weight payloads. Each entry
+        // would be a Phase 6E V2 ``weights`` block split off a replay
+        // ``epoch_end`` metrics event by the handler below. No emitter
+        // attaches one today (F-CANOPY-057), so there is nothing to
+        // drain yet. The designed shape:
         //   { sample_index, epoch, output_weights, output_bias,
         //     hidden_units }
         // Tensors are still base64-encoded float32 envelopes
@@ -99,6 +125,18 @@
         drainReplayWeights: function() {
             var events = this._replayWeightBuffer;
             this._replayWeightBuffer = [];
+            return events;
+        },
+
+        // P2-7 follow-up: drain WS-pushed dataset_swap events. Each
+        // entry is the §3.9-shaped swap dict (timestamp, before_cfg,
+        // after_cfg, arch_changes, pre/post_swap_snapshot_id) pulled
+        // off cascor's EventEnvelope(event="dataset_swap"). Consumer
+        // (server-side dash callback) merges into the existing
+        // dataset-swap-events-store with dedupe.
+        drainDatasetSwaps: function() {
+            var events = this._datasetSwapBuffer;
+            this._datasetSwapBuffer = [];
             return events;
         },
 
@@ -113,6 +151,23 @@
                 mode: status.mode || "live",
                 metricsReceived: !!this._metricsReceived,
                 topologyReceived: !!this._topologyReceived
+            };
+        },
+
+        // N8 (posture O1): report the age in ms of the most recent metrics / state
+        // frame (Date.now() - last-arrival), or null when none has arrived yet. The
+        // liveness clientside callback compares these against WS_LIVENESS_WINDOW_MS
+        // to decide whether the WS path is fresh enough to feed the tiles/state (and
+        // suppress the REST poll). This is a browser-local delta — clock-skew-free —
+        // and, being derived from real frame arrivals, can never latch "live": if the
+        // stream goes quiet the age keeps growing and the poll re-engages. Contrast
+        // peekConnectionStatus's sticky metricsReceived/topologyReceived, which the
+        // liveness gate deliberately does NOT consult.
+        peekLiveness: function() {
+            var now = Date.now();
+            return {
+                metrics_age_ms: (this._lastMetricsFrameMs > 0) ? (now - this._lastMetricsFrameMs) : null,
+                state_age_ms: (this._lastStateFrameMs > 0) ? (now - this._lastStateFrameMs) : null
             };
         }
     };
@@ -165,9 +220,10 @@
         var drain = window._juniperWsDrain;
 
         window.cascorWS.on("metrics", function(data) {
-            // CAN-015g (g-4): replay V2 events carry an extra
-            // ``weights`` block on sample-boundary epochs (set by
-            // g-3's _ReplaySession._emit_frame). Split it off into
+            // CAN-015g (g-4): replay V2 events were designed to carry
+            // an extra ``weights`` block on sample-boundary epochs
+            // (from g-3's _ReplaySession._emit_frame, which sets none
+            // today; F-CANOPY-057). Split it off into
             // the dedicated weight buffer so the metrics ring stays
             // light — a 1000-event metrics buffer with multi-MB
             // weight payloads attached to each entry would balloon
@@ -193,6 +249,8 @@
             drain._metricsBuffer.push(data);
             // GAP-WS-16: first live metrics frame arrives — REST poll can quiet down.
             drain._metricsReceived = true;
+            // N8: stamp the live arrival clock for the liveness gate.
+            drain._lastMetricsFrameMs = Date.now();
         });
 
         // GAP-WS-16: initial_metrics burst — server delivers up to N most-recent
@@ -211,18 +269,47 @@
                 drain._metricsBuffer.push(data.metrics[i]);
             }
             drain._metricsReceived = true;
+            // N8: an initial_metrics burst is a live delivery — stamp the clock.
+            drain._lastMetricsFrameMs = Date.now();
         });
 
-        window.cascorWS.on("state_change", function(data) {
-            // Latest only — overwrites previous
+        // N8: the server broadcasts training-state frames as type "state"
+        // (websocket_manager.broadcast_state_change → {"type": "state", ...},
+        // the relay's forward of cascor's "state" frame, and main.py's on-connect
+        // and snapshot-restore sends). The prior handler registered on the
+        // never-emitted "state_change" type, so _stateBuffer was dead — N8 wires it
+        // to the real type so ws-state-buffer feeds the training-state store.
+        window.cascorWS.on("state", function(data) {
+            // Latest only — overwrites previous. The payload is either the flat
+            // training-state dict (broadcast_state_change / on-connect) or a wrapper
+            // carrying it under `training_state` (snapshot-restore); the server-side
+            // consumer unwraps either shape.
             drain._stateBuffer = data;
+            // N8: stamp the live arrival clock for the liveness gate.
+            drain._lastStateFrameMs = Date.now();
         });
 
         window.cascorWS.on("topology", function(data) {
             // Latest only — overwrites previous
             drain._topologyBuffer = data;
             // GAP-WS-25: first topology frame arrives — REST poll can quiet down.
-            drain._topologyReceived = true;
+            //
+            // Only flag completeness for structurally-complete payloads. A
+            // count-only stub from a pre-fix cascor cascade_add broadcast
+            // (where data.hidden_units is an integer count) must NOT
+            // suppress the REST fallback — otherwise the topology view
+            // freezes on the initial 0-hidden snapshot for the rest of the
+            // session. Mirrors CascorServiceAdapter._is_complete_topology
+            // on the Python side.
+            var hu = data && data.hidden_units;
+            var nodes = data && data.nodes;
+            var isComplete = data && (
+                Array.isArray(hu) ||
+                (data.input_units !== undefined && Array.isArray(nodes))
+            );
+            if (isComplete) {
+                drain._topologyReceived = true;
+            }
         });
 
         window.cascorWS.on("cascade_add", function(data) {
@@ -230,6 +317,21 @@
                 drain._cascadeAddBuffer.shift();
             }
             drain._cascadeAddBuffer.push(data);
+        });
+
+        // P2-7 follow-up: cascor broadcasts dataset_swap events under
+        // the generic "event" envelope type with a discriminator on
+        // data.event. We split here so the swap path can pivot the
+        // payload (data.swap) into the dedicated dataset_swap buffer
+        // without competing with other future event subtypes.
+        window.cascorWS.on("event", function(data) {
+            if (!data || data.event !== "dataset_swap" || !data.swap) {
+                return;
+            }
+            if (drain._datasetSwapBuffer.length >= MAX_DATASET_SWAPS) {
+                drain._datasetSwapBuffer.shift();
+            }
+            drain._datasetSwapBuffer.push(data.swap);
         });
 
         window.cascorWS.on("candidate_progress", function(data) {

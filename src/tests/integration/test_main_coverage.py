@@ -991,11 +991,18 @@ class TestSnapshotCreateDetailed:
 
     @pytest.mark.integration
     def test_create_snapshot_returns_size(self, client):
-        """Created snapshot should have size_bytes."""
+        """Created snapshot reports its size — and in demo mode that size is zero.
+
+        X7 PR 2. This asserted ``size_bytes > 0`` under the demo-mode client fixture, so
+        it was pinning the invented value: demo mode writes no HDF5 file and used to
+        report ~1–1.5 MB anyway. The field must still be present (consumers read it); it
+        must simply be honest, and the row must say it is simulated.
+        """
         response = client.post("/api/v1/snapshots", params={"name": "size_test"})
         data = response.json()
         assert "size_bytes" in data
-        assert data["size_bytes"] > 0
+        assert data["simulated"] is True, "the demo-mode client must produce a marked snapshot"
+        assert data["size_bytes"] == 0, f"demo snapshot invented {data['size_bytes']} bytes for a file it never wrote"
 
     @pytest.mark.integration
     def test_create_snapshot_returns_path(self, client):
@@ -1038,11 +1045,11 @@ class TestHealthEndpointComprehensive:
     """Test /api/health endpoint comprehensively."""
 
     @pytest.mark.integration
-    def test_health_status_healthy(self, client):
-        """Health should report healthy status."""
+    def test_health_status_ok(self, client):
+        """Health should report ok status (API-01: normalized across services)."""
         response = client.get("/api/health")
         data = response.json()
-        assert data["status"] == "healthy"
+        assert data["status"] == "ok"
 
     @pytest.mark.integration
     def test_health_has_timestamp(self, client):

@@ -5,10 +5,10 @@
 # Application:   juniper_canopy
 # File Name:     lockfile-update.yml
 # Author:        Paul Calnon
-# Version:       0.1.0
+# Version:       0.1.1
 #
 # Date Created:  2026-03-02
-# Last Modified: 2026-03-02
+# Last Modified: 2026-10-08
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-2026 Paul Calnon
@@ -29,9 +29,42 @@
 #    targeting (PRs targeting these branches still trigger; the regen pushes to
 #    the PR head branch, never to main/develop directly).
 #
+#    Dependabot caveat (2026-07-27): Dependabot-triggered runs use the
+#    Dependabot secret store ("Secret source: Dependabot"), so the repo-scoped
+#    CROSS_REPO_DISPATCH_TOKEN is EMPTY there and the checkout hard-failed on
+#    every dependabot/pip/** push (runs 29749713997 / 29866415598 /
+#    30274100485). The token-availability gate below turns that arm into a
+#    loud green no-op (the Lockfile Freshness CI gate still enforces staleness)
+#    until the owner registers the same PAT under Settings -> Secrets ->
+#    Dependabot, which re-enables full auto-regen for Dependabot pushes with
+#    no further workflow change. A missing PAT on a NON-Dependabot run still
+#    fails loudly (secret misconfiguration must not pass silently).
+#    The PAT has been registered there since 2026-07-30, so Dependabot pushes
+#    regenerate too; the commit step explains the "[dependabot skip]" tag.
+#
+#    required_signatures (2026-08-14, juniper-ml#1099): the 2026-08-12 branch-
+#    protection normalization made every repo reject UNSIGNED commits, and a
+#    local `git commit` on a runner is unsigned -- so this lane's regen commit
+#    turned every branch it touched UNMERGEABLE (an unsigned commit anywhere in
+#    the history blocks the merge; squash does not rescue it). The regen now
+#    lands through the GitHub API (createCommitOnBranch), which GitHub signs.
+#    CROSS_REPO_DISPATCH_TOKEN is still the identity, so the CI re-trigger
+#    property is unchanged. Live repro: juniper-cascor#518, where 20/20 checks
+#    were green and the PR was BLOCKED solely by this lane's commit.
+#
+#    release/** exclusion (same change): a release-train proposal PR must stay
+#    single-purpose -- version bump + CHANGELOG move. Its pyproject.toml edit is
+#    a version bump that cannot change dependency resolution, but it matched the
+#    `paths: [pyproject.toml]` filter and dragged unrelated upstream drift into
+#    the release PR. The required Lockfile Freshness gate is constraint-mode and
+#    does NOT fail on newer-upstream-exists, so skipping release/** leaves it
+#    green.
+#
 # References:
 #    - Step 7.5.2: Dependency Update Workflow (POLYREPO_MIGRATION_PLAN.md)
 #    - notes/LOCKFILE_FRESHNESS_REDESIGN_2026-05-04.md (juniper-ml)
+#    - juniper-ml#1099 (runner-commit signing), juniper-ml#1096 (propose.py
+#      create_signed_commit -- the reference implementation)
 #####################################################################################################################################################################################################
 
 name: Update Lockfile
@@ -53,11 +86,37 @@ jobs:
     runs-on: ubuntu-latest
     # Skip PRs from forks — they cannot push back to the head branch with our
     # token, and we do not accept third-party PRs in this single-author repo.
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    #
+    # release/** is excluded (juniper-ml#1099): a release-train proposal bumps
+    # pyproject.toml's version, which matches the paths filter but cannot change
+    # dependency resolution -- regenerating there only smuggles unrelated
+    # upstream drift into a PR that must stay single-purpose.
+    if: |
+      github.event_name == 'push' ||
+      (github.event.pull_request.head.repo.full_name == github.repository
+        && !startsWith(github.head_ref, 'release/'))
 
     steps:
+      - name: Gate on CROSS_REPO_DISPATCH_TOKEN availability
+        id: gate
+        env:
+          # Secrets are not readable in job/step `if:` expressions, so surface
+          # presence (never the value) through env for the shell to branch on.
+          HAVE_PAT: ${{ secrets.CROSS_REPO_DISPATCH_TOKEN != '' }}
+        run: |
+          if [[ "${HAVE_PAT}" == "true" ]]; then
+            echo "proceed=true" >> "${GITHUB_OUTPUT}"
+          elif [[ "${{ github.actor }}" == "dependabot[bot]" ]]; then
+            echo "::notice::CROSS_REPO_DISPATCH_TOKEN is not available to Dependabot-triggered runs (Dependabot secret store). Skipping auto-regen; the Lockfile Freshness CI gate still enforces staleness. Register the PAT under Settings -> Secrets -> Dependabot to re-enable."
+            echo "proceed=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::error::CROSS_REPO_DISPATCH_TOKEN is missing for a non-Dependabot run — secret misconfiguration."
+            exit 1
+          fi
+
       - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        if: steps.gate.outputs.proceed == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           token: ${{ secrets.CROSS_REPO_DISPATCH_TOKEN }}
           # On pull_request, check out the PR head branch (not the merge ref)
@@ -67,14 +126,17 @@ jobs:
           ref: ${{ github.head_ref || github.ref }}
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        if: steps.gate.outputs.proceed == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.14"
 
       - name: Install uv
+        if: steps.gate.outputs.proceed == 'true'
         run: pip install uv==0.11.8
 
       - name: Regenerate requirements.lock
+        if: steps.gate.outputs.proceed == 'true'
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - Regenerate Lockfile                 ║"
@@ -91,22 +153,71 @@ jobs:
             --upgrade \
             -o requirements.lock
 
-      - name: Commit updated lockfile
+      # The regen commit is created through the GitHub API rather than by a
+      # local `git commit` + `git push`, because GitHub SIGNS API-created
+      # commits and the repo now enforces required_signatures (juniper-ml#1099).
+      # CROSS_REPO_DISPATCH_TOKEN stays the identity so the resulting commit
+      # still re-triggers CI (GITHUB_TOKEN would not).
+      - name: Commit updated lockfile (GitHub-signed, via API)
+        if: steps.gate.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_DISPATCH_TOKEN }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add requirements.lock
-          if git diff --cached --quiet; then
+          set -euo pipefail
+
+          if git diff --quiet -- requirements.lock; then
             echo "::notice::Lockfile already up to date — no commit needed"
-          else
-            # Pick a commit message tag that matches the trigger so the audit
-            # trail reads naturally. The "[dependabot skip]" tag also keeps
-            # Dependabot from rebasing on top of our regen.
-            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-              MSG="chore(deps): auto-regenerate requirements.lock after pyproject change"
-            else
-              MSG="[dependabot skip] Update requirements.lock"
-            fi
-            git commit -m "$MSG"
-            git push
+            exit 0
           fi
+
+          # Pick a commit message that matches the trigger so the audit trail
+          # reads naturally. "[dependabot skip]" does NOT stop Dependabot
+          # rebasing; it does the opposite. Dependabot ignores a commit carrying
+          # it when deciding whether someone else edited its branch, so it KEEPS
+          # rebasing and may force-push over (erase) this regen, as it erased
+          # b63f211e on canopy#709 (GitHub Docs, "Allowing Dependabot to rebase
+          # and force push over extra commits"). That is deliberate: each rebase
+          # is a push to dependabot/pip/**, which re-runs this regen (the PAT
+          # has been in the Dependabot secret store since 2026-07-30). Untagged,
+          # this commit would stop Dependabot rebasing and leave its PR stuck
+          # behind main under the strict up-to-date ruleset. The required
+          # Lockfile Freshness check still fails a PR whose lock is stale.
+          # juniper-data, -cascor, -data-client, -cascor-client and
+          # -cascor-worker tag their regen commit the same way.
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            MSG="chore(deps): auto-regenerate requirements.lock after pyproject change"
+          else
+            MSG="[dependabot skip] Update requirements.lock"
+          fi
+
+          # expectedHeadOid makes this a compare-and-swap: if anything landed on
+          # the branch since checkout, the mutation fails loudly rather than
+          # clobbering it (the old `git push` had the same protection).
+          HEAD_OID=$(git rev-parse HEAD)
+
+          jq -n \
+            --arg repo "${GITHUB_REPOSITORY}" \
+            --arg branch "${BRANCH}" \
+            --arg oid "${HEAD_OID}" \
+            --arg msg "${MSG}" \
+            --arg contents "$(base64 -w0 requirements.lock)" \
+            '{query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
+              variables: {input: {
+                branch: {repositoryNameWithOwner: $repo, branchName: $branch},
+                message: {headline: $msg},
+                expectedHeadOid: $oid,
+                fileChanges: {additions: [{path: "requirements.lock", contents: $contents}]}
+              }}}' > /tmp/lockfile-commit.json
+
+          gh api graphql --input /tmp/lockfile-commit.json > /tmp/lockfile-commit-result.json
+
+          if jq -e '.errors' /tmp/lockfile-commit-result.json > /dev/null; then
+            echo "::error::createCommitOnBranch failed — lockfile NOT committed:"
+            jq '.errors' /tmp/lockfile-commit-result.json
+            exit 1
+          fi
+
+          jq -r '"Signed lockfile commit: " + .data.createCommitOnBranch.commit.url' \
+            /tmp/lockfile-commit-result.json

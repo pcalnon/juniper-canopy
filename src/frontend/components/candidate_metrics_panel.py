@@ -37,8 +37,8 @@
 # COMPLETED:
 #
 #####################################################################################################################################################################################################
-import time
-from typing import Any, Dict
+import json
+from typing import Any, Dict, List, Optional
 
 import dash
 import dash_bootstrap_components as dbc
@@ -46,12 +46,29 @@ import plotly.graph_objects as go
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
+from canopy_constants import BackendConstants, DashboardConstants
+from frontend.internal_api import internal_api_headers
 from settings import get_settings
 
 from ..base_component import BaseComponent, create_empty_plot
 
-# Maximum number of historical pool entries to retain in memory
-MAX_POOL_HISTORY_ENTRIES = 20
+# Maximum number of historical pool entries retained. F-CANOPY-036 moved the
+# accumulation server-side, so the cap now lives with the accumulator and this is
+# a re-export -- the panel and the backend cannot disagree about how much history
+# exists, and the existing import path keeps working.
+MAX_POOL_HISTORY_ENTRIES = BackendConstants.MAX_POOL_HISTORY_ENTRIES
+
+# F-CANOPY-035: the dashboard-level metrics-history store (owned by the metrics
+# panel; fed by the liveness-gated /api/metrics/history poll and the WS append
+# path). The candidate loss figure consumes it instead of adding a poller.
+SHARED_METRICS_STORE_ID = "metrics-panel-metrics-store"
+
+# F-CANOPY-053: keys of an ``/api/state`` payload that change on every call while the
+# state itself does not. Service mode stamps ``timestamp`` per request, and recomputes
+# ``stale_age_seconds`` per request while the upstream is unreachable (main.py
+# ``get_state``). No consumer of the training-state store reads either key, so a payload
+# that differs from the store only in these is not a change and is not written.
+_VOLATILE_STATE_KEYS = frozenset({"timestamp", "stale_age_seconds"})
 
 
 class CandidateMetricsPanel(BaseComponent):
@@ -80,8 +97,10 @@ class CandidateMetricsPanel(BaseComponent):
         _settings = get_settings()
         self._api_base_url = f"http://127.0.0.1:{_settings.server.port}"
 
-        # Update interval (milliseconds)
-        self.update_interval = config.get("update_interval", 1000)
+        # Update interval (milliseconds). F-CANOPY-053: the default is a named, measured
+        # period. Read ``CANDIDATE_STATE_POLL_INTERVAL_MS`` before lowering it: at 1000 ms
+        # none of this panel's store writes after mount was applied.
+        self.update_interval = config.get("update_interval", DashboardConstants.CANDIDATE_STATE_POLL_INTERVAL_MS)
 
         self.logger.info(f"CandidateMetricsPanel initialized (interval={self.update_interval}ms)")
 
@@ -231,18 +250,66 @@ class CandidateMetricsPanel(BaseComponent):
         # PERF-CN-01: prevent_initial_call=False — must fetch initial state on mount
         # so the candidate panel populates immediately rather than waiting for the
         # first interval tick.
+        # F-CANOPY-036: the pool-history store rides THIS callback rather than a
+        # client-side append of its own. It costs no new poller and no new renderer
+        # slot (the F-CANOPY-027 rule) — one tab-gated tick now carries both the
+        # state and the history the server accumulated for it.
+        #
+        # F-CANOPY-053 (provisional id): AT A 1000 ms TICK, NOT ONE OF THIS CALLBACK'S
+        # WRITES AFTER MOUNT WAS APPLIED. Measured on 9bffaba1, every response carried a
+        # new state (27 of 27 at idle, 34 of 34 across a live candidate phase), yet the
+        # renderer held one value, so the badge read ``Inactive`` while ``/api/state``
+        # said ``Training``. The next tick re-requested the callback before the previous
+        # response was applied; dash-renderer evicts a ``watched`` entry when the same
+        # callback is requested again (dash_renderer.dev.js:3027) and then discards its
+        # response (:2698). That is F-CANOPY-035's mechanism. The repair has three parts:
+        #
+        #  1. The tick is ``CANDIDATE_STATE_POLL_INTERVAL_MS`` (10 s), long enough for a
+        #     response to land before the next request. That constant carries the
+        #     measured dose-response, and the reason this is a period rather than
+        #     #613's ``running=`` guard (this lane is tab-gated).
+        #  2. An unchanged state is not rewritten. ``/api/state`` stamps a fresh
+        #     ``timestamp`` on every call, so the store used to change on every tick
+        #     and re-fire its three Input consumers. The store now rides here as State,
+        #     in the F-CANOPY-039 shape, and a payload that differs from it only in
+        #     ``_VOLATILE_STATE_KEYS`` returns ``no_update``.
+        #  3. A failed fetch holds the last good state. ``_fetch_training_state`` used to
+        #     return ``{}`` on any failure, which the badge renders as ``Inactive``. It
+        #     now returns ``None``, exactly as ``_fetch_pool_history`` does, and ``None``
+        #     maps to ``no_update``.
         @app.callback(
-            Output(f"{self.component_id}-training-state-store", "data"),
+            [
+                Output(f"{self.component_id}-training-state-store", "data"),
+                Output(f"{self.component_id}-pool-history-store", "data"),
+            ],
             [
                 Input(f"{self.component_id}-update-interval", "n_intervals"),
                 Input("visualization-tabs", "active_tab"),
             ],
+            [
+                State(f"{self.component_id}-pool-history-store", "data"),
+                # F-CANOPY-053: State (never an Input). This is the callback's own
+                # Output, here only so an unchanged state can be compared and
+                # suppressed. As an Input it would re-trigger this callback on its own
+                # write. The order of the two States is the order of the parameters.
+                State(f"{self.component_id}-training-state-store", "data"),
+            ],
             prevent_initial_call=False,
         )
-        def fetch_training_state(n_intervals, active_tab):
+        def fetch_training_state(n_intervals, active_tab, pool_history, current_state=None):
             if active_tab != "candidates":
-                return dash.no_update
-            return self._fetch_training_state()
+                return dash.no_update, dash.no_update
+            history_out = self._fetch_pool_history()
+            if history_out is None or history_out == (pool_history or []):
+                # Unreachable server, or nothing new: hold the last-known-good store
+                # and do not re-fire the history's consumers on an identical write
+                # (Stage 2's no-op-write rule).
+                history_out = dash.no_update
+            state_out = self._fetch_training_state()
+            if state_out is None or self._state_unchanged(state_out, current_state):
+                # F-CANOPY-053: the same two rules, now applied to the state store.
+                state_out = dash.no_update
+            return state_out, history_out
 
         # ── Update status display ──
         # PERF-CN-01: prevent_initial_call=False — renders default "Inactive" badge
@@ -313,15 +380,67 @@ class CandidateMetricsPanel(BaseComponent):
         # ── Update candidate loss plot ──
         # PERF-CN-01: prevent_initial_call=False — must render an initial empty
         # figure on mount; theme-aware so it must redraw when theme changes too.
+        # F-CANOPY-052: ``training-state-store`` is a STATE here, never an Input, and
+        # that is the whole fix. It used to be an Input, and it evicted this callback
+        # roughly once a second.
+        #
+        # ``fetch_training_state`` above writes that store off
+        # ``{component_id}-update-interval`` (period 1000 ms when this was measured,
+        # ``self.update_interval``) and returned ``self._fetch_training_state()``
+        # UNCONDITIONALLY on both of its branches while the candidates tab was active.
+        # ``/api/state`` carries a per-call ``timestamp``, so the value written was
+        # genuinely DIFFERENT every tick -- the no-op-write suppression that protects
+        # other stores could not bite. (F-CANOPY-053 later changed both facts: the
+        # period is now ``CANDIDATE_STATE_POLL_INTERVAL_MS`` and a timestamp-only change
+        # is no longer written. The demotion below stays right regardless, since a State
+        # never requests anything and so can never evict.)
+        #
+        # So this callback was re-``requested`` at ~1 Hz under one and the same
+        # ``getUniqueIdentifier``, and dash_renderer.dev.js:3027 evicts the in-flight
+        # entry from ``watched`` while :2698 discards its response on arrival. That is
+        # F-CANOPY-035's mechanism exactly, one callback downstream of the store
+        # F-CANOPY-035 repaired -- not, as first recorded, a separate defect that the
+        # permanently-empty store had been masking.
+        #
+        # Measured on the live leg, one variable, ``setProps`` on the panel interval's
+        # ``disabled`` and nothing else (juniper-ml
+        # ``util/ad-hoc/2026-09-11_f052_trigger_eviction_test.py``):
+        #     tick running  -> the figure rendered **1 of 3**
+        #     tick stopped  -> the figure rendered **3 of 3**
+        # and on every non-render the wire census recorded ZERO responses naming this
+        # output, against 79-88 naming others.
+        #
+        # Demoting the trigger rather than the work is this repo's standing rule and
+        # its precedent: F-CANOPY-039's topology rebuild went 0/11 -> 11/11 on exactly
+        # this change. A server-side guard would NOT have helped -- the round trip has
+        # already happened by the time a handler could decline, and the eviction has
+        # already been booked.
+        #
+        # Nothing is lost by the demotion. ``state`` feeds only the fallback branch in
+        # ``update_loss_plot``, which exists for a backend that supplies
+        # ``epochs``/``losses``/``phases`` -- and F-CANOPY-035 established that
+        # ``/api/state`` never carries those keys in any lane. So the Input triggered a
+        # re-render once a second for a value that could not change what is drawn.
         @app.callback(
             Output(f"{self.component_id}-loss-plot", "figure"),
             [
-                Input(f"{self.component_id}-training-state-store", "data"),
                 Input("theme-state", "data"),
+                # F-CANOPY-035: the per-epoch candidate losses live in the shared
+                # metrics-history store -- NOT in /api/state, which never carries
+                # epochs/losses/phases in any lane, so the figure was structurally
+                # empty. Consuming the existing store adds no poller (the
+                # F-CANOPY-027 rule). This store IS identity-suppressed, so it fires
+                # this callback only when the plotted data actually changes.
+                Input(SHARED_METRICS_STORE_ID, "data"),
             ],
+            State(f"{self.component_id}-training-state-store", "data"),
             prevent_initial_call=False,
         )
-        def update_loss_plot(state, theme):
+        def update_loss_plot(theme, history=None, state=None):
+            series = self._candidate_series_from_history(history)
+            if series:
+                return self._create_candidate_loss_figure(series, theme=theme or "light")
+            # Fallback: the state-store shape, should a backend ever provide it.
             return self._create_candidate_loss_figure(state, theme=theme or "light")
 
         # ── Toggle pool details collapse ──
@@ -340,44 +459,19 @@ class CandidateMetricsPanel(BaseComponent):
                 return new_state, "▼" if new_state else "▶"
             return is_open, "▼"
 
-        # ── Update pool history ──
-        # PERF-CN-01: prevent_initial_call=True — only needs to react when
-        # training-state-store changes; on mount the history is already empty.
-        @app.callback(
-            Output(f"{self.component_id}-pool-history-store", "data"),
-            Input(f"{self.component_id}-training-state-store", "data"),
-            State(f"{self.component_id}-pool-history-store", "data"),
-            prevent_initial_call=True,
-        )
-        def update_pool_history(state, history):
-            if not state:
-                return history or []
-
-            pool_status = state.get("candidate_pool_status", "Inactive")
-            current_epoch = state.get("current_epoch", 0)
-
-            if pool_status != "Inactive":
-                pool_snapshot = {
-                    "epoch": current_epoch,
-                    "status": pool_status,
-                    "phase": state.get("candidate_pool_phase", "Idle"),
-                    "size": state.get("candidate_pool_size", 0),
-                    "top_candidate_id": state.get("top_candidate_id", ""),
-                    "top_candidate_score": state.get("top_candidate_score", 0.0),
-                    "second_candidate_id": state.get("second_candidate_id", ""),
-                    "second_candidate_score": state.get("second_candidate_score", 0.0),
-                    "pool_metrics": state.get("pool_metrics", {}),
-                    "timestamp": time.time(),
-                }
-
-                current_history = history or []
-                existing = next((p for p in current_history if p.get("epoch") == current_epoch), None)
-
-                if not existing:
-                    current_history = [pool_snapshot] + current_history[: MAX_POOL_HISTORY_ENTRIES - 1]
-                    return current_history
-
-            return history or []
+        # ── Pool history ──
+        # F-CANOPY-036: the client-side ``update_pool_history`` append lived here.
+        # It took ``training-state-store`` as its Input and rebuilt the list in the
+        # browser, so dash-renderer executed it with the store's CURRENT value (or
+        # superseded the queued trigger outright) whenever the ~1 Hz feeder rewrote
+        # the store first -- making any pool state shorter-lived than the promotion
+        # delay unrecordable. Measured: zero cards across five training runs / ~20
+        # candidate phases, while the SAME store's sibling consumers provably rendered
+        # live pool values in those runs.
+        #
+        # The accumulation is now server-side, in ``TrainingState.update_state`` under
+        # the state lock, and ``fetch_training_state`` above carries it down. There is
+        # no longer a client-side writer of ``-pool-history-store`` to race.
 
         # ── Render pool history ──
         # PERF-CN-01: prevent_initial_call=False — renders empty history section
@@ -405,18 +499,65 @@ class CandidateMetricsPanel(BaseComponent):
 
     # ── Data Fetching ──
 
-    def _fetch_training_state(self) -> Dict[str, Any]:
-        """Fetch training state from backend API."""
+    def _fetch_training_state(self) -> Optional[Dict[str, Any]]:
+        """Fetch training state from backend API.
+
+        Returns ``None`` on any failure -- a non-200, a transport error, or a payload
+        that is not a JSON object -- so the caller can hold the last-known-good store
+        (F-CANOPY-053). It used to return ``{}``, which the status badge renders as
+        ``Inactive``, so one transient hiccup blanked a live candidate phase. Same
+        contract as ``_fetch_pool_history`` below.
+        """
         import requests
 
         try:
-            response = requests.get(self._api_url("/api/state"), timeout=2)
+            response = requests.get(self._api_url("/api/state"), timeout=2, headers=internal_api_headers())
             if response.status_code == 200:
-                data: Dict[str, Any] = response.json()
-                return data
+                data = response.json()
+                if isinstance(data, dict):
+                    return data
         except Exception:
             self.logger.debug("Failed to fetch training state")
-        return {}
+        return None
+
+    @staticmethod
+    def _state_unchanged(fetched: Dict[str, Any], current: Any) -> bool:
+        """Whether ``fetched`` matches the store's ``current`` value, ignoring
+        ``_VOLATILE_STATE_KEYS`` (F-CANOPY-053).
+
+        Compared canonically (sorted keys), as the F-CANOPY-039 topology guard does. A
+        ``current`` that is ``None`` or not a dict means "no previous value" and never
+        suppresses, and a comparison that fails falls through to the write: a
+        suppressed real update is far worse than a redundant one.
+        """
+        if not isinstance(current, dict):
+            return False
+        try:
+            fetched_canon = json.dumps({k: v for k, v in fetched.items() if k not in _VOLATILE_STATE_KEYS}, sort_keys=True, default=str)
+            current_canon = json.dumps({k: v for k, v in current.items() if k not in _VOLATILE_STATE_KEYS}, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            return False
+        return fetched_canon == current_canon
+
+    def _fetch_pool_history(self) -> Optional[list]:
+        """Fetch the server-accumulated candidate-pool history (F-CANOPY-036).
+
+        Returns ``None`` on any failure so the caller can hold the last-known-good
+        store rather than blanking a populated history on one transient hiccup —
+        the same last-known-good posture the metrics/topology handlers take.
+        """
+        import requests
+
+        try:
+            response = requests.get(self._api_url("/api/v1/candidates/pool-history"), timeout=2, headers=internal_api_headers())
+            if response.status_code == 200:
+                payload = response.json()
+                history = payload.get("history") if isinstance(payload, dict) else payload
+                if isinstance(history, list):
+                    return history
+        except Exception:
+            self.logger.debug("Failed to fetch candidate pool history")
+        return None
 
     # ── Display Builders ──
 
@@ -493,7 +634,7 @@ class CandidateMetricsPanel(BaseComponent):
                                     html.Td(
                                         "No candidates",
                                         colSpan=3,
-                                        style={"padding": "10px", "textAlign": "center", "color": "#888"},
+                                        style={"padding": "10px", "textAlign": "center", "color": "var(--text-muted)"},
                                     )
                                 ]
                             )
@@ -547,6 +688,43 @@ class CandidateMetricsPanel(BaseComponent):
                 pool_metrics_table,
             ]
         )
+
+    @staticmethod
+    def _candidate_series_from_history(history: Any) -> Dict[str, List[Any]]:
+        """Derive the ``epochs`` / ``losses`` / ``phases`` series the loss figure
+        consumes from the shared metrics-history store (F-CANOPY-035).
+
+        Entries are the dashboard's nested shape (``{"epoch", "metrics": {"loss"},
+        "phase"}`` -- produced by both the demo backend and the cascor adapter's
+        ``_to_dashboard_metric``); a flat ``loss`` / ``train_loss`` +
+        ``cascade_phase`` entry is tolerated too. Only candidate-phase entries with
+        an epoch and a numeric loss are kept; an empty dict means "nothing to plot".
+        """
+        if not isinstance(history, list):
+            return {}
+        epochs: List[Any] = []
+        losses: List[float] = []
+        phases: List[str] = []
+        for entry in history:
+            if not isinstance(entry, dict):
+                continue
+            phase = str(entry.get("phase") or entry.get("cascade_phase") or "")
+            if "candidate" not in phase.lower():
+                continue
+            raw_metrics = entry.get("metrics")
+            nested: Dict[str, Any] = raw_metrics if isinstance(raw_metrics, dict) else {}
+            loss = nested.get("loss")
+            if loss is None:
+                loss = entry.get("loss", entry.get("train_loss"))
+            epoch = entry.get("epoch")
+            if epoch is None or isinstance(loss, bool) or not isinstance(loss, (int, float)):
+                continue
+            epochs.append(epoch)
+            losses.append(float(loss))
+            phases.append(phase)
+        if not epochs:
+            return {}
+        return {"epochs": epochs, "losses": losses, "phases": phases}
 
     def _create_candidate_loss_figure(self, state: Dict[str, Any] = None, theme: str = "light") -> go.Figure:
         """

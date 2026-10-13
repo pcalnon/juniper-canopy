@@ -299,6 +299,17 @@ class TrainingState:
             "candidate_total_epochs": 0,
             "all_correlations": [],
         }
+        # F-CANOPY-036: candidate-pool history, accumulated HERE rather than in the
+        # browser. The dashboard used to append it client-side, from a callback whose
+        # Input was a ~1 Hz store — so any pool state shorter-lived than the callback's
+        # promotion delay was simply never recorded, and across five training runs
+        # (~20 candidate phases) the panel rendered no card at all. Every write that
+        # can change ``candidate_pool_status`` already funnels through
+        # ``update_state`` under ``self._lock``, so recording it there observes each
+        # transition synchronously with the write that caused it. The race is not
+        # narrowed, it is removed: there is no window in which a state exists and is
+        # unobserved.
+        self._pool_history: list = []
 
     def get_state(self) -> Dict[str, Any]:
         """
@@ -338,6 +349,58 @@ class TrainingState:
 
             if updated and "timestamp" not in kwargs:
                 self._state["timestamp"] = time.time()
+
+            if updated:
+                # F-CANOPY-036: still under the lock, so the snapshot is taken from
+                # the state the caller just wrote and cannot be overtaken by the next
+                # writer.
+                self._record_pool_snapshot_locked()
+
+    def _record_pool_snapshot_locked(self) -> None:
+        """Record one pool snapshot per epoch while a pool is active (F-CANOPY-036).
+
+        CALLER MUST HOLD ``self._lock``. Preserves the client-side append's contract
+        exactly — one entry per ``current_epoch``, newest first, keeping the FIRST
+        observation for an epoch and capping the list — so the panel's rendering and
+        its existing tests are unaffected by where the accumulation happens.
+        """
+        status = self._state.get("candidate_pool_status") or "Inactive"
+        if status == "Inactive":
+            return
+
+        epoch = self._state.get("current_epoch", 0)
+        if any(entry.get("epoch") == epoch for entry in self._pool_history):
+            return
+
+        self._pool_history.insert(
+            0,
+            {
+                "epoch": epoch,
+                "status": status,
+                "phase": self._state.get("candidate_pool_phase", "Idle"),
+                "size": self._state.get("candidate_pool_size", 0),
+                "top_candidate_id": self._state.get("top_candidate_id", ""),
+                "top_candidate_score": self._state.get("top_candidate_score", 0.0),
+                "second_candidate_id": self._state.get("second_candidate_id", ""),
+                "second_candidate_score": self._state.get("second_candidate_score", 0.0),
+                "pool_metrics": dict(self._state.get("pool_metrics") or {}),
+                "timestamp": time.time(),
+            },
+        )
+        del self._pool_history[BackendConstants.MAX_POOL_HISTORY_ENTRIES :]
+
+    def get_pool_history(self) -> list:
+        """Accumulated candidate-pool history, newest first (F-CANOPY-036).
+
+        Returns defensive copies so a caller cannot mutate the accumulator.
+        """
+        with self._lock:
+            return [dict(entry) for entry in self._pool_history]
+
+    def clear_pool_history(self) -> None:
+        """Drop the accumulated pool history (a new run starts a new history)."""
+        with self._lock:
+            self._pool_history.clear()
 
     def to_json(self) -> str:
         """

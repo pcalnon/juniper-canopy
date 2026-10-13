@@ -78,7 +78,7 @@ Cassandra is NOT mentioned in current configuration files. This guide describes 
 - [ ] **Apache Cassandra** 4.x or DataStax Astra DB
 - [ ] **cassandra-driver** Python client library
 - [ ] **Juniper Canopy** running successfully
-- [ ] **Python 3.11+** with JuniperPython conda environment
+- [ ] **Python 3.11+** with the live `JuniperCanopy1` conda environment (the name is versioned; see AGENTS.md)
 
 **Check Cassandra availability:**
 
@@ -144,7 +144,7 @@ docker exec -it cascor-cassandra cqlsh
 
 ```bash
 # Activate conda environment
-conda activate JuniperPython
+conda activate JuniperCanopy1
 
 # Install cassandra-driver
 pip install cassandra-driver

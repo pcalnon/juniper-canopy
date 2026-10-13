@@ -58,7 +58,7 @@ class TestHealthEndpoint:
         data = response.json()
 
         assert "status" in data
-        assert data["status"] == "healthy"
+        assert data["status"] == "ok"  # API-01: normalized across services
         assert "timestamp" in data
         assert "version" in data
 

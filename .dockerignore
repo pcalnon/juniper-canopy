@@ -17,6 +17,7 @@
 .yamllint.yaml
 .trunk/
 .mypy_cache/
+**/.mypy_cache/
 
 # IDE and editor
 .vscode/
@@ -43,7 +44,17 @@ conftest.py
 __pycache__/
 **/__pycache__/
 *.py[cod]
+# ``*.egg-info/`` alone only matches the context root. The ``**/``-prefixed
+# forms are required to exclude *nested* metadata dirs such as
+# ``src/juniper_canopy.egg-info`` — a stale local build artifact that, when
+# COPYed into the image by ``COPY src/ ./src/``, lands on PYTHONPATH (/app/src)
+# ahead of site-packages and shadows the installed package version. That was
+# the bug behind ``/v1/health`` reporting an old version (0.4.0) while
+# ``pyproject.toml`` was 0.5.0 — surfaced by the build-provenance `make doctor`
+# work (juniper-ml notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md).
 *.egg-info/
+**/*.egg-info/
+**/*.dist-info/
 build/
 dist/
 data/
@@ -51,6 +62,7 @@ logs/
 reports/
 *.prof
 *.log
+**/*.log
 *.out
 
 # Coverage
@@ -68,7 +80,6 @@ conf/*.conf
 conf/*_functions.conf
 conf/__pycache__/
 conf/backups/
-conf/docker-compose.yaml
 conf/conda_environment*.yaml
 conf/requirements*.txt
 conf/setup-miniconda-patched-conda_environment.yaml
@@ -95,3 +106,21 @@ Thumbs.db
 
 # Demo launcher script (not needed in container)
 demo
+
+# -- Credentials. Docker does NOT honour .gitignore, and this image is PUBLIC.
+#    The Dockerfile copies a DIRECTORY allowlist, which is not a file allowlist:
+#    `COPY <pkg>/ ./<pkg>/` ships everything tracked beneath it. Patterns are
+#    root-anchored (Go filepath.Match), so the `**/` twins are load-bearing.
+secrets/
+**/secrets/
+*.key
+**/*.key
+*.pem
+**/*.pem
+*.p12
+*.pfx
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example

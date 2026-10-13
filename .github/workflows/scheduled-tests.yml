@@ -43,12 +43,12 @@ jobs:
         python-version: ["3.12", "3.13", "3.14"]
     steps:
       - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 1
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -56,7 +56,35 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade "pip>=26.1.1"
-          pip install -e ".[test]" || pip install -e ".[dev]" || pip install -e .
+          # Match the main ci.yml unit-tests job: torch from the CPU index (canopy's
+          # demo_mode.py and demo_backend.py import torch at module load), then the repo
+          # itself with the [test] extra. An earlier revision tried `.[test]` before that
+          # extra existed -- pip warned and exit-0'd, so the `||` fallback never fired and
+          # every scheduled run failed with `No module named pytest`. The extra now exists,
+          # so this is the shape that comment was reaching for.
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          # Install the [juniper-cascor] extra, exactly as ci.yml's unit-test job
+          # does. Without it ``src/tests/conftest.py`` injects a stub for
+          # ``juniper_cascor_client`` that registers only the top-level module,
+          # ``.exceptions`` and ``.client`` — NOT ``.constants`` — while
+          # ``src/backend/cascor_service_adapter.py`` imports
+          # ``ENDPOINT_TRAINING_START`` from ``juniper_cascor_client.constants``
+          # (added 2026-07-20 17:57 by #459). Four test modules that import
+          # ``CascorServiceAdapter`` at module scope then die at COLLECTION, which
+          # exits this job 1 regardless of the 413 tests that do pass, and five
+          # more in ``test_n5_apply_params_ux.py`` silently importorskip.
+          # Dated precisely: the last green run of this workflow was 2026-07-20,
+          # and every run from 2026-07-21 to 2026-09-21 failed — a 63-run streak
+          # opened by #459 the evening before. (Retention goes back to 2026-05-01
+          # and holds 58 successes, so this lane is not simply always-red.)
+          # ci.yml's INTEGRATION lane already carries this exact fix, for this
+          # exact reason — see its N3 comment naming ``.constants``. It was never
+          # propagated here, and canopy is the only Juniper repo whose scheduled
+          # lane installs no extra at all (the rest use ``[all]`` or ``[test]``).
+          # The extra is one pure-Python universal wheel
+          # (``juniper_cascor_client-0.8.0-py3-none-any.whl``, requires-python
+          # >=3.12), so it resolves on every leg of the 3.12/3.13/3.14 matrix.
+          pip install -e ".[test,juniper-cascor,observability]"
 
       - name: Run slow / integration tests
         run: |

@@ -45,7 +45,7 @@ def mock_adapter():
 
     # Training control
     adapter.is_training_in_progress.return_value = False
-    adapter.start_training_background.return_value = True
+    adapter.start_training_background.return_value = (True, None)
     adapter.request_training_stop.return_value = True
 
     # Status and metrics
@@ -119,12 +119,59 @@ class TestTrainingControl:
         assert result["is_training"] is True
         mock_adapter.start_training_background.assert_called_once()
 
-    def test_start_training_no_network(self, service_backend, mock_adapter):
-        """start_training() should fail when no network exists."""
+    def test_start_training_no_network_stages_default_dataset(self, service_backend, mock_adapter):
+        """PR-B2 (training-start diagnosis 2026-07-09): with no network and
+        nothing staged/loaded, start stages the Dataset-panel default dataset,
+        then starts — cascor creates the network from the dataset dims on
+        start (PR-B1). Previously this returned ok=False 'No network created'
+        with no creation path anywhere."""
         type(mock_adapter).network = PropertyMock(return_value=None)
+        mock_adapter.get_pending_dataset.return_value = {"ok": True, "pending": None}
+        mock_adapter.get_dataset_info.return_value = {"loaded": False}
+        mock_adapter.stage_dataset.return_value = {"ok": True, "data": {}, "config": {}}
+        result = service_backend.start_training()
+        assert result["ok"] is True
+        mock_adapter.stage_dataset.assert_called_once_with(**ServiceBackend._DEFAULT_FIRST_START_DATASET)
+        mock_adapter.start_training_background.assert_called_once()
+
+    def test_start_training_no_network_pending_dataset_skips_staging(self, service_backend, mock_adapter):
+        """A user-staged pending dataset is respected — no default staged over it."""
+        type(mock_adapter).network = PropertyMock(return_value=None)
+        mock_adapter.get_pending_dataset.return_value = {"ok": True, "pending": {"dataset_type": "spirals"}}
+        result = service_backend.start_training()
+        assert result["ok"] is True
+        mock_adapter.stage_dataset.assert_not_called()
+        mock_adapter.start_training_background.assert_called_once()
+
+    def test_start_training_no_network_loaded_dataset_skips_staging(self, service_backend, mock_adapter):
+        """A dataset already loaded on cascor is enough to size the network from."""
+        type(mock_adapter).network = PropertyMock(return_value=None)
+        mock_adapter.get_pending_dataset.return_value = {"ok": True, "pending": None}
+        mock_adapter.get_dataset_info.return_value = {"loaded": True, "train_samples": 800}
+        result = service_backend.start_training()
+        assert result["ok"] is True
+        mock_adapter.stage_dataset.assert_not_called()
+        mock_adapter.start_training_background.assert_called_once()
+
+    def test_start_training_default_stage_failure_propagates(self, service_backend, mock_adapter):
+        """A staging failure surfaces as ok=False with the reason; no start attempted."""
+        type(mock_adapter).network = PropertyMock(return_value=None)
+        mock_adapter.get_pending_dataset.return_value = {"ok": True, "pending": None}
+        mock_adapter.get_dataset_info.return_value = {"loaded": False}
+        mock_adapter.stage_dataset.return_value = {"ok": False, "error": "cascor unreachable"}
         result = service_backend.start_training()
         assert result["ok"] is False
-        assert "No network" in result["error"]
+        assert "Failed to stage default dataset" in result["error"]
+        assert "cascor unreachable" in result["error"]
+        mock_adapter.start_training_background.assert_not_called()
+
+    def test_start_training_failure_carries_cascor_detail(self, service_backend, mock_adapter):
+        """The cascor 409 detail rides back through the adapter tuple into
+        ControlResult.error (PR-B2 — previously flattened to a bare False)."""
+        mock_adapter.start_training_background.return_value = (False, "Training cannot be started: Training data not provided")
+        result = service_backend.start_training()
+        assert result["ok"] is False
+        assert "Training data not provided" in result["error"]
 
     def test_start_training_already_in_progress(self, service_backend, mock_adapter):
         """start_training() should fail when training already running."""
@@ -389,7 +436,7 @@ class TestPhase4TypedContract:
     """Phase 4 / P5-RC-18: BackendProtocol method returns conform to the
     declared TypedDict shapes. These are field-presence contract tests, not
     runtime type assertions — TypedDicts erase to plain dicts at runtime.
-    See juniper-ml/notes/code-review/CANOPY_CASCOR_INTERFACE_ROADMAP_2026-04-08.md §6.1.
+    See juniper-ml/notes/code-review/JUNIPER_2026-04-08_JUNIPER-ECOSYSTEM_CANOPY-CASCOR-INTERFACE-ROADMAP.md §6.1.
     """
 
     def test_start_training_envelope_keys(self, service_backend):
@@ -454,6 +501,58 @@ class TestPhase4TypedContract:
             "hidden_units",
         ):
             assert canonical_field in result, f"StatusResult missing {canonical_field}"
+
+    def test_get_status_carries_completion_reason(self, service_backend, mock_adapter):
+        """A top-level completion_reason on the nested cascor response (cascor #320)
+        is carried through unchanged into the flat StatusResult (Issue #3 follow-up)."""
+        mock_adapter.get_training_status.return_value = {
+            "state_machine": {"status": "Completed", "phase": "idle"},
+            "monitor": {"current_epoch": 5, "current_hidden_units": 3},
+            "training_state": {"input_size": 2, "output_size": 1},
+            "training_active": False,
+            "network_loaded": True,
+            "completion_reason": "no_candidate",
+        }
+        assert service_backend.get_status()["completion_reason"] == "no_candidate"
+
+    def test_get_status_completion_reason_absent_is_none(self, service_backend, mock_adapter):
+        """When cascor omits completion_reason (predates #320), the field is None."""
+        mock_adapter.get_training_status.return_value = {
+            "state_machine": {"status": "Stopped", "phase": "idle"},
+            "monitor": {},
+            "training_state": {},
+            "training_active": False,
+            "network_loaded": True,
+        }
+        assert service_backend.get_status()["completion_reason"] is None
+
+    def test_get_status_carries_dataset_shortfall(self, service_backend, mock_adapter):
+        """cascor#624's partial-data annotation is carried through unchanged (partial-data contract).
+
+        ``normalize_status`` is a whitelist, so this line is the ONLY place the field could be lost
+        between cascor's status route and the dashboard's status bar / Network Info panel.
+        """
+        shortfall = {"dataset_id": "equities-3.0.0-abc", "accepted_by_this_run": True, "acceptance_source": "request_params", "summary": "14 of 503 symbols imported (cap 14)"}
+        mock_adapter.get_training_status.return_value = {
+            "state_machine": {"status": "Running", "phase": "output"},
+            "monitor": {"current_epoch": 5},
+            "training_state": {"input_size": 16, "output_size": 3},
+            "training_active": True,
+            "network_loaded": True,
+            "dataset_shortfall": shortfall,
+        }
+        assert service_backend.get_status()["dataset_shortfall"] == shortfall
+
+    def test_get_status_dataset_shortfall_absent_is_none(self, service_backend, mock_adapter):
+        """A clean dataset (or a cascor that predates the field) reads None -- consumers branch on presence."""
+        mock_adapter.get_training_status.return_value = {
+            "state_machine": {"status": "Stopped", "phase": "idle"},
+            "monitor": {},
+            "training_state": {},
+            "training_active": False,
+            "network_loaded": True,
+        }
+        assert service_backend.get_status()["dataset_shortfall"] is None
 
     def test_get_metrics_returns_dict(self, service_backend):
         """get_metrics() returns a MetricsResult-shaped dict."""

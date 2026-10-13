@@ -37,24 +37,27 @@
 #
 #####################################################################################################################################################################################################
 import asyncio
-import importlib.metadata
+import ipaddress
 import json
 import os
 import re
 import secrets
+import socket
 
 # import sys
 import time
 import uuid
-from contextlib import asynccontextmanager
+from collections import deque
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
+from urllib.parse import urlsplit
 
 import uvicorn
 from a2wsgi import WSGIMiddleware
 
 # from fastapi.staticfiles import StaticFiles
-from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -62,8 +65,10 @@ from pydantic import BaseModel, Field, SecretStr
 
 # from backend.data_adapter import DataAdapter  trunk-ignore(ruff/E402)
 # from backend.training_monitor import TrainingMonitor  trunk-ignore(ruff/E402)
+from backend.admission import CallerGoneAway, offload  # trunk-ignore(ruff/E402)
+from backend.status_cache import StatusCache  # trunk-ignore(ruff/E402)
 from backend.training_monitor import TrainingState  # trunk-ignore(ruff/E402)
-from canopy_constants import TrainingConstants  # trunk-ignore(ruff/E402)
+from canopy_constants import APP_VERSION, BackendConstants, TrainingConstants  # trunk-ignore(ruff/E402)
 from communication.websocket_manager import create_command_response_message, websocket_manager
 from frontend.dashboard_manager import DashboardManager
 from health import DependencyStatus, ErrorResponse, ReadinessResponse, probe_dependency
@@ -79,9 +84,13 @@ from observability import (
     configure_logging,
     configure_sentry,
     get_prometheus_app,
+    set_backend_status_class,
     set_build_info,
     set_demo_mode_active,
 )
+from outbound_errors import outbound_error_text
+from provenance import build_date as provenance_build_date
+from provenance import git_sha as provenance_git_sha
 from secrets_util import get_secret
 from settings import get_settings
 
@@ -89,18 +98,21 @@ from settings import get_settings
 # from dash import html, dcc
 
 
-# src_dir = Path(__file__).parent
-# sys.path.insert(0, str(src_dir))
-
-
 # Initialize configuration
 settings = get_settings()
 
-# Application version from package metadata
-try:
-    APP_VERSION = importlib.metadata.version("juniper-canopy")
-except importlib.metadata.PackageNotFoundError:
-    APP_VERSION = "0.4.0"
+# SEC-F27: overlay any uvicorn CLI --host/--port onto settings so the SEC-F22 bind
+# guard (in lifespan) evaluates the real bind even when canopy is launched via
+# `uvicorn main:app --host ...` rather than `python main.py` (no-op for the latter).
+# juniper-ml notes/JUNIPER_2026-07-06_JUNIPER-ECOSYSTEM_LAUNCH-PATH-BIND-AUDIT.md (SEC-F27).
+from security import settings_with_uvicorn_cli_bind
+
+settings = settings_with_uvicorn_cli_bind(settings)
+
+# Application version: resolved ONCE in canopy_constants (installed package
+# metadata, pyproject fallback) and shared with the About panel -- E2E arc
+# OBS-1 found the two surfaces reporting different versions. ``APP_VERSION``
+# is imported with the other canopy_constants names above.
 
 # Initialize loggers
 system_logger = get_system_logger()
@@ -127,6 +139,171 @@ _PHASE_D_CONTROL_TIMEOUTS: dict[str, float] = {
 }
 
 
+async def _websocket_keepalive_loop(interval: float, channel: str = "training") -> None:
+    """Server side of the Phase F WebSocket heartbeat.
+
+    The browser client already replies to ``{"type": "ping"}`` with a pong
+    (``assets/websocket_client.js``), and the ``/ws/training`` receive loop
+    resets its idle timer on *any* inbound frame. Nothing, however, ever sent
+    the server ping, so a quiet-but-healthy training stream idled out after
+    ``idle_timeout_seconds`` and the client flapped Connected→Reconnecting.
+
+    This loop pings every ``interval`` seconds (< the idle timeout), scoped to
+    ``channel="training"`` because ``/ws/control`` has no idle timeout, so it
+    needs no keepalive. (``/ws/control`` now also accepts an inbound pong as a
+    no-op, so extending the heartbeat to it later would be safe.)
+    """
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await websocket_manager.broadcast_ping(channel=channel)
+        except Exception as exc:  # a transient send error must not kill the heartbeat
+            system_logger.debug("WebSocket keepalive ping failed: %s", exc)
+
+
+async def _start_status_cache(be: Any) -> None:
+    """(Re)build and start the X7 slice-1c status cache for ``be``.
+
+    Shared by startup and the runtime model swap, for the same reason
+    ``_seed_training_state`` is: two copies of "which backend gets a cache" would drift,
+    and the swap path is the one that gets forgotten.
+
+    Only service backends get a cache. Demo and recurrence answer ``get_status()`` from
+    memory, so there is no upstream call to amortise and nothing to classify — a cache
+    there would add a poll loop and a staleness story to a synchronous dict read.
+    """
+    global status_cache
+    await _stop_status_cache()
+    if be is None or be.backend_type != "service" or not hasattr(be, "_adapter"):
+        return
+    status_cache = StatusCache(
+        # The DEDICATED-breaker fetch, not ``get_training_status``: sharing the breaker
+        # would let five failing ``get_network_data()`` calls freeze this cache for 60 s
+        # against a healthy cascor.
+        fetch_raw=be._adapter.get_training_status_for_refresh,
+        normalize=be.normalize_status,
+        on_verdict=lambda verdict: set_backend_status_class(verdict.value),
+    )
+    await status_cache.start()
+
+
+async def _stop_status_cache() -> None:
+    """Stop and drop the status cache, if one is running. Safe to call when there is none."""
+    global status_cache
+    cache, status_cache = status_cache, None
+    if cache is not None:
+        await cache.stop()
+
+
+async def _training_active_for_health() -> bool:
+    """``training_active`` for the health bodies, from the cache when it knows.
+
+    Falls back to the live call — which 1a already moved off the loop — when there is no
+    cache (demo/recurrence) or it has no verdict yet. The fallback returns ``False`` under
+    an outage, because ``is_training_active()`` keeps its ``bool`` contract deliberately
+    (design §5.5: widening it to a tri-state was measured to open all five 409 gates and
+    race a second run). That is precisely why the health bodies also carry
+    ``_backend_status_extras()`` — the boolean stays a boolean, and the *staleness* is
+    reported beside it instead of being smuggled into it.
+    """
+    if status_cache is not None:
+        cached = status_cache.training_active()
+        if cached is not None:
+            return cached
+    try:
+        return await offload(backend.is_training_active)
+    except CallerGoneAway:
+        # C7: health must stay 200/degraded on an upstream outage — ``values.yaml:222-226``
+        # is binding, and ``test_canopy_never_returns_503_on_upstream_down`` guards it. The
+        # 1d gate is allowed to DECLINE this call, but it is not allowed to turn health
+        # into a 503, so the decline collapses to the same ``bool`` the fallback already
+        # returns under an outage. This is not a fresh negative smuggled past C6: the
+        # accompanying ``_backend_status_extras()`` reports the class and the age, so the
+        # boolean is never the only thing a reader gets.
+        return False
+
+
+def _backend_status_extras() -> dict:
+    """C7: surface the cache's verdict and its age on health responses.
+
+    Additive, and empty outside service mode — demo and recurrence have no upstream to be
+    stale about, so their health bodies are unchanged. Status codes are untouched: an
+    upstream outage stays 200/degraded (``values.yaml:222-226``, guarded by
+    ``test_canopy_never_returns_503_on_upstream_down``).
+    """
+    if status_cache is None:
+        return {}
+    body = status_cache.for_status()
+    return {
+        "backend_status": body["status_class"],
+        "backend_status_stale": body["stale"],
+        "backend_status_age_seconds": body["age_seconds"],
+    }
+
+
+async def _seed_training_state(backend: Any) -> None:
+    """Seed the global ``training_state`` from a freshly-initialized backend.
+
+    The per-backend-type seeding shared by application startup (``lifespan``) and the A1-iv-2
+    runtime model swap (``_swap_backend``), kept in one place so the two never drift:
+
+    - demo: copy the demo simulation's current state.
+    - service (cascor): pull ``get_synced_state()`` and register the relay state-update
+      callback so live per-epoch updates keep ``training_state`` current.
+    - recurrence (one-shot LMU): seed the binary idle/phase baseline from ``get_status()``
+      (no live stream, no callback).
+    """
+    if backend.backend_type == "demo" and hasattr(backend, "_demo"):
+        demo = backend._demo
+        if demo.training_state:
+            demo_state = demo.training_state.get_state()
+            training_state.update_state(**demo_state)
+            system_logger.info(
+                "Global training_state synced with demo defaults: LR=%s, MaxHidden=%s, Epochs=%s",
+                demo_state.get("learning_rate"),
+                demo_state.get("max_hidden_units"),
+                demo_state.get("max_epochs"),
+            )
+    elif backend.backend_type == "service":
+        synced = backend.get_synced_state()
+        if synced:
+            training_state.update_state(
+                status=synced.status,
+                phase=synced.phase,
+                current_epoch=synced.current_epoch,
+                max_epochs=synced.max_epochs,
+                learning_rate=synced.params.get("learning_rate", training_state.get_state().get("learning_rate")),
+                max_hidden_units=synced.params.get("max_hidden_units", training_state.get_state().get("max_hidden_units")),
+                **synced.progress_fields,
+            )
+            system_logger.info(
+                "Global training_state synced with cascor: status=%s, epoch=%s, params=%s keys",
+                synced.status,
+                synced.current_epoch,
+                len(synced.params),
+            )
+        # Register callback so relay-driven state updates keep training_state current
+        backend.set_state_update_callback(training_state.update_state)
+    elif backend.backend_type == "recurrence":
+        # Recurrence (one-shot LMU) has no live training stream and no
+        # ``set_state_update_callback`` — the dashboard reads its binary status by
+        # polling ``get_status()``. Seed ``training_state`` from the backend's initial
+        # status so the dashboard boots to a consistent idle baseline (A1-iii-a).
+        # X7: offloaded even though the recurrence backend answers from memory. The
+        # safety here rests entirely on the ``backend_type`` guard above, which the
+        # off-loop gate cannot see and a future backend added to this chain would
+        # invalidate silently. The alternative -- exempting ``backend.get_status`` by
+        # expression -- is the module-global exemption that made the gate unsound in
+        # d33ab0a, so it is not available. The recurrence call also takes a lock its
+        # training thread holds, which is a loop stall in its own right.
+        initial_status = await offload(backend.get_status)
+        training_state.update_state(
+            status=initial_status.get("fsm_status", "idle"),
+            phase=initial_status.get("phase", "idle"),
+        )
+        system_logger.info("Global training_state seeded for recurrence (one-shot) backend: %s", initial_status.get("fsm_status", "idle"))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
@@ -134,7 +311,83 @@ async def lifespan(app: FastAPI):
     configure_logging(settings.log_level, settings.log_format, "juniper-canopy")
     configure_sentry(settings.sentry_dsn, "juniper-canopy", APP_VERSION, settings.sentry_traces_sample_rate)
     if settings.metrics_enabled:
-        set_build_info("juniper_canopy", APP_VERSION)
+        set_build_info("juniper_canopy", APP_VERSION, git_sha=provenance_git_sha(), build_date=provenance_build_date())
+
+    # E-8: boot-time dependency-floor self-check. Fail loud here -- before backend
+    # init / binding -- if any installed juniper-* wheel is below canopy's declared
+    # floor, instead of serving on a stale wheel (the "green tests / dead app" class
+    # from the canopy incident). Reads canopy's own Requires-Dist floors from the
+    # installed distribution metadata; raises DependencyFloorError (uvicorn startup
+    # fails) on a violation. Bypass with JUNIPER_SKIP_DEP_FLOOR_CHECK=1 (logged
+    # loudly). The automatic prevention companion to ``make check-env`` (E-2).
+    from juniper_service_core import enforce_dependency_floors
+
+    enforce_dependency_floors(distribution="juniper-canopy", logger=system_logger)
+
+    # SEC-F01 (HO-2): boot-time auth-posture self-check, the security companion to
+    # the floor check above. An empty/placeholder CANOPY_API_KEY secret silently
+    # disables APIKeyAuth (security.py computes ``[api_key] if api_key else None``)
+    # and canopy serves its control surface OPEN behind a healthy health check.
+    # Surface that posture loudly at boot. The intended posture comes from
+    # JUNIPER_CANOPY_REQUIRE_AUTH (settings.require_auth; default false): false =
+    # loud WARNING only (bare/dev profile), true = a missing/placeholder key is a
+    # boot FAILURE (CRITICAL + AuthPostureError) — set true wherever secrets are
+    # provisioned (the composed juniper-deploy stack). Bypass with
+    # JUNIPER_SKIP_AUTH_POSTURE_CHECK=1 (logged loudly).
+    from juniper_service_core import AuthPostureError, enforce_auth_posture
+
+    # APD-ECO-008: the posture check words a SET-but-blank key exactly like an unset
+    # one, so a blank key gets its own WARNING, naming which source was blank. The same
+    # report covers a key with leading or trailing whitespace or a line break, and a
+    # CANOPY_API_KEY_FILE that names no file (#678 follow-up). It is emitted here,
+    # through the logger configured above, because the key is read at import
+    # (``api_key_auth = get_api_key_auth()`` below), before ``configure_logging`` has
+    # run. It uses what that read recorded rather than reading the secret again, and it
+    # fires once per process however many times this lifespan runs. When the posture
+    # check refuses to start (JUNIPER_CANOPY_REQUIRE_AUTH=true), its CRITICAL says NO key
+    # is configured, which misleads an operator whose key is SET but blank: the report
+    # still runs, worded for a boot that is failing, and the error propagates unchanged.
+    from security import report_api_key_configuration
+
+    _canopy_api_key = get_secret("CANOPY_API_KEY")
+    try:
+        enforce_auth_posture(
+            [_canopy_api_key] if _canopy_api_key else [],
+            require_auth=settings.require_auth,
+            service_name="juniper-canopy",
+            logger=system_logger,
+        )
+    except AuthPostureError:
+        report_api_key_configuration(system_logger, boot_refused=True)
+        raise
+
+    report_api_key_configuration(system_logger)
+
+    # #683 validation: the same for the keys canopy SENDS. ``settings`` read the
+    # juniper-data and recurrence keys at import, and refused any value no HTTP client
+    # can carry -- the client's refusal quoted it into canopy's logs, Sentry and API
+    # bodies. What that read recorded (variable names only) is reported here, once;
+    # the juniper-cascor key is read by ``create_backend`` below and reported after it.
+    from secrets_util import report_refused_outbound_keys
+
+    report_refused_outbound_keys(system_logger)
+
+    # D2 (SEC-F22): loopback bind-guard. Fail loud + closed here -- before
+    # backend init / serving -- when canopy is configured to bind a non-loopback
+    # interface with NEITHER bind-posture attestation set, instead of silently
+    # exposing the in-network-bypassable browser training-control surface (audit
+    # HO-6). Either attestation (loopback-publish OR auth-proxy) permits the bind;
+    # loopback binds (the default) start regardless. Implemented inline in canopy
+    # (no new dependency). Design-of-record: juniper-ml
+    # notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md §4 / §8 D2.
+    from security import enforce_loopback_bind_guard
+
+    enforce_loopback_bind_guard(
+        settings.server.host,
+        loopback_publish_attested=settings.loopback_publish_attested,
+        auth_proxy_attested=settings.auth_proxy_attested,
+        logger=system_logger,
+    )
 
     system_logger.info("Starting Juniper Canopy application")
     system_logger.info("Settings: server=%s:%s, demo=%s", settings.server.host, settings.server.port, settings.demo_mode)
@@ -166,6 +419,8 @@ async def lifespan(app: FastAPI):
                 system_logger.info("Auto-discovered cascor at %s — activating service mode", discovered_url)
 
     backend = create_backend(service_url=discovered_url)
+    # The juniper-cascor key ``create_backend`` just read (#683 validation, above).
+    report_refused_outbound_keys(system_logger)
 
     # Validate JuniperData URL — mandatory for both demo and real backend (CAN-INT-002).
     juniper_data_url = settings.juniper_data_url
@@ -201,38 +456,20 @@ async def lifespan(app: FastAPI):
     if not backend_initialized:
         await backend.initialize()
 
-    # Sync global training_state from backend
-    if backend.backend_type == "demo" and hasattr(backend, "_demo"):
-        demo = backend._demo
-        if demo.training_state:
-            demo_state = demo.training_state.get_state()
-            training_state.update_state(**demo_state)
-            system_logger.info(
-                "Global training_state synced with demo defaults: LR=%s, MaxHidden=%s, Epochs=%s",
-                demo_state.get("learning_rate"),
-                demo_state.get("max_hidden_units"),
-                demo_state.get("max_epochs"),
-            )
-    elif backend.backend_type == "service":
-        synced = backend.get_synced_state()
-        if synced:
-            training_state.update_state(
-                status=synced.status,
-                phase=synced.phase,
-                current_epoch=synced.current_epoch,
-                max_epochs=synced.max_epochs,
-                learning_rate=synced.params.get("learning_rate", training_state.get_state().get("learning_rate")),
-                max_hidden_units=synced.params.get("max_hidden_units", training_state.get_state().get("max_hidden_units")),
-                **synced.progress_fields,
-            )
-            system_logger.info(
-                "Global training_state synced with cascor: status=%s, epoch=%s, params=%s keys",
-                synced.status,
-                synced.current_epoch,
-                len(synced.params),
-            )
-        # Register callback so relay-driven state updates keep training_state current
-        backend.set_state_update_callback(training_state.update_state)
+    # A1-iv-2: remember the service URL the default backend resolved to (auto-discovered or
+    # configured) so a later swap back from the recurrence model re-creates the SAME cascor
+    # backend instead of silently falling to demo when the URL was discovered, not in settings.
+    global _resolved_service_url
+    _resolved_service_url = (discovered_url or settings.cascor_service_url) if backend.backend_type == "service" else None
+
+    # Sync global training_state from the freshly-initialized backend. Shared with the A1-iv-2
+    # runtime model swap (``_swap_backend``) so the per-backend-type seeding logic lives in
+    # exactly one place and cannot drift between startup and a live model switch.
+    await _seed_training_state(backend)
+
+    # X7 slice 1c: start polling cascor on a timer so read handlers stop each paying
+    # their own upstream call (C2 — call rate independent of tabs and pollers).
+    await _start_status_cache(backend)
 
     system_logger.info("Backend initialized: %s", backend.backend_type)
     # METRICS-MON R3.2 / seed-11: reflect the post-fallback backend type in
@@ -241,12 +478,45 @@ async def lifespan(app: FastAPI):
     # backend from "service" to "demo" before we get here, so reading
     # ``settings.demo_mode`` directly would lie about the live state.
     set_demo_mode_active(backend.backend_type == "demo")
+
+    # W1.7 display half (F-C8): the recurrence model's version is what its service reports. Asked now, in the
+    # background -- startup does not wait for the answer.
+    _start_model_version_refresh()
+
+    # Phase F heartbeat (server side): the browser client already pongs to
+    # server pings, but nothing was sending them, so a quiet but healthy
+    # /ws/training stream idled out after idle_timeout_seconds and the client
+    # flapped Connected→Reconnecting. Start the keepalive pinger now and cancel
+    # it on shutdown. Scoped to the training channel (control has no idle
+    # timeout). Interval comes from the existing (previously dormant)
+    # websocket.heartbeat_interval setting.
+    keepalive_interval = websocket_manager.heartbeat_interval
+    keepalive_task: Optional[asyncio.Task] = None
+    if keepalive_interval and keepalive_interval > 0:
+        keepalive_task = asyncio.create_task(_websocket_keepalive_loop(keepalive_interval), name="ws-keepalive")
+        system_logger.info("WebSocket keepalive heartbeat started (interval=%ss, channel=training)", keepalive_interval)
+    else:
+        system_logger.info("WebSocket keepalive heartbeat disabled (heartbeat_interval=%s)", keepalive_interval)
+
     system_logger.info("Application startup complete")
 
     yield
 
     # Shutdown
     system_logger.info("Shutting down Juniper Canopy application")
+
+    # Stop the keepalive heartbeat before tearing down connections.
+    if keepalive_task is not None:
+        keepalive_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await keepalive_task
+
+    # W1.7: an unfinished version refresh is abandoned, not awaited -- it only fills a label.
+    await _stop_model_version_refresh()
+
+    # Before ``backend.shutdown()``: the refresher holds that backend's adapter, and a
+    # tick landing on a torn-down client logs a spurious unreachable verdict.
+    await _stop_status_cache()
 
     await backend.shutdown()
 
@@ -256,8 +526,17 @@ async def lifespan(app: FastAPI):
     system_logger.info("Application shutdown complete")
 
 
-# Disable interactive API docs when authentication is enabled (production).
-_docs_enabled = not get_secret("CANOPY_API_KEY")
+# Disable interactive API docs when authentication is enabled (production). A blank key
+# (empty or whitespace-only) leaves auth disabled (``security.APIKeyAuth``), so it serves
+# the docs exactly as no key does (#678 follow-up). This read used the raw value, so a
+# whitespace-only CANOPY_API_KEY env var hid /docs, /docs/oauth2-redirect, /openapi.json
+# and /redoc while every other route served without a key. #683 validation: the fix
+# re-derived the rule here, with its own strip and its own read, and one sample pinned
+# it -- so a copy that strips only ASCII whitespace, or ignores CANOPY_API_KEY_FILE,
+# passed. It is now the auth handler's own answer, so one rule decides both.
+from security import get_api_key_auth
+
+_docs_enabled = not get_api_key_auth().enabled
 # Initialize FastAPI
 app = FastAPI(
     title="Juniper Canopy",
@@ -281,11 +560,15 @@ if settings.cors_origins:
     )
 
 # Security headers (outermost — runs on every response)
-from middleware import RequestBodyLimitMiddleware, SecurityHeadersMiddleware, SecurityMiddleware
-from security import get_api_key_auth, get_rate_limiter
+from middleware import CallerBudgetMiddleware, RequestBodyLimitMiddleware, SecurityHeadersMiddleware, SecurityMiddleware
+from security import browser_origin_allowed, get_rate_limiter, require_browser_control_auth
 
 app.add_middleware(RequestBodyLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
+# X7 slice 1d: stamp each request with its caller's budget before any handler runs, so an
+# offloaded cascor call can be DECLINED at admission when the caller has already gone.
+# Added last, so it wraps outermost and every downstream handler sees the deadline.
+app.add_middleware(CallerBudgetMiddleware)
 
 api_key_auth = get_api_key_auth()
 rate_limiter = get_rate_limiter()
@@ -315,11 +598,37 @@ app.add_middleware(
 # Matches the canonical pattern in juniper-data
 # (juniper_data/api/app.py) and juniper-cascor (src/api/app.py).
 if settings.metrics_enabled:
+    from juniper_observability import MetricsAuthMiddleware
+
     from observability import PrometheusMiddleware
 
     app.add_middleware(PrometheusMiddleware, service_name="juniper-canopy", namespace="juniper_canopy")
-    app.mount("/metrics", get_prometheus_app())
+    # SEC-16 parity with juniper-data + juniper-cascor: wrap the
+    # Prometheus ASGI sub-app in ``MetricsAuthMiddleware`` so untrusted
+    # IPs get 403 instead of an open ``/metrics`` surface. The exempt
+    # path prefix in ``SecurityConstants.EXEMPT_PATH_PREFIXES`` already
+    # bypasses canopy's ``SecurityMiddleware`` for ``/metrics`` — the
+    # allowlist is the only gate, so ``settings.metrics_trusted_ips``
+    # is the source of truth.
+    app.mount("/metrics", MetricsAuthMiddleware(get_prometheus_app(), settings.metrics_trusted_ips))
 app.add_middleware(RequestIdMiddleware)
+
+
+# X7 slice 1d: a declined cascor call is not a canopy fault and not an upstream fault —
+# the work was refused because the caller's own budget had already elapsed while it sat in
+# the admission queue. Registered ABOVE the catch-all so it is not flattened into a 500
+# that reads like a bug; 503 with a distinct marker says "we deliberately did not do this".
+# There is very likely no reader left, which is the whole point.
+@app.exception_handler(CallerGoneAway)
+async def caller_gone_away_handler(request: Request, exc: CallerGoneAway):
+    """Answer 503 for work declined at admission (C10)."""
+    system_logger.info("Declined %s %s: %s", request.method, request.url.path, exc)
+    body = ErrorResponse(
+        error="Request abandoned",
+        detail="The caller's budget elapsed before this upstream call was issued; it was not performed.",
+        status_code=503,
+    )
+    return JSONResponse(body.model_dump(), status_code=503)
 
 
 # Global exception handler for unhandled errors — returns standardized ErrorResponse.
@@ -333,6 +642,25 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 # Backend is initialized in lifespan via create_backend() factory
 backend = None
+# A1-iv-2: the currently-selected model key driving the live ``backend`` (None = the
+# cascor/demo startup default) and the service URL that default resolved to. Both are set by
+# the lifespan + ``_swap_backend`` so a runtime model switch can faithfully re-create either
+# backend (D5: re-create, not multiplex).
+current_nn_model: Optional[str] = None
+_resolved_service_url: Optional[str] = None
+# W1.7 display half (F-C8): the model registry as its services last reported their versions --
+# ``model_registry.refresh_model_versions``'s returned tuple, which is the cache by design. ``None``
+# until a refresh lands. Loop-confined like ``backend`` and ``current_nn_model``: assigned only by
+# ``_refresh_model_versions`` once its worker-thread lookup returns, read only by handlers.
+_reported_models: Optional[tuple] = None
+# The refresh in flight, so that a burst of selections asks the service once.
+_model_version_refresh: Optional[asyncio.Task] = None
+
+# X7 slice 1c: the cascor status cache. ``None`` outside service mode — demo and
+# recurrence backends answer ``get_status()`` from memory, so there is no upstream call
+# to amortise and no unreachability to classify. Readers must therefore handle ``None``
+# by falling back to the live (already off-loop, since 1a) call rather than assuming it.
+status_cache: Optional[StatusCache] = None
 
 # Initialize Dash dashboard (standalone with its own Flask server)
 dashboard_manager = DashboardManager({})
@@ -385,7 +713,30 @@ async def api_csrf_token(request: Request):
 
     The token is stored server-side with a 1h sliding TTL and must be
     sent as the first frame after /ws/control connection is accepted.
+
+    PR-1 hardening (§6): the route is key-exempt (``KEY_EXEMPT_PATHS``) so the
+    same-origin browser can fetch a token. Minting is refused only for an
+    explicit **disallowed** ``Origin`` (a cross-origin page) when auth is enabled;
+    a *missing* Origin is the normal same-origin GET — browsers omit the Origin
+    header on same-origin GETs (they send ``sec-fetch-site: same-origin`` instead)
+    — and is allowed, as are keyed callers. In open/dev mode (no key configured)
+    it stays anonymously mintable. This blocks an off-origin browser token oracle
+    without breaking the same-origin bootstrap.
     """
+    from fastapi import HTTPException
+
+    _key = request.headers.get("X-API-Key")
+    _keyed = bool(_key is not None and api_key_auth.validate(_key))
+    # Reject only an Origin that is PRESENT and not allowlisted (an explicit
+    # cross-origin request). A MISSING Origin is the same-origin browser bootstrap
+    # (the dashboard's page-load GET /api/csrf) and must be allowed, else
+    # window.__canopy_csrf never populates and the whole browser control surface
+    # 403s. The state-changing /api/train/* POSTs stay fail-closed on Origin
+    # (browsers do send Origin on POST), so this relaxation is scoped to minting.
+    _origin = request.headers.get("origin")
+    if api_key_auth.enabled and not _keyed and _origin is not None and not browser_origin_allowed(request):
+        raise HTTPException(status_code=403, detail="Origin not allowed.")
+
     if not settings.csrf_enabled:
         return {"csrf_token": "", "enabled": False}  # nosec B105 — empty token when CSRF disabled
     store = get_csrf_store(ttl_seconds=settings.csrf_token_ttl_seconds)
@@ -393,16 +744,26 @@ async def api_csrf_token(request: Request):
     return {"csrf_token": token, "enabled": True}
 
 
-async def _authenticate_websocket(websocket: WebSocket) -> bool:
+async def _authenticate_websocket(websocket: WebSocket, allow_browser_auth: bool = False) -> bool:
     """Authenticate WebSocket connection using X-API-Key header.
 
     BaseHTTPMiddleware does not intercept WebSocket upgrades, so
     authentication must be performed explicitly at connection accept.
 
+    PR-1 (Start-Training 401 fix): when ``allow_browser_auth`` is True, an
+    *absent* key is accepted so the downstream Origin gate (and, on
+    ``/ws/control``, the CSRF first-frame) becomes the real authn for the
+    same-origin browser, which cannot hold the server key. A *present* key is
+    still validated, so keyed callers — and a bad key — are unaffected (no
+    regression). When ``allow_browser_auth`` is False the legacy behaviour
+    holds: any keyless connection is closed 4001.
+
     Returns True if authenticated (or auth disabled), False otherwise.
     """
     if api_key_auth.enabled:
         key = websocket.headers.get("X-API-Key") or websocket.query_params.get("api_key")
+        if allow_browser_auth and key is None:
+            return True
         if not api_key_auth.validate(key):
             await websocket.close(code=4001, reason="Authentication required")
             return False
@@ -461,7 +822,10 @@ async def websocket_training_endpoint(websocket: WebSocket):
             console.log('Received:', data.type);
         };
     """
-    if not await _authenticate_websocket(websocket):
+    # PR-1 (C5): read-only metric stream — relax the key gate so the keyless
+    # same-origin browser is admitted by the Origin gate below (no state to
+    # forge, no CSRF frame). A present key is still validated.
+    if not await _authenticate_websocket(websocket, allow_browser_auth=True):
         return
 
     # SEC-06: opt-in bearer-token auth over Sec-WebSocket-Protocol
@@ -483,8 +847,17 @@ async def websocket_training_endpoint(websocket: WebSocket):
             await websocket.close(code=4003, reason="Origin not allowed")
             return
 
-    # Phase B-pre-a: Per-IP connection cap (M-SEC-04)
-    if not websocket_manager.check_per_ip_limit(websocket, ws_settings.max_connections_per_ip):
+    # SEC-F19 / D4: per-IP cap (M-SEC-04; DoS-dampening, INERT BEHIND NAT --
+    # every client behind Docker NAT shares the bridge-gateway IP) + per-session
+    # cap keyed on the anonymous canopy_session cookie (restores per-client
+    # fairness under a shared NAT IP). The global cap
+    # (websocket_manager.max_connections, enforced in connect()) bounds total
+    # load + backstops cookieless connections. Over-cap -> close 1013.
+    if not websocket_manager.check_connection_limits(
+        websocket,
+        max_per_ip=ws_settings.max_connections_per_ip,
+        max_per_session=ws_settings.max_connections_per_session,
+    ):
         await websocket.close(code=1013, reason="Per-IP connection limit reached")
         return
 
@@ -492,14 +865,21 @@ async def websocket_training_endpoint(websocket: WebSocket):
     # OBS-WIRE A.4: pass channel="training" so connect/disconnect updates
     # juniper_canopy_websocket_connections_active{channel="training"} and
     # outbound dispatch labels juniper_canopy_websocket_messages_total{...}.
-    await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol, channel="training")
+    try:
+        connected = await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol, channel="training")
+    except Exception:
+        websocket_manager.release_connection_limits(websocket)
+        raise
+    if not connected:
+        websocket_manager.release_connection_limits(websocket)
+        return
 
     idle_timeout = ws_settings.idle_timeout_seconds
     max_msg_size = ws_settings.max_message_size_training
 
     try:
         # Send initial status
-        status = backend.get_status()
+        status = await offload(backend.get_status)
 
         await websocket_manager.send_personal_message({"type": "initial_status", "data": status}, websocket)
 
@@ -544,6 +924,31 @@ async def websocket_training_endpoint(websocket: WebSocket):
         websocket_manager.disconnect(websocket)
 
 
+def _recurrence_start_kwargs(payload: "dict | None") -> dict:
+    """Extract a recurrence dataset-ref + LMU hyperparameters from a start payload (A1-iii-a).
+
+    The one-shot recurrence ``start_training`` needs a dataset reference
+    (``generator``/``name``/``dataset_id`` + ``params``/``split``) and optional
+    ``d``/``theta``/``ridge``. ``payload`` is the REST ``/api/train/start`` body (as a dict)
+    or the WS ``/ws/control`` ``start`` ``params`` dict. Returns ONLY the keys actually
+    present, so cascor/demo (which never supply a payload) keep their bare
+    ``start_training(reset=...)`` call unchanged.
+    """
+    kwargs: dict = {}
+    if not payload:
+        return kwargs
+    dataset = payload.get("dataset") or {}
+    for key in ("dataset_id", "name", "generator", "split"):
+        if dataset.get(key) is not None:
+            kwargs[key] = dataset[key]
+    if dataset.get("params") is not None:
+        kwargs["params"] = dataset["params"]
+    for key in ("d", "theta", "ridge"):
+        if payload.get(key) is not None:
+            kwargs[key] = payload[key]
+    return kwargs
+
+
 @app.websocket("/ws/control")
 async def websocket_control_endpoint(websocket: WebSocket):
     """WebSocket endpoint for training control commands.
@@ -554,7 +959,10 @@ async def websocket_control_endpoint(websocket: WebSocket):
     3. Per-IP connection cap (M-SEC-04)
     4. CSRF first-frame auth (M-SEC-02) — 5s timeout → close 1008
     """
-    if not await _authenticate_websocket(websocket):
+    # PR-1: relax the key gate for the same-origin browser — a keyless
+    # connection defers to the Origin + CSRF first-frame gates below; a
+    # present key is still validated (keyed callers unaffected).
+    if not await _authenticate_websocket(websocket, allow_browser_auth=True):
         return
 
     # SEC-06: opt-in bearer-token auth over Sec-WebSocket-Protocol
@@ -576,8 +984,15 @@ async def websocket_control_endpoint(websocket: WebSocket):
             await websocket.close(code=4003, reason="Policy violation")  # M-SEC-06: opaque
             return
 
-    # Phase B-pre-a: Per-IP connection cap (M-SEC-04)
-    if not websocket_manager.check_per_ip_limit(websocket, ws_settings.max_connections_per_ip):
+    # SEC-F19 / D4: per-IP cap (M-SEC-04; DoS-dampening, INERT BEHIND NAT) +
+    # per-session cap keyed on the anonymous canopy_session cookie (per-client
+    # fairness under a shared NAT IP); the global cap (connect()) backstops the
+    # cookieless case. Over-cap -> close 1013 (opaque per M-SEC-06).
+    if not websocket_manager.check_connection_limits(
+        websocket,
+        max_per_ip=ws_settings.max_connections_per_ip,
+        max_per_session=ws_settings.max_connections_per_session,
+    ):
         await websocket.close(code=1013, reason="Policy violation")  # M-SEC-06: opaque
         return
 
@@ -585,13 +1000,33 @@ async def websocket_control_endpoint(websocket: WebSocket):
     # OBS-WIRE A.4: pass channel="control" so connect/disconnect updates
     # juniper_canopy_websocket_connections_active{channel="control"} and
     # outbound dispatch labels juniper_canopy_websocket_messages_total{...}.
-    await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol, channel="control")
+    try:
+        connected = await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol, channel="control")
+    except Exception:
+        websocket_manager.release_connection_limits(websocket)
+        raise
+    if not connected:
+        websocket_manager.release_connection_limits(websocket)
+        return
 
     # Phase B-pre-b: CSRF first-frame authentication (M-SEC-02)
+    #
+    # F-CANOPY-008: connect() has already SUCCEEDED at this point, so the socket
+    # holds a per-IP + per-session slot, an active_connections entry and a count
+    # on the {channel="control"} gauge. A reject arm that only close()s and
+    # returns leaks all three: five stale-token rejections (a canopy restart
+    # with a dashboard tab open is enough -- the client's auto-reconnect burns
+    # them in ~10 s) locked the control plane for every client behind that IP
+    # until canopy restarted. Every rejection therefore funnels through ONE
+    # teardown that calls websocket_manager.disconnect(), the full rollback
+    # (slots + registration + gauge). Any gate added after this block must do
+    # the same -- release_connection_limits() alone is NOT enough once
+    # connect() has registered the socket.
     if settings.csrf_enabled:
         from audit_log import log_ws_csrf_rejected
 
         client_ip = websocket.client[0] if websocket.client else "unknown"
+        csrf_reject_reason: str | None = None
         try:
             raw_auth = await asyncio.wait_for(
                 websocket.receive_text(),
@@ -599,21 +1034,19 @@ async def websocket_control_endpoint(websocket: WebSocket):
             )
             auth_msg = json.loads(raw_auth)
             if auth_msg.get("type") != "auth" or not auth_msg.get("csrf_token"):
-                log_ws_csrf_rejected("/ws/control", client_ip, "missing_or_invalid_frame")
-                await websocket.close(code=1008, reason="Policy violation")
-                return
-            csrf_store = get_csrf_store()
-            if not csrf_store.validate(auth_msg["csrf_token"]):
-                log_ws_csrf_rejected("/ws/control", client_ip, "invalid_token")
-                await websocket.close(code=1008, reason="Policy violation")
-                return
+                csrf_reject_reason = "missing_or_invalid_frame"
+            elif not get_csrf_store().validate(auth_msg["csrf_token"]):
+                csrf_reject_reason = "invalid_token"
         except asyncio.TimeoutError:
-            log_ws_csrf_rejected("/ws/control", client_ip, "auth_timeout")
-            await websocket.close(code=1008, reason="Policy violation")
-            return
+            csrf_reject_reason = "auth_timeout"
         except (json.JSONDecodeError, Exception):
-            log_ws_csrf_rejected("/ws/control", client_ip, "malformed_auth")
-            await websocket.close(code=1008, reason="Policy violation")
+            csrf_reject_reason = "malformed_auth"
+        if csrf_reject_reason is not None:
+            log_ws_csrf_rejected("/ws/control", client_ip, csrf_reject_reason)
+            try:
+                await websocket.close(code=1008, reason="Policy violation")
+            finally:
+                websocket_manager.disconnect(websocket)
             return
 
     _valid_commands = {"start", "stop", "pause", "resume", "reset", "set_params"}
@@ -633,7 +1066,16 @@ async def websocket_control_endpoint(websocket: WebSocket):
         dict" when building the command_response envelope.
         """
         if cmd == "start":
-            return backend.start_training(reset=reset)
+            # N5: the same refusal the REST route makes -- a selection recorded over a backend
+            # that does not serve it must not start a run that would be filed under the wrong
+            # model. ``ok=False`` rides the existing failure envelope (``_control_result_failure``).
+            inactive = _selection_inactive_reason()
+            if inactive is not None:
+                return {"ok": False, "error": inactive}
+            # A1-iii-a: forward a one-shot dataset-ref + hyperparameters for recurrence
+            # (carried in the WS ``params``); cascor/demo keep the bare reset-only call.
+            start_kwargs = _recurrence_start_kwargs(params) if backend.backend_type == "recurrence" else {}
+            return backend.start_training(reset=reset, **start_kwargs)
         if cmd == "stop":
             return backend.stop_training()
         if cmd == "pause":
@@ -673,6 +1115,17 @@ async def websocket_control_endpoint(websocket: WebSocket):
                 await websocket_manager.send_personal_message({"type": "pong"}, websocket)
                 continue
 
+            # A client may send an unsolicited heartbeat pong (e.g. if the
+            # server heartbeat is later extended to this channel — today it
+            # only pings /ws/training). Accept it as a no-op instead of
+            # mis-parsing it as an "Unknown command: " — a pong frame carries
+            # no ``command`` key, so it would otherwise fall through to the
+            # command dispatch below and return an error. Mirrors /ws/training,
+            # which silently ignores non-ping frames.
+            if message.get("type") == "pong":
+                system_logger.debug("Received heartbeat pong on /ws/control")
+                continue
+
             command = message.get("command", "")
             command_id = message.get("command_id")
 
@@ -694,7 +1147,7 @@ async def websocket_control_endpoint(websocket: WebSocket):
             timeout = _command_timeout(command)
             try:
                 result = await asyncio.wait_for(
-                    asyncio.to_thread(
+                    offload(
                         _execute_command,
                         command,
                         message.get("params"),
@@ -702,15 +1155,30 @@ async def websocket_control_endpoint(websocket: WebSocket):
                     ),
                     timeout=timeout,
                 )
-                await websocket_manager.send_personal_message(
-                    create_command_response_message(
-                        command,
-                        "success",
-                        command_id=command_id,
-                        data=result if isinstance(result, dict) else None,
-                    ),
-                    websocket,
-                )
+                failure = _control_result_failure(result)
+                if failure is not None:
+                    system_logger.warning("Command '%s' failed: %s", command, failure)
+                    await websocket_manager.send_personal_message(
+                        create_command_response_message(
+                            command,
+                            "error",
+                            command_id=command_id,
+                            data=result if isinstance(result, dict) else None,
+                            error=failure,
+                            code="command_failed",
+                        ),
+                        websocket,
+                    )
+                else:
+                    await websocket_manager.send_personal_message(
+                        create_command_response_message(
+                            command,
+                            "success",
+                            command_id=command_id,
+                            data=result if isinstance(result, dict) else None,
+                        ),
+                        websocket,
+                    )
             except asyncio.TimeoutError:
                 system_logger.error("Command '%s' timed out after %ss", command, timeout)
                 await websocket_manager.send_personal_message(
@@ -745,28 +1213,66 @@ async def websocket_control_endpoint(websocket: WebSocket):
 async def health_check_deprecated(request: Request):
     """Health check endpoint (deprecated — use /v1/health instead)."""
     system_logger.warning("Deprecated health endpoint %s called — use /v1/health, /v1/health/live, or /v1/health/ready instead", request.url.path)
+    # X7 1a hoisted this off the dict literal so the upstream probe ran in a worker
+    # thread; 1c removes the probe from the request path entirely in service mode.
+    training_active = await _training_active_for_health()
     return {
-        "status": "healthy",
+        # API-01: align with cascor + juniper-data ("ok"). Canopy was the
+        # only service returning "healthy"; the field is still present so
+        # legacy clients see a non-empty status, just with the
+        # ecosystem-standard value.
+        "status": "ok",
+        # API-02: shared {status, version, service} base across the three
+        # Juniper services so cross-service monitoring tools can tell
+        # health responses apart without inspecting the URL. The canopy-
+        # specific fields below (timestamp, active_connections,
+        # training_active, demo_mode, juniper_data_available) are
+        # documented optional extras per Approach A guardrails and
+        # remain unchanged for backward compat.
+        "service": "juniper-canopy",
         "timestamp": time.time(),
         "version": APP_VERSION,
         "active_connections": websocket_manager.get_connection_count(),
-        "training_active": backend.is_training_active(),
+        "training_active": training_active,
         "demo_mode": backend.backend_type == "demo",
         "juniper_data_available": juniper_data_available,
+        **_backend_status_extras(),
     }
 
 
 @app.get("/v1/health")
 async def health_check():
-    """Combined health check endpoint."""
+    """Combined health check endpoint.
+
+    Response schema:
+
+    - Shared API-02 base: ``status``, ``version``, ``service``
+      (``"juniper-canopy"``) — matches juniper-data and juniper-cascor.
+    - Canopy-specific optional extras (Approach A guardrails): ``timestamp``,
+      ``active_connections``, ``training_active``, ``demo_mode``,
+      ``juniper_data_available``.
+    """
+    # X7: same as the deprecated twin above -- see the note there.
+    training_active = await _training_active_for_health()
     return {
-        "status": "healthy",
+        # API-01: align with cascor + juniper-data ("ok").
+        "status": "ok",
+        # API-02: shared {status, version, service} base across services.
+        "service": "juniper-canopy",
         "timestamp": time.time(),
         "version": APP_VERSION,
         "active_connections": websocket_manager.get_connection_count(),
-        "training_active": backend.is_training_active(),
+        "training_active": training_active,
         "demo_mode": backend.backend_type == "demo",
         "juniper_data_available": juniper_data_available,
+        # C7: the cache's verdict and its age, so an outage is legible on the endpoint
+        # the defect is named for. Additive and service-mode only; status codes unchanged.
+        **_backend_status_extras(),
+        # Build provenance (juniper-ml notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md):
+        # source git SHA + ISO-8601 build date baked into the image. ``None``
+        # outside a provenance-stamped image; lets ``make doctor`` detect drift.
+        "git_sha": provenance_git_sha(),
+        "build_date": provenance_build_date(),
     }
 
 
@@ -806,17 +1312,54 @@ async def readiness_probe() -> ReadinessResponse:
             overall = "degraded"
             break
 
+    # X7: the readiness probe is the third endpoint the outage was measured on.
+    training_active = await _training_active_for_health()
     return ReadinessResponse(
         status=overall,
         version=APP_VERSION,
         service="juniper-canopy",
+        git_sha=provenance_git_sha(),
+        build_date=provenance_build_date(),
         dependencies=dependencies,
         details={
             "mode": backend.backend_type,
             "active_connections": websocket_manager.get_connection_count(),
-            "training_active": backend.is_training_active(),
+            "training_active": training_active,
+            **_backend_status_extras(),
         },
     )
+
+
+def _active_training_state():
+    """The ``TrainingState`` that is authoritative for this backend mode.
+
+    Demo mode keeps its own instance on ``DemoMode``; service mode uses the module
+    global. Both are real ``TrainingState`` objects, so both accumulate pool history.
+    Mirrors the selection ``/api/state`` makes, factored out so the two cannot drift.
+    """
+    if backend.backend_type == "demo" and hasattr(backend, "_demo"):
+        demo = backend._demo
+        if demo.training_state:
+            return demo.training_state
+    return training_state
+
+
+@app.get("/api/v1/candidates/pool-history")
+async def get_candidate_pool_history():
+    """Candidate-pool history, newest first (F-CANOPY-036).
+
+    The dashboard used to accumulate this in the browser, appending from a callback
+    whose Input was a ~1 Hz store — so any pool state shorter-lived than the
+    callback's promotion delay was never recorded, and the panel showed no card
+    across five training runs. The accumulation now happens in ``TrainingState``
+    under the same lock as the state write itself, and this route serves it.
+
+    Returns:
+        ``{"history": [...], "count": N}`` — newest first, capped at
+        ``BackendConstants.MAX_POOL_HISTORY_ENTRIES``.
+    """
+    history = _active_training_state().get_pool_history()
+    return {"history": history, "count": len(history)}
 
 
 @app.get("/api/state")
@@ -871,8 +1414,58 @@ async def get_state():
 
     # Service mode: provide all nn_*/cn_* keys the dashboard expects.
     # Keys that cascor exposes are fetched live; the rest get defaults.
+    #
+    # N2 (training-runtime defects plan §4 I-1): the BASE fields
+    # (status/phase/current_epoch/timestamp) are now LIVE-FIRST. This route
+    # already paid a live cascor call per GET for the parameter keys
+    # (``get_canopy_params``) while serving base fields solely from the
+    # relay-fed ``training_state`` global — which went ~8 h stale in the
+    # 2026-07-10 session when the WS relay silently died. The base fields now
+    # ride the same live-fetch posture (one consolidated ``get_status()``
+    # call), and the relay-fed global is only the fallback on upstream error,
+    # explicitly marked ``stale: true`` with an age. The global itself stays
+    # relay-updated for demo mode and WS-push granularity.
     if backend.backend_type == "service" and hasattr(backend, "_adapter"):
+        # Both fetches are synchronous HTTP calls — keep them off the event
+        # loop so a slow cascor cannot stall every other canopy route.
+        def _fetch_live_status_and_params():
+            return backend.get_status(), backend._adapter.get_canopy_params()
+
+        live_status, canopy_params = await offload(_fetch_live_status_and_params)
+
         state = training_state.get_state()
+
+        live_ok = isinstance(live_status, dict) and not live_status.get("error") and "fsm_status" in live_status
+        if live_ok:
+            from backend.state_sync import CascorStateSync
+
+            if live_status.get("failed"):
+                state["status"] = "Failed"
+            elif live_status.get("is_paused"):
+                state["status"] = "Paused"
+            elif live_status.get("is_running") or live_status.get("is_training"):
+                state["status"] = "Started"
+            elif live_status.get("completed"):
+                state["status"] = "Completed"
+            else:
+                state["status"] = CascorStateSync._normalize_status(str(live_status.get("fsm_status", "")))
+            live_phase = live_status.get("phase")
+            if isinstance(live_phase, str) and live_phase:
+                state["phase"] = live_phase
+            live_epoch = live_status.get("current_epoch")
+            if live_epoch is not None:
+                state["current_epoch"] = live_epoch
+            state["timestamp"] = time.time()
+            state["stale"] = False
+        else:
+            # Upstream error: serve the last-known relay-fed global, honestly
+            # marked. The 8-hour-stale-base-fields class is impossible while
+            # cascor is reachable; when it is NOT, the staleness is declared.
+            state["stale"] = True
+            try:
+                state["stale_age_seconds"] = round(max(0.0, time.time() - float(state.get("timestamp") or 0.0)), 1)
+            except (TypeError, ValueError):
+                state["stale_age_seconds"] = None
 
         # Populate all nn_*/cn_* keys with defaults first (dashboard reads all 22)
         state.setdefault("nn_max_iterations", TrainingConstants.DEFAULT_MAX_GROWTH_ITERATIONS)
@@ -901,8 +1494,8 @@ async def get_state():
         state.setdefault("cn_top_candidates", TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT)
         state.setdefault("cn_random_candidates", TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT)
 
-        # Override with live values from cascor (keys it actually exposes)
-        canopy_params = backend._adapter.get_canopy_params()
+        # Override with live values from cascor (keys it actually exposes).
+        # Fetched above in the same off-loop thread hop as the status call.
         state.update(canopy_params)
         return state
 
@@ -914,9 +1507,60 @@ async def get_status():
     """
     Get current training status.
     Returns:
-        Training status dictionary with FSM-based status and phase
+        Training status dictionary with FSM-based status and phase, plus the X7 slice-1c
+        cache envelope (``status_class``, ``stale``, ``age_seconds``) in service mode.
     """
-    return backend.get_status()
+    # X7 slice 1c: serve the cache. Every browser tab polling this route used to cost one
+    # upstream call; now they cost none (C2). The body carries the cache's CLASS so the
+    # status bar can distinguish "cascor says idle" from "cascor is unreachable" — handing
+    # back the raw payload instead is what re-creates the PR #340 defect on a half-dead 200.
+    if status_cache is not None:
+        return status_cache.for_status()
+    return await offload(backend.get_status)
+
+
+def _demo_dataset_source() -> str | None:
+    """Where demo mode's dataset actually came from (§4.12 / G9).
+
+    ``"juniper-data"`` when demo mode reached the service (the dogfooding path), ``"local"`` when
+    it fell back to its own generator, ``None`` for any backend that is not demo. The distinction
+    is the point: demo mode exists to exercise the real platform, and a silent fallback turns it
+    into a demo of code that runs nowhere else.
+    """
+    demo = getattr(backend, "_demo", None)
+    if demo is None:
+        return None
+    return "local" if getattr(demo, "local_dataset_fallback", False) else "juniper-data"
+
+
+@app.get("/api/stream_health")
+async def get_stream_health():
+    """
+    N2 (training-runtime defects plan §4 I-1 / §5 T2): canopy→cascor stream
+    health for the dashboard's degraded-mode indicator.
+
+    Returns ``{"overall": "healthy"|"degraded"|"reconnecting"|"n/a", "relay":
+    {...}, "control": {...}}`` in service mode — a pure in-memory snapshot of
+    the metrics-relay / control-stream supervisor liveness state (no upstream
+    call). Non-service backends (demo/recurrence) have no upstream stream, so
+    ``overall`` is ``"n/a"`` and the badge ignores it.
+    """
+    if backend.backend_type == "service" and hasattr(backend, "_adapter"):
+        # X7: this one really is in-memory today (StreamHealth.snapshot() under a lock
+        # held only by in-memory writers), so it is offloaded for uniformity rather than
+        # exempted. The docstring's "no upstream call" is a promise about a method on the
+        # same adapter whose every neighbour does call upstream; a thread hop costs
+        # microseconds against a 1.0 s budget, and an exemption entry would need
+        # re-verifying every time that promise is edited.
+        health = await asyncio.to_thread(backend._adapter.get_stream_health)
+        # PR 2 (demo-mode honesty): carry the backend mode on BOTH branches. The non-service
+        # branch below has always reported it; the service branch did not, so a consumer
+        # could not use this field as a mode signal at all — it had to already know which
+        # branch it was reading, which is the thing it was trying to find out.
+        if isinstance(health, dict):
+            health = {**health, "mode": backend.backend_type}
+        return health
+    return {"overall": "n/a", "mode": backend.backend_type, "dataset_source": _demo_dataset_source(), "relay": None, "control": None}
 
 
 @app.get("/api/metrics")
@@ -926,7 +1570,7 @@ async def get_metrics():
     Returns:
         Current metrics dictionary
     """
-    return backend.get_metrics()
+    return await offload(backend.get_metrics)
 
 
 @app.get("/api/metrics/history")
@@ -939,7 +1583,10 @@ async def get_metrics_history(limit: int = 100):
         Dictionary with history list
     """
     count = limit if limit > 0 else 10000
-    return {"history": backend.get_metrics_history(count)}
+    # N1 event-loop guard: the backend call is a synchronous cascor-client call;
+    # run it in a thread so a slow cascor cannot stall canopy's event loop under
+    # the un-gated 1 Hz dashboard poll.
+    return {"history": await offload(backend.get_metrics_history, count)}
 
 
 @app.get("/api/network/stats")
@@ -980,7 +1627,7 @@ async def get_network_stats():
 
     # Service mode: get network data from adapter
     if backend.backend_type == "service" and hasattr(backend, "_adapter"):
-        network_data = backend._adapter.get_network_data()
+        network_data = await offload(backend._adapter.get_network_data)
         return adapter.get_network_statistics(
             input_weights=network_data.get("input_weights"),
             hidden_weights=network_data.get("hidden_weights"),
@@ -1000,7 +1647,9 @@ async def get_topology():
     Returns:
         Network topology dictionary with nodes and connections
     """
-    topology = backend.get_network_topology()
+    # N1 event-loop guard: same sync-in-async pattern as /api/metrics/history —
+    # the un-gated topology poll exercises this route on every slow tick.
+    topology = await offload(backend.get_network_topology)
     if topology is None:
         return JSONResponse({"error": "No topology available"}, status_code=503)
     return topology
@@ -1012,7 +1661,8 @@ async def get_raw_topology():
     Get raw weight-oriented network topology (pre-transformation).
     Returns CasCor's native format with weight arrays for heatmap visualization.
     """
-    raw = backend.get_raw_topology()
+    # N1 event-loop guard (trivially co-located with /api/topology).
+    raw = await offload(backend.get_raw_topology)
     if raw is None:
         return JSONResponse({"error": "No raw topology available"}, status_code=503)
     return raw
@@ -1025,7 +1675,7 @@ async def get_dataset():
     Returns:
         Dataset dictionary
     """
-    dataset = backend.get_dataset()
+    dataset = await offload(backend.get_dataset)
     if dataset is None:
         return JSONResponse({"error": "No dataset available"}, status_code=503)
     return dataset
@@ -1054,8 +1704,26 @@ async def generate_dataset(request: Request):
     n_rotations = max(0.1, min(10.0, n_rotations))
     noise = max(0.0, min(1.0, noise))
 
+    # Generator selection (dataset-plotter "Dataset:" picker). Spiral is the
+    # demo's local generator; every other generator (xor, circles, moon, …) is
+    # synthesized by the JuniperData service, so it requires that service to be
+    # reachable and surfaces a clean 503 otherwise.
+    generator = str(body.get("generator", "spiral")).strip().lower() or "spiral"
+    if generator not in ("spiral", "spirals"):
+        if not juniper_data_available:
+            return JSONResponse({"error": f"Generator '{generator}' requires the JuniperData service"}, status_code=503)
+        if not hasattr(backend, "regenerate_dataset_from_generator"):
+            return JSONResponse({"error": "Backend does not support generator selection"}, status_code=501)
+        try:
+            dataset = await offload(backend.regenerate_dataset_from_generator, generator=generator, n_samples=n_samples)
+            return dataset or {"status": "generated"}
+        except Exception as exc:
+            error_id = uuid.uuid4().hex[:12]
+            system_logger.error("Generator '%s' dataset load failed [error_id=%s]", generator, error_id, exception=exc)
+            return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
     try:
-        dataset = backend.regenerate_dataset(n_samples=n_samples, n_spirals=n_spirals, noise=noise, n_rotations=n_rotations)
+        dataset = await offload(backend.regenerate_dataset, n_samples=n_samples, n_spirals=n_spirals, noise=noise, n_rotations=n_rotations)
         return dataset or {"status": "generated"}
     except Exception as exc:
         # SEC-14: never leak internal exception messages to clients; log the
@@ -1094,7 +1762,7 @@ async def import_dataset_file(file: UploadFile = File(...)):  # noqa: B008 — F
         return JSONResponse({"error": str(exc)}, status_code=400)
 
     try:
-        dataset = backend.import_dataset(inputs, targets, source_label=f"upload:{file.filename or 'unnamed.csv'}")
+        dataset = await offload(backend.import_dataset, inputs, targets, source_label=f"upload:{file.filename or 'unnamed.csv'}")
         return dataset or {"status": "imported"}
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
@@ -1104,6 +1772,50 @@ async def import_dataset_file(file: UploadFile = File(...)):  # noqa: B008 — F
         error_id = uuid.uuid4().hex[:12]
         system_logger.error("Dataset import (file) failed [error_id=%s]", error_id, exception=exc)
         return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
+
+# SEC-F08: SSRF egress guard for POST /api/dataset/import-url. The URL-fetch
+# import makes the canopy server issue an outbound request to a caller-supplied
+# address; unguarded, that address can be a loopback / RFC-1918 / link-local host
+# (including the cloud-metadata endpoint 169.254.169.254). These helpers resolve
+# the target and refuse it when the RESOLVED IP is non-public — validating the
+# resolved address rather than the URL string, so a hostname that resolves to an
+# internal address (DNS rebind) is caught too. Audit: SEC-F08 (HO-1/HO-7),
+# juniper-ml notes/JUNIPER_STACK_SECURITY_AUDIT_PLAN_2026-07-02.md §4.3 / §5.2.
+def _import_url_ip_is_blocked(ip_text: str) -> bool:
+    """True when ``ip_text`` is a non-routable / internal address the SSRF guard
+    must refuse: loopback (127.0.0.0/8, ::1), RFC-1918 private (10/8, 172.16/12,
+    192.168/16), link-local (169.254/16 incl. the metadata IP, fe80::/10),
+    unique-local IPv6 (fc00::/7), unspecified (0.0.0.0, ::), multicast, and
+    reserved ranges. An unparseable value fails closed (blocked)."""
+    try:
+        addr = ipaddress.ip_address(ip_text)
+    except ValueError:
+        return True
+    return bool(addr.is_loopback or addr.is_private or addr.is_link_local or addr.is_reserved or addr.is_multicast or addr.is_unspecified)
+
+
+def _classify_import_url_target(url: str) -> Optional[str]:
+    """Resolve ``url``'s host and return a human-readable rejection reason when it
+    maps to any non-public address, else ``None`` (safe to fetch).
+
+    Every resolved A/AAAA record is checked — a host that resolves to a mix of
+    public and internal addresses is rejected. Uses a blocking ``getaddrinfo``,
+    so callers must invoke it off the event loop (``asyncio.to_thread``)."""
+    host = urlsplit(url).hostname
+    if not host:
+        return "URL has no host to resolve"
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        return f"Could not resolve host: {host}"
+    resolved = {str(info[4][0]) for info in infos}
+    if not resolved:
+        return f"Could not resolve host: {host}"
+    for ip_text in sorted(resolved):
+        if _import_url_ip_is_blocked(ip_text):
+            return "Refusing to fetch a URL that resolves to a non-public address"
+    return None
 
 
 class _ImportUrlRequest(BaseModel):
@@ -1116,16 +1828,21 @@ class _ImportUrlRequest(BaseModel):
 async def import_dataset_url(request: _ImportUrlRequest):
     """CAN-016b: fetch a CSV from a URL and import it (demo mode only).
 
-    Network access is gated by ``settings.dataset_import_url_enabled`` (off by
-    default in production-leaning configs to avoid letting the canopy server
-    issue arbitrary outbound requests). 10s fetch timeout, 10 MB body cap.
+    Network access is gated by ``settings.dataset_import_url_enabled`` — a real
+    ``Settings`` field that defaults **off** (SEC-F08): URL-based import lets the
+    server issue arbitrary outbound requests, so it is opt-in. When enabled, the
+    fetch is hardened against SSRF — the resolved target IP is refused if it is
+    loopback / private / link-local / reserved (``_classify_import_url_target``),
+    redirects are **not** followed (a public→internal 302 cannot bypass the
+    egress guard), and the 10 MB cap is enforced *during* the streamed download.
+    10s fetch timeout.
     """
     if backend.backend_type != "demo":
         return JSONResponse(
             {"error": "Dataset import only available in demo mode (cascor backend doesn't accept inline datasets yet)"},
             status_code=400,
         )
-    if not getattr(settings, "dataset_import_url_enabled", True):
+    if not settings.dataset_import_url_enabled:
         return JSONResponse({"error": "URL-based dataset import is disabled by configuration"}, status_code=403)
     if not hasattr(backend, "import_dataset"):
         return JSONResponse({"error": "Backend does not support dataset import"}, status_code=501)
@@ -1134,6 +1851,14 @@ async def import_dataset_url(request: _ImportUrlRequest):
     if not (url.startswith("http://") or url.startswith("https://")):
         return JSONResponse({"error": "URL must use http:// or https:// scheme"}, status_code=400)
 
+    # SEC-F08: SSRF egress guard. Resolve the host and refuse the fetch when the
+    # RESOLVED IP is loopback / private / link-local / reserved — validating the
+    # resolved address (not just the URL string) defeats DNS-rebind. Blocking DNS
+    # runs off the event loop so the single uvicorn worker never stalls (SEC-F20).
+    ssrf_rejection = await asyncio.to_thread(_classify_import_url_target, url)
+    if ssrf_rejection is not None:
+        return JSONResponse({"error": ssrf_rejection}, status_code=400)
+
     try:
         import httpx
     except ImportError:
@@ -1141,19 +1866,30 @@ async def import_dataset_url(request: _ImportUrlRequest):
 
     from dataset_import import MAX_FILE_BYTES, DatasetImportError, parse_csv_bytes
 
+    # SEC-F08: redirects disabled (a 302 to an internal host must not slip past
+    # the egress guard, which only validated the original URL) and the size cap
+    # enforced while streaming — abort as soon as the running byte count exceeds
+    # MAX_FILE_BYTES instead of buffering the whole body first.
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            resp = await client.get(url)
-        if resp.status_code != 200:
-            return JSONResponse({"error": f"Fetch failed: HTTP {resp.status_code}"}, status_code=400)
-        raw = resp.content
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+            async with client.stream("GET", url) as resp:
+                if resp.status_code != 200:
+                    return JSONResponse({"error": f"Fetch failed: HTTP {resp.status_code}"}, status_code=400)
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > MAX_FILE_BYTES:
+                        return JSONResponse(
+                            {"error": f"Remote file too large: exceeds {MAX_FILE_BYTES} bytes"},
+                            status_code=413,
+                        )
+                    chunks.append(chunk)
+        raw = b"".join(chunks)
     except httpx.TimeoutException:
         return JSONResponse({"error": "Fetch timed out (10s limit)"}, status_code=504)
     except httpx.HTTPError as exc:
         return JSONResponse({"error": f"Fetch failed: {type(exc).__name__}"}, status_code=400)
-
-    if len(raw) > MAX_FILE_BYTES:
-        return JSONResponse({"error": f"Remote file too large: {len(raw)} bytes (limit {MAX_FILE_BYTES})"}, status_code=413)
 
     try:
         inputs, targets = parse_csv_bytes(raw)
@@ -1161,7 +1897,7 @@ async def import_dataset_url(request: _ImportUrlRequest):
         return JSONResponse({"error": str(exc)}, status_code=400)
 
     try:
-        dataset = backend.import_dataset(inputs, targets, source_label=f"url:{url}")
+        dataset = await offload(backend.import_dataset, inputs, targets, source_label=f"url:{url}")
         return dataset or {"status": "imported"}
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
@@ -1179,6 +1915,19 @@ async def list_dataset_generators():
     Falls back to built-in demo generators when JuniperData is unavailable.
     """
     generators = []
+    # A-N5 / canopy#653. The fallback below answers HTTP 200 with a list, so a caller could
+    # not distinguish "juniper-data said these are the generators" from "juniper-data never
+    # answered and these are four demo built-ins". That is exactly the state canopy#653's
+    # ``unknown`` availability state exists to name, and it could never be reached: the
+    # dashboard's ``_fetch_generators`` only returns ``None`` when THIS route fails, which a
+    # juniper-data outage does not cause. The built-ins carry no ``available`` flag, so every
+    # gated generator then defaulted to available — a down juniper-data reported
+    # ``equities_seq`` selectable, the precise complaint A-N5 was filed for.
+    #
+    # ``upstream_unavailable`` means ATTEMPTED AND DID NOT ANSWER. It is deliberately false
+    # when ``juniper_data_available`` is false: an unconfigured deployment is demo mode, where
+    # the built-in four ARE the offering and availability is known, not unknown.
+    upstream_unavailable = False
 
     # Try JuniperData service first
     if juniper_data_available:
@@ -1186,16 +1935,47 @@ async def list_dataset_generators():
             import httpx
 
             data_url = settings.juniper_data_url.rstrip("/")
+            # Y5 (design §12.3 item 1). ``/v1/generators`` is NOT in juniper-data's
+            # EXEMPT_PATHS -- that set holds the three health probes and /metrics and
+            # nothing else -- so the route authenticates like any other. Every other
+            # canopy -> juniper-data call already sends this key, because they all go
+            # through juniper-data-client (``api_key=settings.juniper_data_api_key``);
+            # this proxy was the one raw-httpx caller that did not. On a keyed
+            # deployment it therefore 401'd and fell through to the built-in list
+            # below, which carries no ``schema`` -- so EVERY dataset's params panel
+            # rendered "No adjustable parameters". ``settings.juniper_data_api_key``
+            # is None when no key is configured, and an unkeyed juniper-data accepts
+            # the request either way, so sending nothing then is correct.
+            headers = {}
+            if settings.juniper_data_api_key:
+                headers["X-API-Key"] = settings.juniper_data_api_key
             async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(f"{data_url}/v1/generators")
+                resp = await client.get(f"{data_url}/v1/generators", headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
                     if isinstance(data, list):
                         generators = data
                     elif isinstance(data, dict) and "generators" in data:
                         generators = data["generators"]
+                else:
+                    # A reachable juniper-data that REFUSES us is a misconfiguration,
+                    # not an outage, and the fallback hides it behind a params panel
+                    # that merely looks featureless. The settings docstring for
+                    # ``juniper_data_api_key`` promises this failure is "loud rather
+                    # than silent"; at debug it was neither. The status code is the
+                    # whole diagnosis (401 = key missing/wrong, 403 = key rejected),
+                    # and nothing caller-supplied is echoed.
+                    system_logger.warning(
+                        "juniper-data refused GET /v1/generators with HTTP %s (api key %s); " "falling back to the built-in generator list, which carries no parameter schema",
+                        resp.status_code,
+                        "configured" if settings.juniper_data_api_key else "NOT configured",
+                    )
+                    upstream_unavailable = True
         except Exception as e:
+            # Unreachable service -- the fallback list is the intended demo affordance
+            # here, so this stays at debug. Only the refusal branch above is loud.
             system_logger.debug("Failed to fetch generators from JuniperData: %s", e)
+            upstream_unavailable = True
 
     # Fallback to built-in demo generators
     if not generators:
@@ -1209,7 +1989,9 @@ async def list_dataset_generators():
             {"name": "moon", "display_name": "Moon", "description": "Two interleaving half-moon classification"},
         ]
 
-    return {"generators": generators}
+    # Additive: existing consumers read ``generators`` and are unaffected. ``dataset_plotter``
+    # only needs the list; ``_fetch_generators`` reads the flag to decide KNOWN vs UNKNOWN.
+    return {"generators": generators, "upstream_unavailable": upstream_unavailable}
 
 
 @app.get("/api/decision_boundary")
@@ -1222,7 +2004,7 @@ async def get_decision_boundary(resolution: int = 100):
         Decision boundary dictionary with grid and predictions
     """
     resolution = max(5, min(200, resolution))
-    boundary = backend.get_decision_boundary(resolution)
+    boundary = await offload(backend.get_decision_boundary, resolution)
     if boundary is None:
         return JSONResponse({"error": "No decision boundary data available"}, status_code=503)
     return boundary
@@ -1362,7 +2144,12 @@ def _generate_mock_snapshots():
                 "id": f"demo_snapshot_{i + 1}",
                 "name": f"Demo Snapshot {i + 1}",
                 "timestamp": f"{ts.isoformat()}Z",
-                "size_bytes": (i + 1) * 1024 * 1024 + i * 512 * 1024,
+                # PR 2: no invented sizes. These rows name no file on disk, so a
+                # byte count is a claim about something that does not exist -- and
+                # ``(i+1) MB + i*512 KB`` is exactly the kind of plausible number that
+                # passes every sanity check a consumer might apply.
+                "size_bytes": 0,
+                "simulated": True,
                 "description": f"Demo training snapshot #{i + 1} (simulated)",
             }
         )
@@ -1405,24 +2192,132 @@ def _list_snapshot_files():
     return snapshots
 
 
+def _panel_entry_from_backend_snapshot(entry: dict) -> Optional[dict]:
+    """Normalize one cascor snapshot record to the panel's list shape (F-CANOPY-007)."""
+    snapshot_id = entry.get("id")
+    if not snapshot_id:
+        return None
+    path = str(entry.get("path") or "")
+    name = Path(path).name if path else f"{snapshot_id}.h5"
+    return {
+        "id": str(snapshot_id),
+        "name": name,
+        "timestamp": str(entry.get("modified") or entry.get("timestamp") or ""),
+        "size_bytes": int(entry.get("size_bytes") or 0),
+        "path": path,
+        "source": "cascor",
+    }
+
+
+def _backend_snapshot_inventory() -> Optional[list]:
+    """F-CANOPY-007: list snapshots from the backend that CREATES them.
+
+    Canopy proxies snapshot creation (and every restore / replay / resume /
+    retrain) to cascor, but this module listed and resolved snapshots off its
+    own local directory (``_snapshots_dir``). That only agrees with cascor when
+    the two processes share a filesystem -- the shipped compose topology
+    co-mounts one volume, which is why it was never seen -- and on any split
+    deployment (two host processes with different CWDs, a split-host deploy)
+    the list was SILENTLY empty while the create reported success. In service
+    mode the inventory therefore comes from cascor's ``GET /v1/snapshots``.
+
+    Returns the panel-shaped list, newest first, or ``None`` when the backend
+    cannot answer (not service mode, no adapter, transport failure) so the
+    caller falls back to the local directory listing.
+    """
+    if getattr(backend, "backend_type", None) != "service":
+        return None
+    adapter = getattr(backend, "_adapter", None)
+    lister = getattr(adapter, "list_snapshots", None)
+    if adapter is None or not callable(lister):
+        return None
+    try:
+        result = lister()
+    except Exception as e:  # noqa: BLE001 -- the adapter already logged; never break the route
+        system_logger.error("Backend snapshot inventory failed: %s", e)
+        return None
+    if not isinstance(result, dict) or not result.get("ok") or not isinstance(result.get("snapshots"), list):
+        return None
+    entries = []
+    for raw in result["snapshots"]:
+        entry = _panel_entry_from_backend_snapshot(raw) if isinstance(raw, dict) else None
+        if entry is not None:
+            entries.append(entry)
+    entries.sort(key=lambda item: item["timestamp"], reverse=True)
+    return entries
+
+
+def _backend_snapshot_detail(snapshot_id: str) -> Optional[dict]:
+    """F-CANOPY-007 companion for the detail route.
+
+    Returns ``{"found": bool, "snapshot": <panel-shaped dict or None>}`` from
+    cascor, or ``None`` when the backend cannot answer (not service mode, no
+    adapter, transport failure) so the caller falls back to its local lookup.
+    """
+    if getattr(backend, "backend_type", None) != "service":
+        return None
+    adapter = getattr(backend, "_adapter", None)
+    getter = getattr(adapter, "get_snapshot", None)
+    if adapter is None or not callable(getter):
+        return None
+    try:
+        result = getter(snapshot_id)
+    except Exception as e:  # noqa: BLE001
+        system_logger.error("Backend snapshot detail failed for %s: %s", snapshot_id, e)
+        return None
+    if not isinstance(result, dict) or not result.get("ok"):
+        return None
+    snapshot = result.get("snapshot")
+    if not isinstance(snapshot, dict):
+        return {"found": False, "snapshot": None}
+    return {"found": True, "snapshot": _panel_entry_from_backend_snapshot(snapshot)}
+
+
 @app.get("/api/v1/snapshots")
-async def get_snapshots():
+async def get_snapshots(limit: Optional[int] = None, offset: int = 0):
     """
     List available HDF5 snapshots.
 
+    F-CANOPY-031: the shared corpus holds 27,903+ snapshots (10.4 MB / ~4.9 s
+    as one payload) and the S-2 retention ruling is no-deletion, so unbounded
+    listing only gets worse. ``limit``/``offset`` slice the (already
+    newest-first) list server-side; ``total`` always reports the pre-slice
+    count so callers can render an honest "newest N of TOTAL". Omitting
+    ``limit`` preserves the legacy full-list behaviour for existing callers.
+
+    Args:
+        limit: Maximum snapshots to return (newest first). ``None`` = all.
+        offset: Skip this many (after the newest-first sort) before returning.
+
     Returns:
         JSON object with:
-            - snapshots: list of snapshot metadata objects
+            - snapshots: list of snapshot metadata objects (sliced)
+            - total: pre-slice count for this backend mode
             - message: optional status message
     """
-    try:
-        snapshots = _list_snapshot_files()
-    except Exception as e:
-        system_logger.error("Failed to list snapshots: %s", e)
-        snapshots = []
 
-    # Demo mode or no real snapshots available → return mock data
-    if (backend.backend_type == "demo" or not snapshots) and backend.backend_type != "service":
+    def _slice(items):
+        start = max(offset, 0)
+        if limit is None or limit <= 0:
+            return items[start:] if start else items
+        return items[start : start + limit]
+
+    # F-CANOPY-007: in service mode the inventory comes from the backend that
+    # created the files; the local directory is only the fallback.
+    inventory = await offload(_backend_snapshot_inventory)
+    if inventory is not None:
+        snapshots = inventory
+    else:
+        try:
+            snapshots = _list_snapshot_files()
+        except Exception as e:
+            system_logger.error("Failed to list snapshots: %s", e)
+            snapshots = []
+
+    # Demo mode → return mock data. (A1-iii-a: gate on ``== "demo"`` rather than
+    # ``!= "service"`` so a non-cascor, non-demo backend — e.g. recurrence — does NOT
+    # fall into the "no real snapshots" branch and serve fabricated demo snapshots.)
+    if backend.backend_type == "demo":
         # Combine session-created demo snapshots with mock snapshots
         mock_snapshots = _generate_mock_snapshots()
 
@@ -1433,12 +2328,12 @@ async def get_snapshots():
             if mock["id"] not in existing_ids:
                 combined.append(mock)
 
-        return {"snapshots": combined, "message": "Demo mode: showing simulated snapshots"}
+        return {"snapshots": _slice(combined), "total": len(combined), "message": "Demo mode: showing simulated snapshots"}
 
     if not snapshots:
-        return {"snapshots": [], "message": "No snapshots available"}
+        return {"snapshots": [], "total": 0, "message": "No snapshots available"}
 
-    return {"snapshots": snapshots}
+    return {"snapshots": _slice(snapshots), "total": len(snapshots)}
 
 
 @app.get("/api/v1/snapshots/history")
@@ -1526,26 +2421,40 @@ async def get_snapshot_detail(snapshot_id: str):
 
         raise HTTPException(status_code=404, detail="Snapshot not found")
 
-    # Real mode: find file in snapshots directory. The directory walk and
-    # ``stat`` syscall are bundled into ``_find_snapshot_file`` and run on a
-    # worker thread so the FastAPI event loop stays responsive on slow disks.
-    snapshot_file, stat, directory_missing = await asyncio.to_thread(_find_snapshot_file, _snapshots_dir, snapshot_id)
+    # F-CANOPY-007: in service mode cascor is the authority on which snapshots
+    # exist (it created them); a local copy, when also visible here (shared
+    # volume), only enriches the record with its HDF5 attributes.
+    remote = await offload(_backend_snapshot_detail, snapshot_id)
+    if remote is not None:
+        if not remote.get("found"):
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+        detail: dict = dict(remote.get("snapshot") or {})
+        detail.setdefault("attributes", None)
+        snapshot_file, _stat, _directory_missing = await asyncio.to_thread(_find_snapshot_file, _snapshots_dir, snapshot_id)
+        if snapshot_file is None:
+            return detail
+    else:
+        # Real mode without a backend inventory: find the file in the local
+        # snapshots directory. The directory walk and ``stat`` syscall are
+        # bundled into ``_find_snapshot_file`` and run on a worker thread so
+        # the FastAPI event loop stays responsive on slow disks.
+        snapshot_file, stat, directory_missing = await asyncio.to_thread(_find_snapshot_file, _snapshots_dir, snapshot_id)
 
-    if directory_missing:
-        raise HTTPException(status_code=404, detail="Snapshot directory not found")
-    if snapshot_file is None or stat is None:
-        raise HTTPException(status_code=404, detail="Snapshot not found")
+        if directory_missing:
+            raise HTTPException(status_code=404, detail="Snapshot directory not found")
+        if snapshot_file is None or stat is None:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
 
-    ts = datetime.fromtimestamp(stat.st_mtime, tz=UTC).replace(microsecond=0)
+        ts = datetime.fromtimestamp(stat.st_mtime, tz=UTC).replace(microsecond=0)
 
-    detail = {
-        "id": snapshot_file.stem,
-        "name": snapshot_file.name,
-        "timestamp": f"{ts.isoformat()}Z",
-        "size_bytes": stat.st_size,
-        "path": str(snapshot_file.absolute()),
-        "attributes": None,
-    }
+        detail = {
+            "id": snapshot_file.stem,
+            "name": snapshot_file.name,
+            "timestamp": f"{ts.isoformat()}Z",
+            "size_bytes": stat.st_size,
+            "path": str(snapshot_file.absolute()),
+            "attributes": None,
+        }
 
     # Optional: if h5py is available, read HDF5 root attributes
     try:
@@ -1564,16 +2473,28 @@ async def get_snapshot_detail(snapshot_id: str):
     return detail
 
 
-# Session-persistent storage for demo mode snapshots (P3-1)
-_demo_snapshots: list = []
+# Session-persistent storage for demo mode snapshots (P3-1).
+# BUG-CN-08: bounded by ``maxlen`` so the list can't grow unbounded across
+# a long demo session — older snapshots fall off the tail LRU-style. 100
+# is enough for any realistic demo run; existing callers iterate the
+# whole collection and don't depend on list-specific methods beyond
+# ``insert(0, ...)`` (now ``.appendleft(...)``).
+_DEMO_SNAPSHOTS_MAX = 100
+_demo_snapshots: deque = deque(maxlen=_DEMO_SNAPSHOTS_MAX)
 
 # Meta parameter key prefixes captured in snapshots
 _META_PARAM_PREFIXES = ("nn_", "cn_")
 
 
-def _extract_meta_params() -> dict:
-    """Extract current nn_*/cn_* meta parameters from the backend status."""
-    status = backend.get_status()
+async def _extract_meta_params() -> dict:
+    """Extract current nn_*/cn_* meta parameters from the backend status.
+
+    X7: async because it reaches cascor. This helper is why the committed AST gate is
+    necessary but not sufficient — at both call sites the receiver is a bare module
+    function, not an I/O client, so a receiver-resolving scan sees nothing at all while
+    the call blocks the loop exactly as ``backend.get_status()`` does.
+    """
+    status = await offload(backend.get_status)
     return {k: v for k, v in status.items() if any(k.startswith(p) for p in _META_PARAM_PREFIXES)}
 
 
@@ -1616,14 +2537,17 @@ def _log_snapshot_activity(action: str, snapshot_id: str, details: dict = None, 
 @app.post("/api/v1/snapshots", status_code=201)
 async def create_snapshot(
     name: str = None,
-    description: str = None,
+    description: str = "",
 ):
     """
     Create a new HDF5 snapshot of the current training state.
 
     Args:
         name: Optional custom name for the snapshot (auto-generated if not provided)
-        description: Optional description for the snapshot
+        description: Optional description for the snapshot. Defaults to "" (never
+            ``None``) — cascor's ``SnapshotCreateRequest.description: str`` accepts an
+            omitted/blank string but 422s an explicit ``null``, so a blank description
+            must never be forwarded as ``None`` (plan N4 / incident I-3).
 
     Returns:
         JSON object with the created snapshot metadata
@@ -1643,28 +2567,41 @@ async def create_snapshot(
 
     # Demo mode: create mock snapshot entry
     if backend.backend_type == "demo":
-        size_bytes = 1024 * 1024 + int(now.timestamp()) % (512 * 1024)  # ~1-1.5 MB mock size
-        meta_params = _extract_meta_params()
+        # PR 2 (demo-mode honesty). This branch used to invent a *plausible* size --
+        # ``1 MB + timestamp % 512 KB``, i.e. ~1-1.5 MB -- for a file it never writes, and
+        # report it beside a ``path`` inside the real (often bind-mounted) snapshot
+        # archive. A plausible number is worse than no number: it survives every sanity
+        # check a consumer might apply, so a demo entry is indistinguishable from a real
+        # snapshot in the listing, in the activity log, and in anything that later totals
+        # archive size. Zero is the truth -- no bytes were written.
+        size_bytes = 0
+        meta_params = await _extract_meta_params()
 
         snapshot = {
             "id": snapshot_id,
             "name": snapshot_name,
             "timestamp": f"{now.replace(microsecond=0).isoformat()}Z",
             "size_bytes": size_bytes,
+            # Machine-readable, and not merely a prose default: the previous marker lived
+            # only in ``description``, which the caller overwrites whenever it supplies
+            # one of its own -- so a described demo snapshot carried no marker at all.
+            "simulated": True,
             "description": description or "Demo snapshot (no real HDF5 file)",
             "path": f"{_snapshots_dir}/{snapshot_name}",
             "meta_params": meta_params,
         }
 
         # Include dataset versioning metadata for reproducibility
-        status = backend.get_status()
+        status = await offload(backend.get_status)
         if "dataset_name" in status:
             snapshot["dataset_name"] = status["dataset_name"]
         if "dataset_version" in status:
             snapshot["dataset_version"] = status["dataset_version"]
 
-        # Add to session-persistent demo snapshots list
-        _demo_snapshots.insert(0, snapshot)
+        # Add to session-persistent demo snapshots list (deque appendleft is
+        # the O(1) equivalent of list.insert(0, ...); maxlen drops the oldest
+        # entry when the cap is reached — see BUG-CN-08).
+        _demo_snapshots.appendleft(snapshot)
 
         # Log the activity
         _log_snapshot_activity(
@@ -1684,14 +2621,51 @@ async def create_snapshot(
     # Real mode: create actual HDF5 file via backend
     try:
         snapshot_path = Path(_snapshots_dir) / snapshot_name
+        # Path-containment guard: defense-in-depth over
+        # ``_sanitize_snapshot_name`` (which already 400s traversal
+        # sequences), and the explicit taint barrier CodeQL's
+        # py/path-injection query recognizes — the resolved target must stay
+        # inside the snapshots directory.
+        snapshots_base = await asyncio.to_thread(Path(_snapshots_dir).resolve)
+        snapshot_path = await asyncio.to_thread(snapshot_path.resolve)
+        if not snapshot_path.is_relative_to(snapshots_base):
+            raise HTTPException(status_code=400, detail="Invalid snapshot name")
         # ``mkdir`` is a sync syscall — push to a worker thread so a slow
         # disk doesn't stall the event loop. ``exist_ok=True`` keeps the
         # call idempotent on a hot path that may run frequently.
         await asyncio.to_thread(Path(_snapshots_dir).mkdir, parents=True, exist_ok=True)
 
-        # Attempt to create HDF5 snapshot via CasCor integration
-        if hasattr(backend, "_adapter") and hasattr(backend._adapter, "save_snapshot"):
-            backend._adapter.save_snapshot(str(snapshot_path), description=description)
+        # Attempt to create HDF5 snapshot via CasCor integration. (A1-iii-a: gate on
+        # ``backend_type == "service"`` — recurrence also exposes ``_adapter`` but it is a
+        # ``RecurrenceServiceAdapter`` with cascor-incompatible semantics, so it must use
+        # the h5py state-dump fallback below, never the cascor adapter's ``save_snapshot``.)
+        if backend.backend_type == "service" and hasattr(backend, "_adapter") and hasattr(backend._adapter, "save_snapshot"):
+            # N4 (plan I-3): normalize a ``None`` description to "" at the seam — the
+            # adapter defaults to "" and the cascor-client would otherwise POST
+            # ``{"description": null}``, which cascor rejects with a 422.
+            #
+            # Wave-1 E2E finding (2026-07-18): the local ``snapshot_path`` is a
+            # hint the adapter deliberately IGNORES — cascor names and stores
+            # the snapshot server-side, and canopy shares no filesystem with it
+            # (the deploy stack mounts no snapshot volume into canopy). The
+            # former post-save ``snapshot_path.stat()`` therefore raised ENOENT
+            # and turned every SUCCESSFUL service-mode save into a 500. Build
+            # the response from cascor's own metadata instead; the local stat
+            # now lives only in the h5py fallback branch, which really writes
+            # the file it stats.
+            result = await offload(backend._adapter.save_snapshot, str(snapshot_path), description=description or "")
+            data = result.get("data", result) if isinstance(result, dict) else {}
+            if not isinstance(data, dict):
+                data = {}
+            server_id = data.get("id") or snapshot_id
+            snapshot = {
+                "id": server_id,
+                "name": f"{server_id}.h5",
+                "timestamp": data.get("timestamp") or f"{now.replace(microsecond=0).isoformat()}Z",
+                "size_bytes": data.get("size_bytes", 0),
+                "description": data.get("description", description),
+                "path": data.get("path", ""),
+            }
         else:
             # Fallback: create a minimal HDF5 file with current state
             try:
@@ -1710,7 +2684,7 @@ async def create_snapshot(
                                 state_group.attrs[key] = value
 
                     # Store nn_*/cn_* meta parameters
-                    meta_params = _extract_meta_params()
+                    meta_params = await _extract_meta_params()
                     if meta_params:
                         mp_group = f.create_group("meta_params")
                         for key, value in meta_params.items():
@@ -1723,21 +2697,23 @@ async def create_snapshot(
                     detail="h5py not available for creating HDF5 snapshots",
                 ) from e
 
-        # Get file stats after creation
-        stat = snapshot_path.stat()
-        ts = datetime.fromtimestamp(stat.st_mtime, tz=UTC).replace(microsecond=0)
+            # Get file stats after creation (the fallback genuinely wrote this
+            # file locally, so the stat is valid here — the service branch
+            # above never reaches this).
+            stat = snapshot_path.stat()
+            ts = datetime.fromtimestamp(stat.st_mtime, tz=UTC).replace(microsecond=0)
 
-        snapshot = {
-            "id": snapshot_id,
-            "name": snapshot_name,
-            "timestamp": f"{ts.isoformat()}Z",
-            "size_bytes": stat.st_size,
-            "description": description,
-            "path": str(snapshot_path.absolute()),
-        }
+            snapshot = {
+                "id": snapshot_id,
+                "name": snapshot_name,
+                "timestamp": f"{ts.isoformat()}Z",
+                "size_bytes": stat.st_size,
+                "description": description,
+                "path": str(snapshot_path.absolute()),
+            }
 
         # Include dataset versioning metadata for reproducibility
-        status = backend.get_status()
+        status = await offload(backend.get_status)
         if "dataset_name" in status:
             snapshot["dataset_name"] = status["dataset_name"]
         if "dataset_version" in status:
@@ -1746,12 +2722,12 @@ async def create_snapshot(
         # Log the activity
         _log_snapshot_activity(
             action="create",
-            snapshot_id=snapshot_id,
-            details={"name": snapshot_name, "size_bytes": stat.st_size, "mode": "real"},
+            snapshot_id=snapshot["id"],
+            details={"name": snapshot["name"], "size_bytes": snapshot["size_bytes"], "mode": "real"},
             message="Snapshot created successfully",
         )
 
-        system_logger.info("Created snapshot: %s at %s", snapshot_id, snapshot_path)
+        system_logger.info("Created snapshot: %s at %s", snapshot["id"], snapshot["path"] or snapshot_path)
 
         return {
             **snapshot,
@@ -1762,9 +2738,16 @@ async def create_snapshot(
         raise
     except Exception as e:
         system_logger.error("Failed to create snapshot: %s", e)
+        # N4 (plan I-3): carry the upstream failure reason in the HTTP detail
+        # (truncated for display) so the frontend toast shows the actual cause
+        # instead of doubling a generic constant with zero diagnostic content.
+        # In service mode the failure is cascor's: its answer passes, and a
+        # transport failure is named by type -- its text can quote the key a
+        # client refused to send (#683 validation, ``outbound_errors``).
+        reason = outbound_error_text(e) if backend.backend_type == "service" else (str(e) or e.__class__.__name__)
         raise HTTPException(
             status_code=500,
-            detail="Failed to create snapshot",
+            detail=f"Failed to create snapshot: {reason[:300]}",
         ) from e
 
 
@@ -1794,7 +2777,8 @@ async def restore_snapshot(snapshot_id: str):
     global training_state
 
     # Check if training is running - only allow restore when paused/stopped
-    if backend.is_training_active():
+    training_is_active = await offload(backend.is_training_active)
+    if training_is_active:
         raise HTTPException(
             status_code=409,
             detail="Cannot restore while training is running. Please pause or stop training first.",
@@ -1843,7 +2827,7 @@ async def restore_snapshot(snapshot_id: str):
         # Demo mode: simulate restore by resetting training state
         if backend.backend_type == "demo":
             # Reset demo mode state
-            backend.reset_training()
+            await offload(backend.reset_training)
 
             # Update training state with simulated restored values
             if training_state:
@@ -1857,7 +2841,7 @@ async def restore_snapshot(snapshot_id: str):
             # Restore meta parameters if the snapshot captured them
             meta_params = snapshot_data.get("meta_params")
             if meta_params:
-                backend.apply_params(**meta_params)
+                await offload(backend.apply_params, **meta_params)
 
             restored_state = {
                 "snapshot_id": snapshot_id,
@@ -1901,8 +2885,10 @@ async def restore_snapshot(snapshot_id: str):
         snapshot_path = Path(snapshot_data.get("path", f"{_snapshots_dir}/{snapshot_id}.h5"))
         meta_params = None
 
-        if hasattr(backend, "_adapter") and hasattr(backend._adapter, "load_snapshot"):
-            backend._adapter.load_snapshot(str(snapshot_path))
+        # A1-iii-a: gate on ``backend_type == "service"`` — recurrence's ``_adapter`` is a
+        # different type, so it falls to the h5py fallback rather than cascor's load path.
+        if backend.backend_type == "service" and hasattr(backend, "_adapter") and hasattr(backend._adapter, "load_snapshot"):
+            await offload(backend._adapter.load_snapshot, str(snapshot_path))
         else:
             # Fallback: read HDF5 file and restore state
             try:
@@ -1938,7 +2924,7 @@ async def restore_snapshot(snapshot_id: str):
                 pass
 
         if meta_params:
-            backend.apply_params(**meta_params)
+            await offload(backend.apply_params, **meta_params)
 
         restored_state = {
             "snapshot_id": snapshot_id,
@@ -2052,17 +3038,18 @@ async def replay_snapshot_route(snapshot_id: str):
     from fastapi import HTTPException
 
     snapshot_id = _sanitize_snapshot_name(snapshot_id)
-    if backend.is_training_active():
+    training_is_active = await offload(backend.is_training_active)
+    if training_is_active:
         raise HTTPException(status_code=409, detail="Cannot start replay while training is running. Pause or stop training first.")
     adapter = _require_service_adapter()
     try:
-        result = adapter.replay_snapshot(snapshot_id)
+        result = await offload(adapter.replay_snapshot, snapshot_id)
         _log_snapshot_activity(action="replay", snapshot_id=snapshot_id, details={"mode": "service"}, message=f"Started replay of snapshot {snapshot_id}")
         _broadcast_snapshot_op("replay_started", snapshot_id, payload=result)
         return result
     except Exception as e:
         system_logger.error("Failed to start replay for %s: %s", snapshot_id, e)
-        raise HTTPException(status_code=500, detail=f"Failed to start replay: {e}") from e
+        raise HTTPException(status_code=500, detail=f"Failed to start replay: {outbound_error_text(e)}") from e
 
 
 class _ReplayControlBody(BaseModel):
@@ -2086,7 +3073,7 @@ async def replay_control_route(snapshot_id: str, body: _ReplayControlBody):
     adapter = _require_service_adapter()
     params = body.model_dump(exclude_none=True, exclude={"action"})
     try:
-        result = adapter.replay_control(snapshot_id, body.action, **params)
+        result = await offload(adapter.replay_control, snapshot_id, body.action, **params)
         # Don't log/broadcast every play/pause/seek tick — too noisy. The
         # ``stop`` action is the meaningful one to surface.
         if body.action.lower() == "stop":
@@ -2099,7 +3086,7 @@ async def replay_control_route(snapshot_id: str, body: _ReplayControlBody):
         # we don't get to see the underlying status here without parsing
         # JuniperCascorClientError. Map all to 500 for now and let the
         # message carry the cascor detail.
-        raise HTTPException(status_code=500, detail=f"Replay control failed: {e}") from e
+        raise HTTPException(status_code=500, detail=f"Replay control failed: {outbound_error_text(e)}") from e
 
 
 @app.post("/api/v1/snapshots/{snapshot_id}/resume")
@@ -2113,17 +3100,18 @@ async def resume_snapshot_route(snapshot_id: str):
     from fastapi import HTTPException
 
     snapshot_id = _sanitize_snapshot_name(snapshot_id)
-    if backend.is_training_active():
+    training_is_active = await offload(backend.is_training_active)
+    if training_is_active:
         raise HTTPException(status_code=409, detail="Cannot resume while training is running. Pause or stop training first.")
     adapter = _require_service_adapter()
     try:
-        result = adapter.resume_snapshot(snapshot_id)
+        result = await offload(adapter.resume_snapshot, snapshot_id)
         _log_snapshot_activity(action="resume", snapshot_id=snapshot_id, details={"mode": "service"}, message=f"Resumed snapshot {snapshot_id}")
         _broadcast_snapshot_op("resumed", snapshot_id, payload=result)
         return result
     except Exception as e:
         system_logger.error("Failed to resume %s: %s", snapshot_id, e)
-        raise HTTPException(status_code=500, detail=f"Failed to resume: {e}") from e
+        raise HTTPException(status_code=500, detail=f"Failed to resume: {outbound_error_text(e)}") from e
 
 
 @app.post("/api/v1/snapshots/{snapshot_id}/retrain")
@@ -2134,17 +3122,18 @@ async def retrain_snapshot_route(snapshot_id: str):
     from fastapi import HTTPException
 
     snapshot_id = _sanitize_snapshot_name(snapshot_id)
-    if backend.is_training_active():
+    training_is_active = await offload(backend.is_training_active)
+    if training_is_active:
         raise HTTPException(status_code=409, detail="Cannot retrain while training is running. Pause or stop training first.")
     adapter = _require_service_adapter()
     try:
-        result = adapter.retrain_snapshot(snapshot_id)
+        result = await offload(adapter.retrain_snapshot, snapshot_id)
         _log_snapshot_activity(action="retrain", snapshot_id=snapshot_id, details={"mode": "service"}, message=f"Retrain prepared from snapshot {snapshot_id}")
         _broadcast_snapshot_op("retrain_ready", snapshot_id, payload=result)
         return result
     except Exception as e:
         system_logger.error("Failed to retrain from %s: %s", snapshot_id, e)
-        raise HTTPException(status_code=500, detail=f"Failed to retrain: {e}") from e
+        raise HTTPException(status_code=500, detail=f"Failed to retrain: {outbound_error_text(e)}") from e
 
 
 # ============================================================================
@@ -2178,7 +3167,8 @@ async def patch_weights_route(body: _PatchWeightsBody):
 
     adapter = _require_service_adapter()
     try:
-        return adapter.patch_weights(
+        return await offload(
+            adapter.patch_weights,
             target=body.target,
             field=body.field,
             values=body.values,
@@ -2187,7 +3177,7 @@ async def patch_weights_route(body: _PatchWeightsBody):
         )
     except Exception as e:
         system_logger.error("patch_weights failed (target=%s, field=%s): %s", body.target, body.field, e)
-        raise HTTPException(status_code=500, detail=f"patch_weights failed: {e}") from e
+        raise HTTPException(status_code=500, detail=f"patch_weights failed: {outbound_error_text(e)}") from e
 
 
 class _AddHiddenUnitBody(BaseModel):
@@ -2208,14 +3198,15 @@ async def add_hidden_unit_route(body: _AddHiddenUnitBody):
 
     adapter = _require_service_adapter()
     try:
-        return adapter.add_hidden_unit(
+        return await offload(
+            adapter.add_hidden_unit,
             weights=body.weights,
             bias=body.bias,
             activation=body.activation,
         )
     except Exception as e:
         system_logger.error("add_hidden_unit failed (activation=%s): %s", body.activation, e)
-        raise HTTPException(status_code=500, detail=f"add_hidden_unit failed: {e}") from e
+        raise HTTPException(status_code=500, detail=f"add_hidden_unit failed: {outbound_error_text(e)}") from e
 
 
 @app.delete("/api/v1/network/hidden-units/{idx}")
@@ -2225,10 +3216,10 @@ async def remove_hidden_unit_route(idx: int):
 
     adapter = _require_service_adapter()
     try:
-        return adapter.remove_hidden_unit(idx=idx)
+        return await offload(adapter.remove_hidden_unit, idx=idx)
     except Exception as e:
         system_logger.error("remove_hidden_unit(idx=%d) failed: %s", idx, e)
-        raise HTTPException(status_code=500, detail=f"remove_hidden_unit failed: {e}") from e
+        raise HTTPException(status_code=500, detail=f"remove_hidden_unit failed: {outbound_error_text(e)}") from e
 
 
 # ============================================================================
@@ -2441,7 +3432,7 @@ async def get_redis_status():
     from backend.redis_client import get_redis_client
 
     client = get_redis_client()
-    return client.get_status()
+    return await asyncio.to_thread(client.get_status)
 
 
 @app.get("/api/v1/redis/metrics")
@@ -2458,7 +3449,7 @@ async def get_redis_metrics():
     from backend.redis_client import get_redis_client
 
     client = get_redis_client()
-    return client.get_metrics()
+    return await asyncio.to_thread(client.get_metrics)
 
 
 # ============================================================================
@@ -2483,7 +3474,7 @@ async def get_cassandra_status():
     from backend.cassandra_client import get_cassandra_client
 
     client = get_cassandra_client()
-    return client.get_status()
+    return await asyncio.to_thread(client.get_status)
 
 
 @app.get("/api/v1/cassandra/metrics")
@@ -2500,7 +3491,7 @@ async def get_cassandra_metrics():
     from backend.cassandra_client import get_cassandra_client
 
     client = get_cassandra_client()
-    return client.get_metrics()
+    return await asyncio.to_thread(client.get_metrics)
 
 
 # ============================================================================
@@ -2518,7 +3509,7 @@ async def get_worker_stats():
     """
     if backend.backend_type == "service" and hasattr(backend, "_adapter"):
         try:
-            result = backend._adapter._client.get_worker_stats()
+            result = await offload(backend._adapter._client.get_worker_stats)
             return result.get("data", result)
         except Exception:
             # SEC-14: return an opaque error_id instead of the exception message.
@@ -2536,6 +3527,11 @@ async def get_worker_stats():
                 "error_id": error_id,
             }
 
+    # A1-iii-a: a one-shot LMU regressor has no distributed worker pool — return an
+    # empty pool rather than the synthetic demo fixtures below (which are demo-only).
+    if backend.backend_type == "recurrence":
+        return {"total": 0, "idle": 0, "busy": 0, "stale": 0, "total_tasks_completed": 0, "total_tasks_failed": 0, "average_health_score": 0}
+
     import time
 
     return {"total": 2, "idle": 1, "busy": 1, "stale": 0, "total_tasks_completed": 42, "total_tasks_failed": 1, "average_health_score": 0.9767, "timestamp": time.time()}
@@ -2544,20 +3540,42 @@ async def get_worker_stats():
 @app.get("/api/v1/workers/list")
 async def get_worker_list():
     """
-    List all registered remote workers with status (CAN-HIGH-005).
+    List registered workers with status, kind (local/remote), and heartbeat (CAN-HIGH-005; N10 / U-5).
 
-    In service mode, delegates to JuniperCascor /v1/workers endpoint.
-    In demo mode, returns synthetic worker data.
+    In service mode, delegates to JuniperCascor ``GET /v1/workers``. Per the N10
+    worker-registration discovery, cascor's registry (``src/api/workers/registry.py``)
+    models **remote** WebSocket-registered workers only and carries no locality field;
+    the local in-process candidate pool (``src/parallelism/task_distributor.py``) is
+    tracked separately and is not individually enumerated by any REST route. Each
+    returned worker is therefore annotated ``kind="remote"`` (a backend-supplied
+    ``kind`` is honored for forward-compatibility), and ``local_reported`` is ``False``
+    so the Workers tab renders an honest "local workers not individually reported"
+    note instead of fabricating local records.
+
+    In demo mode, returns synthetic workers — one ``local`` and one ``remote`` — so
+    the tab exercises both kinds (a clearly-labeled demo mock).
     """
     if backend.backend_type == "service" and hasattr(backend, "_adapter"):
         try:
-            result = backend._adapter._client.list_workers()
-            return result.get("data", result)
+            result = await offload(backend._adapter._client.list_workers)
+            data = result.get("data", result)
+            if isinstance(data, dict):
+                for worker in data.get("workers", []) or []:
+                    if isinstance(worker, dict):
+                        # cascor exposes only remote WS workers; label them as such
+                        # without overwriting a future backend-supplied kind.
+                        worker.setdefault("kind", "remote")
+                data.setdefault("local_reported", False)
+            return data
         except Exception:
             # SEC-14: return an opaque error_id instead of the exception message.
             error_id = uuid.uuid4().hex[:12]
             system_logger.warning("Failed to fetch worker list from CasCor [error_id=%s]", error_id)
-            return {"workers": [], "count": 0, "error": "Upstream error", "error_id": error_id}
+            return {"workers": [], "count": 0, "local_reported": False, "error": "Upstream error", "error_id": error_id}
+
+    # A1-iii-a: recurrence (one-shot LMU) has no worker pool — empty list, not demo fixtures.
+    if backend.backend_type == "recurrence":
+        return {"workers": [], "count": 0, "local_reported": False}
 
     import time
 
@@ -2565,6 +3583,7 @@ async def get_worker_list():
         "workers": [
             {
                 "worker_id": "worker-demo-01",
+                "kind": "local",
                 "capabilities": {"cpu_cores": 8, "gpu": False, "python": "3.13"},
                 "connected_at": time.time() - 600,
                 "last_heartbeat": time.time() - 2,
@@ -2576,6 +3595,7 @@ async def get_worker_list():
             },
             {
                 "worker_id": "worker-demo-02",
+                "kind": "remote",
                 "capabilities": {"cpu_cores": 4, "gpu": True, "python": "3.13"},
                 "connected_at": time.time() - 300,
                 "last_heartbeat": time.time() - 1,
@@ -2587,6 +3607,7 @@ async def get_worker_list():
             },
         ],
         "count": 2,
+        "local_reported": True,
     }
 
 
@@ -2604,7 +3625,10 @@ async def ws_endpoint(websocket: WebSocket):
 
     Handles both text and non-text frames gracefully.
     """
-    if not await _authenticate_websocket(websocket):
+    # PR-1 (C5): read-only compat stream — relax the key gate so the keyless
+    # same-origin browser is admitted by the Origin gate below (no state to
+    # forge, no CSRF frame). A present key is still validated.
+    if not await _authenticate_websocket(websocket, allow_browser_auth=True):
         return
 
     # SEC-06: opt-in bearer-token auth over Sec-WebSocket-Protocol
@@ -2626,12 +3650,26 @@ async def ws_endpoint(websocket: WebSocket):
             await websocket.close(code=4003, reason="Origin not allowed")
             return
 
-    # SEC-12: Per-IP connection cap (parity with /ws/training, /ws/control)
-    if not websocket_manager.check_per_ip_limit(websocket, ws_settings.max_connections_per_ip):
+    # SEC-F19 / D4: per-IP cap (DoS-dampening, INERT BEHIND NAT) + per-session
+    # cap keyed on the anonymous canopy_session cookie; the global cap
+    # (connect()) backstops cookieless connections. Parity with /ws/training,
+    # /ws/control. Over-cap -> close 1013.
+    if not websocket_manager.check_connection_limits(
+        websocket,
+        max_per_ip=ws_settings.max_connections_per_ip,
+        max_per_session=ws_settings.max_connections_per_session,
+    ):
         await websocket.close(code=1013, reason="Per-IP connection limit reached")
         return
 
-    await websocket_manager.connect(websocket, subprotocol=ws_subprotocol)
+    try:
+        connected = await websocket_manager.connect(websocket, subprotocol=ws_subprotocol)
+    except Exception:
+        websocket_manager.release_connection_limits(websocket)
+        raise
+    if not connected:
+        websocket_manager.release_connection_limits(websocket)
+        return
     try:
         while True:
             await websocket.receive_text()
@@ -2643,91 +3681,634 @@ async def ws_endpoint(websocket: WebSocket):
         websocket_manager.disconnect(websocket)
 
 
-@app.post("/api/train/start")
-async def api_train_start(reset: bool = False):
+def _control_result_failure(result: Any) -> Optional[str]:
+    """Return the backend failure message when a control result signals failure, else None.
+
+    Backends return ``ControlResult`` (TypedDict, total=False): only an explicit
+    ``ok=False`` is a failure. An absent ``ok`` (demo-state dicts) or a non-dict
+    result keeps the legacy success interpretation, so demo and pre-ControlResult
+    shapes are unaffected. Phase D §S10 error surfacing keys off error envelopes
+    and non-2xx responses — wrapping an ``ok=False`` result in a success envelope
+    is the "dead button" class (training-start diagnosis 2026-07-09 §4.2).
+    """
+    if isinstance(result, dict) and result.get("ok") is False:
+        return str(result.get("error") or "command failed")
+    return None
+
+
+class _TrainStartBody(BaseModel):
+    """Optional body for ``POST /api/train/start`` (A1-iii-a).
+
+    Lets a one-shot (recurrence) fit carry its dataset reference + LMU hyperparameters.
+    Ignored for cascor/demo (which start from a separately-staged/pending dataset). Every
+    field is optional so the existing no-body ``?reset=`` callers are unaffected.
+    """
+
+    dataset: dict | None = None  # {generator | name | dataset_id, params, split}
+    d: int | None = None
+    theta: float | None = None
+    ridge: float | None = None
+
+
+@app.post("/api/train/start", dependencies=[Depends(require_browser_control_auth)])
+async def api_train_start(reset: bool = False, body: _TrainStartBody | None = None):
     """
     Start training.
     Args:
         reset: Whether to reset network before starting
+        body: Optional one-shot dataset ref + LMU hyperparameters (recurrence only)
     Returns:
         Training status
     """
+    from fastapi import HTTPException
+
     from communication.websocket_manager import create_control_ack_message
 
-    result = backend.start_training(reset=reset)
+    # A1-iii-a: forward a one-shot dataset-ref + hyperparameters for recurrence; cascor/demo
+    # keep the bare reset-only call (no extra kwargs reach their start_training).
+    # N3 note: the start-fresh toggle (Q4) is driven exclusively through the
+    # dedicated POST /api/train/restart orchestration route, which calls
+    # ``backend.start_training(reset=..., start_fresh=...)`` directly — the plain
+    # Start route keeps its existing signature (start_fresh defaults to False).
+    # N5: refuse when the recorded selection is not the backend that would run. The sidebar
+    # already reads "NOT ACTIVE" in that state (canopy#592); this is what stops the run itself.
+    inactive = _selection_inactive_reason()
+    if inactive is not None:
+        system_logger.warning("Training start refused: %s", inactive)
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, inactive)))
+        raise HTTPException(status_code=409, detail=f"Training could not be started: {inactive}")
+    start_kwargs = _recurrence_start_kwargs(body.model_dump()) if (backend.backend_type == "recurrence" and body is not None) else {}
+    result = await offload(backend.start_training, reset=reset, **start_kwargs)
+    failure = _control_result_failure(result)
+    if failure is not None:
+        system_logger.warning("Training start rejected: %s", failure)
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, failure)))
+        raise HTTPException(status_code=409, detail=f"Training could not be started: {failure}")
     message = "Training started successfully"
     schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", True, message)))
     return {"status": "started", **result}
 
 
-@app.post("/api/train/pause")
+@app.post("/api/train/pause", dependencies=[Depends(require_browser_control_auth)])
 async def api_train_pause():
     """
     Pause training.
     Returns:
         Training status
     """
+    from fastapi import HTTPException
+
     from communication.websocket_manager import create_control_ack_message
 
-    backend.pause_training()
+    result = await offload(backend.pause_training)
+    failure = _control_result_failure(result)
+    if failure is not None:
+        system_logger.warning("Training pause rejected: %s", failure)
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("pause", False, failure)))
+        raise HTTPException(status_code=409, detail=f"Training could not be paused: {failure}")
     schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("pause", True, "Training paused")))
     return {"status": "paused"}
 
 
-@app.post("/api/train/resume")
+@app.post("/api/train/resume", dependencies=[Depends(require_browser_control_auth)])
 async def api_train_resume():
     """
     Resume training.
     Returns:
         Training status
     """
+    from fastapi import HTTPException
+
     from communication.websocket_manager import create_control_ack_message
 
-    backend.resume_training()
+    result = await offload(backend.resume_training)
+    failure = _control_result_failure(result)
+    if failure is not None:
+        system_logger.warning("Training resume rejected: %s", failure)
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("resume", False, failure)))
+        raise HTTPException(status_code=409, detail=f"Training could not be resumed: {failure}")
     schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("resume", True, "Training resumed")))
     return {"status": "running"}
 
 
-@app.post("/api/train/stop")
+@app.post("/api/train/stop", dependencies=[Depends(require_browser_control_auth)])
 async def api_train_stop():
     """
     Stop training.
     Returns:
         Training status
     """
+    from fastapi import HTTPException
+
     from communication.websocket_manager import create_control_ack_message
 
-    backend.stop_training()
+    result = await offload(backend.stop_training)
+    failure = _control_result_failure(result)
+    if failure is not None:
+        system_logger.warning("Training stop rejected: %s", failure)
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", False, failure)))
+        raise HTTPException(status_code=409, detail=f"Training could not be stopped: {failure}")
     schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", True, "Training stopped")))
     return {"status": "stopped"}
 
 
-@app.post("/api/train/reset")
+@app.post("/api/train/reset", dependencies=[Depends(require_browser_control_auth)])
 async def api_train_reset():
     """
     Reset training.
     Returns:
         Training status with reset state
     """
+    from fastapi import HTTPException
+
     from communication.websocket_manager import create_control_ack_message
 
-    result = backend.reset_training()
+    result = await offload(backend.reset_training)
+    failure = _control_result_failure(result)
+    if failure is not None:
+        system_logger.warning("Training reset rejected: %s", failure)
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("reset", False, failure)))
+        raise HTTPException(status_code=409, detail=f"Training could not be reset: {failure}")
     schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("reset", True, "Training reset")))
     return {"status": "reset", **result}
 
 
-@app.get("/api/train/status")
+@app.get("/api/train/status", dependencies=[Depends(require_browser_control_auth)])
 async def api_train_status():
     """
     Get current training status (P1-NEW-003).
     Returns:
         Training status dictionary with network info and training state.
     """
-    return {"backend": backend.backend_type, **backend.get_status()}
+    status = await offload(backend.get_status)
+    return {"backend": backend.backend_type, "execution": backend.execution, **status}
+
+
+class _TrainRestartBody(BaseModel):
+    """Body for ``POST /api/train/restart`` (N3 cold-swap restart orchestration)."""
+
+    # N3 / Q4 / cascor C5: start-fresh toggle (default off) — see _TrainStartBody.
+    start_fresh: bool = False
+    # Legacy network-reset flag, forwarded to the backend for demo parity (cascor
+    # consumes the staged dataset + rebuilds regardless; start_fresh carries the
+    # explicit model-discard semantics for the service path).
+    reset: bool = True
+
+
+async def _await_training_stopped(timeout_s: float, poll: float) -> bool:
+    """Poll (bounded) until the backend reports training is no longer active.
+
+    Returns True once stopped, False on timeout. Status reads run off the event
+    loop (``asyncio.to_thread``) so a slow cascor cannot stall the single uvicorn
+    worker while we wait out the current run (plan §8 stop→start race).
+    """
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while True:
+        if not await offload(backend.is_training_active):
+            return True
+        if asyncio.get_running_loop().time() >= deadline:
+            return False
+        await asyncio.sleep(poll)
+
+
+async def _peek_training_completed(budget: float, poll: float) -> bool:
+    """Best-effort: did the just-started run already reach a terminal state?
+
+    Folded finding 2 (2026-07-19 live pass): a ``start_fresh`` rebuild on a tiny
+    dataset can converge at epoch 0 with empty history. This bounded peek lets the
+    restart outcome read truthfully ("converged immediately") instead of looking
+    frozen — it exits fast once the run is genuinely progressing (``is_running``
+    with ``current_epoch > 0``) and swallows every error so it can NEVER turn a
+    successful restart into a failure. Live status polling (N1/N2) remains the
+    real source of truth.
+    """
+    try:
+        deadline = asyncio.get_running_loop().time() + budget
+        while True:
+            status = await offload(backend.get_status)
+            if isinstance(status, dict):
+                if status.get("completed") or status.get("failed"):
+                    return True
+                if status.get("is_running") and (status.get("current_epoch") or 0) > 0:
+                    return False
+            if asyncio.get_running_loop().time() >= deadline:
+                return False
+            await asyncio.sleep(poll)
+    except Exception:  # pragma: no cover - the peek must never break a restart
+        return False
+
+
+@app.post("/api/train/restart", dependencies=[Depends(require_browser_control_auth)])
+async def api_train_restart(body: _TrainRestartBody | None = None):
+    """N3 (canopy training-runtime defects plan, I-6): cold-swap restart with the
+    staged dataset, surfacing every step's outcome.
+
+    Sequence (E-2 pin — a start against an ACTIVE run 409s immediately while the
+    staged dataset config survives): stop (if a run is active) → await stopped
+    (bounded) → start(start_fresh). Idle / completed / failed runs skip straight
+    to start (cascor's engine FSM and the demo FSM both auto-reset from a terminal
+    state on start), so no stop step is issued there.
+
+    Replaces the pre-N3 fire-and-forget ``POST /api/train/start?reset=true``
+    callback that returned only the banner ``is_open`` — three cold-swaps trained
+    to completion invisibly in the 2026-07-11 incident. Returns a structured,
+    per-step result so the dashboard renders a truthful outcome::
+
+        {"success": bool, "steps": [{"step","ok","detail"}, ...], "was_active": bool,
+         "start_fresh": bool, "instant_complete": bool, "status": "restarted"}
+
+    A stop-await timeout returns 504 with ``retriable: True`` and leaves the staged
+    dataset intact so the caller keeps the pending banner open and can retry.
+    """
+    from communication.websocket_manager import create_control_ack_message
+
+    start_fresh = bool(body.start_fresh) if body is not None else False
+    reset = bool(body.reset) if body is not None else True
+    steps: list[dict] = []
+
+    was_active = await offload(backend.is_training_active)
+    # N5: refuse BEFORE touching the current run -- stopping a healthy run and then declining to
+    # start its replacement would be worse than either alone. ``was_active`` is still reported
+    # truthfully; nothing was stopped.
+    inactive = _selection_inactive_reason()
+    if inactive is not None:
+        steps.append({"step": "start", "ok": False, "detail": inactive})
+        system_logger.warning("Restart: start refused: %s", inactive)
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, inactive)))
+        return JSONResponse({"success": False, "steps": steps, "was_active": was_active, "start_fresh": start_fresh, "message": f"Could not start the new run: {inactive}"}, status_code=409)
+    if was_active:
+        stop_result = await offload(backend.stop_training)
+        stop_failure = _control_result_failure(stop_result)
+        if stop_failure is not None:
+            steps.append({"step": "stop", "ok": False, "detail": stop_failure})
+            system_logger.warning("Restart: stop rejected: %s", stop_failure)
+            schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", False, stop_failure)))
+            return JSONResponse({"success": False, "steps": steps, "was_active": True, "start_fresh": start_fresh, "message": f"Could not stop the current run: {stop_failure}"}, status_code=409)
+        steps.append({"step": "stop", "ok": True, "detail": "Training stop requested"})
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", True, "Training stopped")))
+
+        stopped = await _await_training_stopped(BackendConstants.RESTART_STOP_WAIT_TIMEOUT_SECONDS, BackendConstants.RESTART_STOP_WAIT_POLL_SECONDS)
+        if not stopped:
+            steps.append({"step": "await_stopped", "ok": False, "detail": f"still running after {BackendConstants.RESTART_STOP_WAIT_TIMEOUT_SECONDS:.0f}s"})
+            system_logger.warning("Restart: timed out waiting for training to stop")
+            return JSONResponse(
+                {"success": False, "steps": steps, "was_active": True, "start_fresh": start_fresh, "retriable": True, "message": "Timed out waiting for the current run to stop — the dataset change is still staged; try Restart again."},
+                status_code=504,
+            )
+        steps.append({"step": "await_stopped", "ok": True, "detail": "Training stopped"})
+
+    # Start consumes the staged dataset; start_fresh discards the model when set.
+    start_result = await offload(backend.start_training, reset=reset, start_fresh=start_fresh)
+    start_failure = _control_result_failure(start_result)
+    if start_failure is not None:
+        steps.append({"step": "start", "ok": False, "detail": start_failure})
+        system_logger.warning("Restart: start rejected: %s", start_failure)
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, start_failure)))
+        return JSONResponse({"success": False, "steps": steps, "was_active": was_active, "start_fresh": start_fresh, "message": f"Could not start the new run: {start_failure}"}, status_code=409)
+    steps.append({"step": "start", "ok": True, "detail": "Training started (start-fresh)" if start_fresh else "Training started"})
+    schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", True, "Training started")))
+
+    instant_complete = await _peek_training_completed(BackendConstants.RESTART_INSTANT_COMPLETE_PEEK_SECONDS, BackendConstants.RESTART_STOP_WAIT_POLL_SECONDS)
+
+    return {"success": True, "steps": steps, "was_active": was_active, "start_fresh": start_fresh, "instant_complete": instant_complete, "status": "restarted"}
+
+
+class _ModelSelectBody(BaseModel):
+    """Request body for ``POST /api/model/select`` (A1-iv-2)."""
+
+    nn_model: str
+
+
+def _selection_targets_recurrence(nn_model: str) -> bool:
+    """True when selecting ``nn_model`` should route to the recurrence service backend.
+
+    Mirrors ``create_backend``'s routing: a model targets the recurrence backend iff it is a
+    recurrence-provider model AND ``recurrence_service_url`` is configured. Every other
+    selection (cascor, or recurrence without a configured URL) resolves to the default
+    cascor/demo backend — so this single predicate decides whether a swap is a no-op (target
+    backend type unchanged) or a real re-create.
+    """
+    from model_registry import RECURRENCE_PROVIDER, get_model_spec
+
+    spec = get_model_spec(nn_model)
+    return spec is not None and spec.provider == RECURRENCE_PROVIDER and bool(settings.recurrence_service_url)
+
+
+def _model_state_response(nn_model: str, *, swapped: bool) -> dict:
+    """Describe the live backend + current selection for the ``/api/model/*`` responses.
+
+    ``version`` (W1.7 / F-C8) is the version the model's service last reported -- or
+    ``unknown (version lookup failed)`` when it was asked and did not say -- and is present only
+    then: a model served in-process, or a service not asked yet, has no version to report, and
+    the key stays optional for every client that predates it.
+    """
+    from model_registry import get_model_spec
+
+    spec = get_model_spec(nn_model)
+    payload = {
+        "nn_model": nn_model,
+        "backend": backend.backend_type,
+        "execution": backend.execution,
+        "status": spec.status if spec is not None else "unknown",
+        "swapped": swapped,
+    }
+    reported = get_model_spec(nn_model, models=_reported_models) if _reported_models is not None else None
+    if reported is not None and reported.version:
+        payload["version"] = reported.version
+    return payload
+
+
+async def _refresh_model_versions(version_source: Any) -> None:
+    """Ask the recurrence service for its version, off the event loop, and keep the answer (W1.7 / F-C8).
+
+    ``model_registry.refresh_model_versions`` never raises for a version -- a failed lookup is the
+    ``unknown (version lookup failed)`` label, with a WARNING -- and it is two blocking HTTP calls at
+    most (``GET /v1/health``, then ``GET /openapi.json``), so it runs in a worker thread. Plain
+    ``asyncio.to_thread``, not ``offload``: this is not a cascor call, and a refresh started by a
+    request has no caller left to decline for once that request has been answered.
+    """
+    global _reported_models
+    from model_registry import RECURRENCE_PROVIDER, refresh_model_versions
+
+    try:
+        _reported_models = await asyncio.to_thread(refresh_model_versions, {RECURRENCE_PROVIDER: version_source})
+    except Exception as exc:  # noqa: BLE001 -- a background label refresh must never surface as an unretrieved task error
+        system_logger.warning("Model version refresh failed: %s: %s", type(exc).__name__, exc)
+
+
+def _schedule_model_version_refresh(version_source: Any) -> None:
+    """Start a version refresh in the background; nothing waits on it (W1.7 / F-C8).
+
+    No page render, ``/api/selection`` read or selection response waits on the recurrence
+    service: each reads :data:`_reported_models`, the last answer, and the next read carries
+    the new one. A refresh already in flight is not duplicated.
+    """
+    global _model_version_refresh
+    if _model_version_refresh is not None and not _model_version_refresh.done():
+        return
+    _model_version_refresh = asyncio.create_task(_refresh_model_versions(version_source), name="model-version-refresh")
+
+
+def _start_model_version_refresh() -> None:
+    """Startup's version refresh (W1.7 / F-C8): when a recurrence service is configured, ask it in the background.
+
+    So the recurrence model carries the version its service reports by the time anyone selects it. The boot backend
+    is never recurrence, so the adapter is built from the settings ``create_backend`` uses for one. A service not up
+    yet reads ``unknown (version lookup failed)`` until a selection of the recurrence model asks again.
+    """
+    if not settings.recurrence_service_url:
+        return
+    from backend.recurrence_service_adapter import RecurrenceServiceAdapter
+
+    _schedule_model_version_refresh(RecurrenceServiceAdapter(settings.recurrence_service_url, settings.recurrence_api_key).service_version)
+
+
+async def _stop_model_version_refresh() -> None:
+    """Abandon an unfinished version refresh at shutdown (W1.7). It only fills a label, so it is cancelled, not awaited.
+
+    Cancelling releases the task at once; the worker thread under ``asyncio.to_thread`` cannot be interrupted, and ends
+    when its HTTP call does, within the adapter's timeouts. ``asyncio.wait`` returns once the cancellation has landed,
+    without re-raising it here.
+    """
+    refresh = _model_version_refresh
+    if refresh is not None and not refresh.done():
+        refresh.cancel()
+        await asyncio.wait({refresh})
+
+
+def _live_recurrence_version_source() -> Any:
+    """The live recurrence backend's ``service_version``, or ``None`` when the live backend is not recurrence.
+
+    The live backend's own adapter, so the version is that of the very service its fits go to.
+    """
+    if backend is None or backend.backend_type != "recurrence":
+        return None
+    source = getattr(getattr(backend, "_adapter", None), "service_version", None)
+    return source if callable(source) else None
+
+
+def _selection_inactive_reason() -> Optional[str]:
+    """Why a start must be refused when the recorded selection is not what is running (N5).
+
+    ``_swap_backend`` records ``current_nn_model`` even when it swaps nothing: with
+    ``recurrence_service_url`` unset (the code default) a ``recurrence`` selection routes to the
+    cascor/demo backend already running, answers 200 with ``swapped=False``, and is recorded.
+    canopy#592 made the sidebar say so; nothing stopped the run, so pressing Start filed a
+    cascor/demo run under Recurrence (LMU). Every start path -- ``POST /api/train/start``, the
+    ``/ws/control`` dispatch and ``POST /api/train/restart`` -- asks this first, so a run cannot
+    execute on one backend and be filed under another model by any transport.
+
+    ``None`` when the selection and the backend agree, or when nothing has been selected yet
+    (``current_nn_model`` stays ``None`` until the first ``/api/model/select``): the boot
+    backend serves the default model by construction, and unknown is not disagreement. The
+    predicate is ``model_registry.selection_is_live`` -- the same one the sidebar summary and
+    the Start gate read -- so the label, the control and the run cannot disagree.
+    """
+    from model_registry import get_model_spec, selection_is_live
+
+    backend_type = backend.backend_type
+    if selection_is_live(current_nn_model, backend_type) is not False:
+        return None
+    spec = get_model_spec(current_nn_model)
+    label = spec.label if spec is not None else str(current_nn_model)
+    remedy = "Select the model again once its service is configured (Recurrence: JUNIPER_CANOPY_RECURRENCE_SERVICE_URL), or select the model the running backend serves."
+    return f"{label} is selected but the {backend_type} backend is running; the run would execute on {backend_type} and be filed under {label}. {remedy}"
+
+
+def _request_model_refusal(nn_model: Optional[str], dataset_value: Optional[str] = None) -> Optional[tuple[int, str]]:
+    """FR9 / canopy#368's ``nn_model`` mirror: refuse a request made for a model the server is not serving.
+
+    The dashboard sends the model it believes is selected with every dataset stage and parameter
+    apply. ``current_nn_model`` is server state and ``model-selection-store`` is per-tab memory, so
+    the two can disagree: a second tab, or a tab opened before another client changed the model,
+    holds a stale selection. A request made under it used to land on whichever backend was live,
+    and a stale tab could stage a rank-2 dataset into the LMU, which fails only at fit time. The
+    guardrail in #368 states the precondition: "a field absent from a request model is silently
+    dropped", so the key had to exist on BOTH request models before any of this could be checked.
+
+    Returns ``(status_code, message)`` or ``None``:
+
+    * ``nn_model`` absent -- ``None``. Every pre-mirror client, and ``curl``, keeps working exactly
+      as before (payload keys are added as optional, never required -- AGENTS.md hazards).
+    * an unknown model key -- ``422``.
+    * a model other than the server's selection -- ``409``: the client is out of date, not wrong.
+      The server's selection is ``current_nn_model``, or the default model until the first
+      ``/api/model/select`` (the boot backend serves it by construction -- ``api_selection``).
+    * ``dataset_value`` given and known, and incompatible with the model -- ``422``, failing closed
+      (FR9, design §5.9). A dataset canopy cannot name (an unseeded generator) is not judged here;
+      the target service remains the authority for it.
+    """
+    if not nn_model:
+        return None
+    from dataset_schema import dataset_type_for_generator_name
+    from model_registry import DATASET_TYPES, DEFAULT_MODEL_KEY, compatible, dataset_reason, get_dataset_spec, get_model_spec
+
+    spec = get_model_spec(nn_model)
+    if spec is None:
+        return 422, f"Unknown model: {nn_model!r}"
+    serving = current_nn_model or DEFAULT_MODEL_KEY
+    if nn_model != serving:
+        serving_spec = get_model_spec(serving)
+        serving_label = serving_spec.label if serving_spec is not None else serving
+        return 409, f"This request was made for {spec.label}, but the selected model is {serving_label}; the dashboard is out of date (the model was changed elsewhere). Reload the page and try again."
+    if dataset_value:
+        value = dataset_type_for_generator_name(dataset_value, [d.value for d in DATASET_TYPES])
+        dataset = get_dataset_spec(value) if value else None
+        if dataset is not None and not compatible(dataset, spec):
+            reason = dataset_reason(dataset, spec) or "incompatible"
+            return 422, f"{dataset.label} cannot be used with {spec.label}: {reason}."
+    return None
+
+
+async def _swap_backend(nn_model: str) -> dict:
+    """Re-create the process-global ``backend`` for a newly-selected model (A1-iv-2).
+
+    Toggles between the recurrence (one-shot LMU) service backend and the default cascor/demo
+    backend. **No-ops** when the selection would not change the live backend type, so
+    re-selecting the active model never tears down a working connection. **Refuses** to swap
+    while training is active (409). The new backend is created + initialized BEFORE the global
+    is reassigned and the old one is shut down only AFTER — so concurrent requests always see a
+    live backend, and a failed ``initialize()`` leaves the current backend untouched (502).
+    D5: re-create, not multiplex (sufficient for the two-model population).
+    """
+    from fastapi import HTTPException
+
+    from backend import create_backend
+
+    global backend, current_nn_model
+
+    if _selection_targets_recurrence(nn_model) == (backend.backend_type == "recurrence"):
+        # Target backend type is unchanged — record the selection and skip the re-create.
+        current_nn_model = nn_model
+        return _model_state_response(nn_model, swapped=False)
+
+    training_is_active = await offload(backend.is_training_active)
+    if training_is_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot switch models while training is active. Pause or stop training first.",
+        )
+
+    old_backend = backend
+    new_backend = create_backend(nn_model=nn_model, service_url=_resolved_service_url)
+    if not await new_backend.initialize():
+        await new_backend.shutdown()
+        raise HTTPException(status_code=502, detail=f"Failed to initialize the backend for model {nn_model!r}.")
+
+    backend = new_backend
+    current_nn_model = nn_model
+    await _seed_training_state(new_backend)
+    # Rebind the cache to the new backend's adapter (and drop it entirely when swapping to
+    # recurrence, which has no upstream). Before ``old_backend.shutdown()`` below.
+    await _start_status_cache(new_backend)
+    set_demo_mode_active(new_backend.backend_type == "demo")
+    await old_backend.shutdown()
+    system_logger.info("Backend swapped for model %r -> %s", nn_model, new_backend.backend_type)
+    return _model_state_response(nn_model, swapped=True)
+
+
+@app.post("/api/model/select")
+async def api_model_select(body: _ModelSelectBody):
+    """Select the active NN model, re-creating the backend if the target changes (A1-iv-2).
+
+    The A1 model picker (A1-iv-3/iv-4) POSTs the chosen model key here. Validates the key
+    against the registry, then swaps the process-global backend (a no-op when the live backend
+    type is unchanged). Lifecycle ``status`` gating (``coming_soon`` etc.) is the picker's job;
+    this endpoint is the mechanism and returns the model ``status`` so the UI can reflect it.
+    """
+    from fastapi import HTTPException
+
+    from model_registry import get_model_spec
+
+    if get_model_spec(body.nn_model) is None:
+        raise HTTPException(status_code=422, detail=f"Unknown model: {body.nn_model!r}")
+    response = await _swap_backend(body.nn_model)
+    # W1.7 (F-C8): selecting the recurrence model re-reads its service's version -- the service may have been
+    # restarted or upgraded since startup asked, or not been up then. In the background: this response carries the
+    # version already known, and the next read carries the new one.
+    version_source = _live_recurrence_version_source()
+    if version_source is not None:
+        _schedule_model_version_refresh(version_source)
+    return response
+
+
+def _backend_dataset_selection(status: Any) -> dict:
+    """Which dataset the live backend holds, in canopy's vocabulary (§4.10 / guardrail G7).
+
+    Precedence is what the next Start would train on: a PENDING staged dataset first (Start
+    consumes it), else the one LOADED. ``source`` says which, and it is the field a consumer
+    must branch on, because ``value`` alone cannot tell "the backend holds nothing" from "the
+    backend cannot say":
+
+    * ``"pending"`` / ``"loaded"`` -- ``value`` is the canopy dataset-type value. It is ``None``
+      when the backend holds something canopy cannot name: an unseeded generator another client
+      staged (``generator`` then says which) or raw inline data (``generator`` is ``None`` too).
+    * ``"none"`` -- the backend reports that nothing is loaded.
+    * ``"unknown"`` -- the backend does not report its loaded dataset (a cascor predating
+      cascor#676 omits ``current_dataset``), or its status could not be read at all.
+
+    Every backend reports ``current_dataset`` in cascor's shape, so this reads all three alike.
+    """
+    from dataset_schema import dataset_type_for_generator_name
+    from model_registry import DATASET_TYPES
+
+    known = [spec.value for spec in DATASET_TYPES]
+    status = status if isinstance(status, dict) else {}
+    pending = status.get("pending_dataset")
+    if isinstance(pending, dict):
+        # canopy stages ``nn_dataset_type``; cascor echoes its own dialect, ``dataset_type``.
+        raw = pending.get("nn_dataset_type") or pending.get("dataset_type")
+        if raw:
+            return {"value": dataset_type_for_generator_name(raw, known), "source": "pending", "generator": raw}
+    if "current_dataset" not in status:
+        return {"value": None, "source": "unknown", "generator": None}
+    current = status.get("current_dataset")
+    if not isinstance(current, dict):
+        return {"value": None, "source": "none", "generator": None}
+    raw = current.get("dataset_type") or current.get("nn_dataset_type")
+    return {"value": dataset_type_for_generator_name(raw, known), "source": "loaded", "generator": raw or None}
+
+
+@app.get("/api/selection")
+async def api_selection():
+    """The read side of the selection: which model and which dataset are live (Y3 / §4.10).
+
+    ``POST /api/model/select`` could WRITE the model and nothing could read it back, so a page
+    reload showed the layout's seeded model over whatever backend was running -- *"Active:
+    CasCor"* over a recurrence backend, with Start enabled against a selection the server would
+    refuse (Y3). The dataset axis never had a read side at all: the dropdown showed its layout
+    default over whatever the backend had staged (§4.10). The dashboard hydrates both from here,
+    once, at mount.
+
+    The model fields have exactly the ``POST /api/model/select`` response's shape, so the
+    dashboard holds either in one store and every reader of it (the summary, the Start gate, the
+    train-gate notice) works unchanged. ``swapped`` is False because a read swaps nothing;
+    ``selected`` is False until the first ``/api/model/select``, and ``nn_model`` is then the
+    model the boot backend serves. ``dataset`` is :func:`_backend_dataset_selection`.
+    """
+    from model_registry import DEFAULT_MODEL_KEY
+
+    payload = _model_state_response(current_nn_model or DEFAULT_MODEL_KEY, swapped=False)
+    payload["selected"] = current_nn_model is not None
+    try:
+        status = await offload(backend.get_status)
+    except Exception as exc:
+        # The model half is canopy's own state and needs no backend; the dataset half degrades
+        # to "unknown" rather than taking the whole read down with it.
+        system_logger.warning("Selection read: backend status unavailable: %s", exc)
+        status = None
+    payload["dataset"] = _backend_dataset_selection(status)
+    return payload
 
 
 class SetParamsRequest(BaseModel):
     """Validated request body for the set_params endpoint."""
+
+    # FR9 / canopy#368: the model the client believes is selected. Optional, so every pre-mirror
+    # client is unaffected; when present, ``_request_model_refusal`` rejects a stale or unknown
+    # one. It is a ROUTING field, never a parameter -- it is not in ``nn_keys`` and never reaches
+    # a backend.
+    nn_model: str | None = None
 
     # Neural network parameters
     nn_max_iterations: int | None = None
@@ -2743,6 +4324,16 @@ class SetParamsRequest(BaseModel):
     nn_spiral_number: int | None = None
     nn_dataset_elements: int | None = None
     nn_dataset_noise: float | None = None
+    # #2b: previously omitted here, so these three were silently dropped before
+    # reaching the adapter (which DOES map them). The dashboard already sends them.
+    nn_output_epochs: int | None = None
+    nn_optimizer_type: str | None = None
+    nn_activation_function_name: str | None = None
+    # init_output_weights is consumed by the set_params handler (nn_keys) and
+    # surfaced on /api/state, but was missing from this request model — so the
+    # dashboard's dropdown value was silently dropped at parse time
+    # (Pydantic extra="ignore") and never reached the backend. Declared now.
+    nn_init_output_weights: str | None = None
 
     # Candidate parameters
     cn_pool_size: int | None = None
@@ -2778,8 +4369,13 @@ async def api_set_params(body: SetParamsRequest):
     Returns:
         Updated training state
     """
+    refusal = _request_model_refusal(body.nn_model)
+    if refusal is not None:
+        status_code, message = refusal
+        system_logger.warning("Parameter update refused: %s", message)
+        return JSONResponse({"error": message}, status_code=status_code)
     try:
-        params = body.model_dump(exclude_none=True)
+        params = body.model_dump(exclude_none=True, exclude={"nn_model"})
         # Backward-compatible mapping: old-style keys -> new prefixed keys
         compat_map = {
             "learning_rate": "nn_learning_rate",
@@ -2811,6 +4407,9 @@ async def api_set_params(body: SetParamsRequest):
             "nn_spiral_number",
             "nn_dataset_elements",
             "nn_dataset_noise",
+            "nn_output_epochs",
+            "nn_optimizer_type",
+            "nn_activation_function_name",
         ]
         cn_keys = [
             "cn_pool_size",
@@ -2863,11 +4462,37 @@ async def api_set_params(body: SetParamsRequest):
         if "cn_candidate_learning_rate" in backend_updates:
             ts_updates["candidate_learning_rate"] = float(backend_updates["cn_candidate_learning_rate"])
         # Forward all params to backend FIRST (offloaded to thread for sync backends)
-        result = await asyncio.to_thread(backend.apply_params, **backend_updates)
-        if isinstance(result, dict) and not result.get("ok", True):
-            error_msg = result.get("error", "unknown")
-            system_logger.warning("Backend parameter application failed: %s", error_msg)
-            return JSONResponse({"error": f"Backend rejected parameters: {error_msg}"}, status_code=502)
+        result = await offload(backend.apply_params, **backend_updates)
+        skipped: list = []
+        # N5 (I-4 / T3): cascor's C2a applied/skipped(reason) partition — which
+        # submitted keys the live network actually took vs. declined (with the
+        # reason). Distinct from ``skipped`` above (canopy keys with no cascor
+        # mapping, never sent). Threaded into the response so the dashboard toast
+        # can render both. Absent on a pre-C2a backend → empty lists.
+        applied_detail: list = []
+        skipped_detail: list = []
+        if isinstance(result, dict):
+            if not result.get("ok", True):
+                error_msg = result.get("error", "unknown")
+                system_logger.warning("Backend parameter application failed: %s", error_msg)
+                # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1a: even on failure, surface
+                # which keys never made it through the adapter map so the user can
+                # tell "backend rejected my values" from "canopy never asked the
+                # backend in the first place".
+                err_payload = {"error": f"Backend rejected parameters: {error_msg}"}
+                if result.get("skipped"):
+                    # ``skipped`` is a real runtime key that ``ApplyParamsResult`` does not
+                    # declare. Latent until now: 1a's bare ``asyncio.to_thread`` returns
+                    # ``Any``, so mypy could not see the type at all. 1d's ``offload`` is
+                    # generic in the callable's return, so the TypedDict finally reaches
+                    # here -- the same class of gap the three ignores just below already
+                    # record. Widening the TypedDict is a protocol change and belongs with
+                    # the C2a work, not in an admission-control slice.
+                    err_payload["skipped"] = result["skipped"]  # type: ignore[typeddict-item]
+                return JSONResponse(err_payload, status_code=502)
+            skipped = list(result.get("skipped") or [])  # type: ignore[call-overload]  # pre-existing: dict.get() is object-typed, runtime value is a list (surfaced by the A1-iv-2 main.py mypy re-check)
+            applied_detail = list(result.get("applied") or [])  # type: ignore[call-overload]  # runtime value is list[str] (C2a applied, canopy-keyed)
+            skipped_detail = list(result.get("skipped_detail") or [])  # type: ignore[call-overload]  # runtime value is list[{key, reason}] (C2a skipped, canopy-keyed)
 
         # Only update TrainingState AFTER backend confirms success
         if ts_updates:
@@ -2878,7 +4503,19 @@ async def api_set_params(body: SetParamsRequest):
         broadcast_data = {**training_state.get_state(), "applied_params": backend_updates}
         await websocket_manager.broadcast({"type": "params_updated", "data": broadcast_data})
 
-        return {"status": "success", "state": training_state.get_state()}
+        # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1a: thread the adapter's `skipped`
+        # list into the response so the dashboard handler can show
+        # "Applied X of Y; Z not yet supported by the backend: …" instead of the
+        # misleading "Parameters applied" toast for every call.
+        response: dict = {"status": "success", "state": training_state.get_state()}
+        if skipped:
+            response["skipped"] = skipped
+        # N5: additive C2a partition (both empty on a pre-C2a backend).
+        if applied_detail:
+            response["applied"] = applied_detail
+        if skipped_detail:
+            response["skipped_detail"] = skipped_detail
+        return response
     except Exception as exc:
         # SEC-14: return an opaque error_id; full traceback goes to logs only.
         error_id = uuid.uuid4().hex[:12]
@@ -2887,6 +4524,336 @@ async def api_set_params(body: SetParamsRequest):
             {"error": "Internal server error", "error_id": error_id},
             status_code=500,
         )
+
+
+# =========================================================================
+# FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 + §3.5.2 Phase 1 — Issue #3
+# Pending dataset stage / cancel endpoints. Mirrors cascor #242.
+# =========================================================================
+
+
+class StageDatasetRequest(BaseModel):
+    """Body for POST /api/stage_dataset.
+
+    All fields optional so the dashboard can build the body from whatever
+    subset of dataset inputs the user touched. The cascor side
+    (StageDatasetRequest) is the authoritative validator; we forward
+    blindly via the adapter.
+    """
+
+    nn_dataset_type: Optional[str] = None
+    nn_dataset_elements: Optional[int] = None
+    nn_dataset_noise: Optional[float] = None
+    nn_spiral_rotations: Optional[float] = None
+    nn_spiral_number: Optional[int] = None
+    # N7 (I-7): generic generator params for non-spiral generators whose inputs are not covered by
+    # the typed convenience fields above (e.g. mnist: dataset/flatten; equities: regression_target).
+    # Forwarded verbatim to cascor's StageDatasetRequest.params channel (the adapter maps the canopy
+    # key -> cascor ``params``), which cascor merges into its create_dataset call. Keeps the legacy
+    # spiral/xor bodies unchanged (no key present) while letting schema-driven generators pass
+    # arbitrary params without widening the typed fields.
+    nn_dataset_params: Optional[dict[str, Any]] = None
+    # FR9 / canopy#368: the model the client believes is selected -- see ``SetParamsRequest``.
+    # A routing field: every route taking this body excludes it before forwarding to a backend,
+    # whose staged config would otherwise carry (and echo back) a key that names no dataset.
+    nn_model: Optional[str] = None
+
+
+@app.post("/api/stage_dataset")
+async def api_stage_dataset(body: StageDatasetRequest):
+    """Stage a dataset-config change for the next start_training.
+
+    Returns the staged config + the adapter's ``ok`` flag. On backend
+    rejection (e.g. unknown dataset_type) returns 502 with the cascor
+    error string.
+    """
+    # N5 -- and X6's cascor branch at its cause. With ``recurrence_service_url`` unset a Recurrence
+    # selection is recorded over the cascor/demo backend, and staging its only compatible dataset
+    # (``equities_seq``, rank 3) sent a sequence artifact toward cascade-correlation, which refuses
+    # it BY DESIGN at the tier boundary (cascor ``manager.py:3815``, W-2): widening cascor's
+    # ``Literal`` would only move that refusal from the request boundary to artifact load. Refuse
+    # here instead, with the same reason Start gives, so nothing reaches a backend the selection
+    # does not target.
+    inactive = _selection_inactive_reason()
+    if inactive is not None:
+        system_logger.warning("Dataset staging refused: %s", inactive)
+        return JSONResponse({"error": f"Refusing to stage a dataset for a model that is not active: {inactive}"}, status_code=409)
+    # FR9 / canopy#368: a stale dashboard's selection, or a dataset its model cannot use, fails
+    # closed HERE rather than at the next fit.
+    refusal = _request_model_refusal(body.nn_model, body.nn_dataset_type)
+    if refusal is not None:
+        status_code, message = refusal
+        system_logger.warning("Dataset staging refused: %s", message)
+        return JSONResponse({"error": message}, status_code=status_code)
+    # X6 / §4.9: a backend without ``stage_dataset`` says so with a 501, as the sibling routes
+    # (``regenerate_dataset``, ``import_dataset``) do -- the AttributeError used to fall into the
+    # bare ``except`` below as "Internal server error" plus an opaque error_id. All three shipped
+    # backends stage now (``RecurrenceBackend`` in-process, since its service is one-shot); this
+    # guards the next one.
+    if not hasattr(backend, "stage_dataset"):
+        system_logger.info("Dataset staging unsupported by backend %r", backend.backend_type)
+        return JSONResponse(
+            {"error": f"The active backend ({backend.backend_type}) does not support staging a dataset change. One-shot models take their dataset at Start instead."},
+            status_code=501,
+        )
+    try:
+        params = body.model_dump(exclude_none=True, exclude={"nn_model"})
+        result = await offload(backend.stage_dataset, **params)
+        if isinstance(result, dict) and not result.get("ok", True):
+            error_msg = result.get("error", "unknown")
+            system_logger.warning("Backend rejected dataset staging: %s", error_msg)
+            return JSONResponse({"error": f"Backend rejected dataset: {error_msg}"}, status_code=502)
+        return {"status": "success", "data": (result or {}).get("data", {})}
+    except Exception as exc:
+        # SEC-14: opaque error_id; full traceback to logs only.
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Failed to stage dataset [error_id=%s]", error_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
+
+@app.delete("/api/cancel_pending_dataset")
+async def api_cancel_pending_dataset():
+    """Cancel any staged dataset change — Phase 1 Cancel button target."""
+    try:
+        result = await offload(backend.cancel_pending_dataset)
+        if isinstance(result, dict) and not result.get("ok", True):
+            error_msg = result.get("error", "unknown")
+            system_logger.warning("Backend rejected dataset cancel: %s", error_msg)
+            return JSONResponse({"error": f"Backend rejected cancel: {error_msg}"}, status_code=502)
+        return {"status": "success", "data": (result or {}).get("data", {})}
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Failed to cancel pending dataset [error_id=%s]", error_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
+
+@app.post("/api/recurrence/effective_request")
+async def api_recurrence_effective_request(body: _TrainStartBody | None = None):
+    """The exact ``POST /v1/train`` body the next recurrence Start would send -- read-only (W1.2 / R7).
+
+    juniper-ml plan ``notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md``,
+    ruling R7: the effective request is shown before Start and logged at INFO. ``body`` is the one-shot
+    Start body the dashboard would send, unpacked exactly as ``POST /api/train/start`` unpacks it, and
+    the backend resolves it with the code ``start_training`` runs, so a staged dataset wins here as it
+    does there. Nothing is staged, consumed or started.
+
+    Returns the backend's preview (``ok`` / ``source`` / ``request`` / ``not_forwarded`` / ``edited``
+    / ``fit_in_progress``). 409 when Start itself would be refused for the selection (N5), or when the
+    active backend is not the recurrence backend, so there is no recurrence request to preview.
+    """
+    inactive = _selection_inactive_reason()
+    if inactive is not None:
+        return JSONResponse({"ok": False, "error": f"Training could not be started: {inactive}"}, status_code=409)
+    preview = getattr(backend, "preview_train_request", None)
+    if backend.backend_type != "recurrence" or preview is None:
+        return JSONResponse({"ok": False, "error": f"The active backend ({backend.backend_type}) is not the recurrence backend, so there is no recurrence request to preview."}, status_code=409)
+    start_kwargs = _recurrence_start_kwargs(body.model_dump()) if body is not None else {}
+    return await offload(preview, **start_kwargs)
+
+
+# =========================================================================
+# Phase 2 P2-4 (Issue #3): Experimental Functions gate proxy.
+# Canopy proxies cascor's /v1/admin/experimental_functions through its own
+# backend so the Dash callback layer keeps a single HTTP target convention
+# and inherits canopy's X-API-Key auth boundary. F2.10 in
+# ISSUE_3_PHASE_2_LIVE_DATASET_SWAP_2026-05-09 makes the cascor side the
+# authoritative source of truth — these routes faithfully forward whatever
+# state cascor reports back.
+# =========================================================================
+
+
+class ExperimentalFunctionsRequest(BaseModel):
+    """Body for POST /api/admin/experimental_functions."""
+
+    enabled: bool
+
+
+@app.get("/api/admin/experimental_functions")
+async def api_get_experimental_functions():
+    """Read the server-side experimental-functions gate state.
+
+    Returns ``{"status": "success", "data": {"enabled": bool}}`` on success.
+    On backend rejection / cascor unreachable: 502 with the error string,
+    and the dash callback layer treats that as "gate is closed" (F2.10
+    safe default — no Live Switch affordance until we can confirm).
+    """
+    try:
+        result = await offload(backend.get_experimental_functions)
+        if isinstance(result, dict) and not result.get("ok", True):
+            error_msg = result.get("error", "unknown")
+            system_logger.warning("Backend rejected experimental_functions read: %s", error_msg)
+            return JSONResponse({"error": f"Backend rejected: {error_msg}"}, status_code=502)
+        return {"status": "success", "data": {"enabled": bool((result or {}).get("enabled", False))}}
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Failed to read experimental_functions [error_id=%s]", error_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
+
+@app.post("/api/admin/experimental_functions")
+async def api_set_experimental_functions(body: ExperimentalFunctionsRequest):
+    """Toggle the server-side experimental-functions gate.
+
+    Returns the gate state AFTER cascor's write completed. F2.10: the
+    returned ``enabled`` may differ from the request body if cascor's
+    policy overrides (e.g., env-var lockdown). The Dash callback layer
+    must trust the returned value and reconcile UI state to it.
+    """
+    try:
+        result = await offload(backend.set_experimental_functions, body.enabled)
+        if isinstance(result, dict) and not result.get("ok", True):
+            error_msg = result.get("error", "unknown")
+            system_logger.warning("Backend rejected experimental_functions write: %s", error_msg)
+            return JSONResponse({"error": f"Backend rejected: {error_msg}"}, status_code=502)
+        return {"status": "success", "data": {"enabled": bool((result or {}).get("enabled", False))}}
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Failed to set experimental_functions [error_id=%s]", error_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
+
+# =========================================================================
+# Phase 2 P2-5 (Issue #3): Live Dataset Switch proxy.
+# POST /api/live_dataset_swap → backend.swap_dataset_live → cascor's
+# /v1/training/dataset/live (the P2-1a/P2-1d/P2-2/P2-3 endpoint).
+# DELETE /api/live_dataset_swap → backend.cancel_swap_dataset_live →
+# cascor's DELETE (P2-1b cancel mechanism). The Dash callback fires
+# the POST on Dash's worker pool, so the Cancel button (a separate
+# callback) can fire the DELETE concurrently while the POST is still
+# in flight — cascor's swap aborts at its next checkpoint and the
+# POST returns with ``{"status": "cancelled"}``.
+# =========================================================================
+
+
+@app.post("/api/live_dataset_swap")
+async def api_live_dataset_swap(body: StageDatasetRequest):
+    """Initiate an in-flight live dataset swap.
+
+    Reuses ``StageDatasetRequest`` body shape — same canopy keys cascor
+    accepts for both ``POST /v1/training/dataset`` (cold swap) and
+    ``POST /v1/training/dataset/live`` (live swap). All fields optional;
+    cascor is the authoritative validator.
+
+    Response on success: ``{"status": "success", "data": {<§3.3 dict>}}``
+    carrying ``status`` (``"swapped"`` or ``"cancelled"``), ``arch_changes``,
+    ``pre_swap_snapshot_id``, ``post_swap_snapshot_id``, ``mode``, etc.
+
+    Cascor rejection codes (403 gate, 409 in-flight, 422 validation,
+    504 pause-timeout, 502 fetch failure) all collapse to canopy 502
+    here; the Dash callback layer surfaces the error string in a toast.
+    """
+    # FR9 / canopy#368: the same mirror check as staging -- a live swap changes the dataset of a
+    # RUNNING model, so a stale selection or an incompatible pair is refused before anything moves.
+    refusal = _request_model_refusal(body.nn_model, body.nn_dataset_type)
+    if refusal is not None:
+        status_code, message = refusal
+        system_logger.warning("Live dataset swap refused: %s", message)
+        return JSONResponse({"error": message}, status_code=status_code)
+    try:
+        params = body.model_dump(exclude_none=True, exclude={"nn_model"})
+        result = await offload(backend.swap_dataset_live, **params)
+        if isinstance(result, dict) and not result.get("ok", True):
+            error_msg = result.get("error", "unknown")
+            system_logger.warning("Backend rejected live dataset swap: %s", error_msg)
+            return JSONResponse({"error": f"Backend rejected live swap: {error_msg}"}, status_code=502)
+        return {"status": "success", "data": (result or {}).get("data", {})}
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Failed to swap dataset live [error_id=%s]", error_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
+
+@app.delete("/api/live_dataset_swap")
+async def api_cancel_live_dataset_swap():
+    """Cancel an in-flight live dataset swap.
+
+    Fires cascor's ``DELETE /v1/training/dataset/live`` (P2-1b). Cascor
+    sets its internal cancel flag; the in-flight swap aborts at the
+    next checkpoint and the originating POST returns with
+    ``{"status": "cancelled"}``.
+
+    Returns 502 when cascor returns 404 (no swap in flight) — the Dash
+    callback layer treats that as "Cancel had no effect, swap already
+    finished" and leaves the UI alone.
+    """
+    try:
+        result = await offload(backend.cancel_swap_dataset_live)
+        if isinstance(result, dict) and not result.get("ok", True):
+            error_msg = result.get("error", "unknown")
+            system_logger.warning("Backend rejected live swap cancel: %s", error_msg)
+            return JSONResponse({"error": f"Backend rejected cancel: {error_msg}"}, status_code=502)
+        return {"status": "success", "data": (result or {}).get("data", {})}
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Failed to cancel live dataset swap [error_id=%s]", error_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
+
+# =========================================================================
+# Phase 2 P2-7 (Issue #3): dataset_swap event feed for canopy timeline /
+# paired-diff / snapshot-badge consumers. Proxies cascor's follow-up B
+# (#255) — ``GET /v1/history/dataset_swaps`` — so the canopy callback
+# layer keeps its single-HTTP-target convention.
+#
+# ``since`` query param is forwarded verbatim so a poller can pass its
+# last-seen timestamp and get only strictly-newer events on subsequent
+# ticks. Empty-list response is normal (no swaps yet) and not an error.
+# =========================================================================
+
+
+@app.get("/api/history/dataset_swaps")
+async def api_get_dataset_swap_events(since: Optional[str] = None):
+    """Read the canopy session's live dataset_swap event list.
+
+    Returns ``{"status": "success", "data": {"events": [...]}}`` on
+    success. Each event has the §3.9 schema (``timestamp``, ``before_cfg``,
+    ``after_cfg``, ``arch_changes``, ``pre_swap_snapshot_id``,
+    ``post_swap_snapshot_id``).
+
+    Cascor / backend failure → 502 with the error string. The canopy
+    panels treat a 502 as "no events known yet" and render empty state.
+    """
+    try:
+        result = await offload(backend.get_dataset_swap_events, since=since)
+        if isinstance(result, dict) and not result.get("ok", True):
+            error_msg = result.get("error", "unknown")
+            system_logger.warning("Backend rejected dataset_swap events fetch: %s", error_msg)
+            return JSONResponse({"error": f"Backend rejected: {error_msg}"}, status_code=502)
+        events = (result or {}).get("events", []) or []
+        return {"status": "success", "data": {"events": events}}
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Failed to fetch dataset_swap events [error_id=%s]", error_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
+
+@app.get("/api/snapshots/{snapshot_id}/history/dataset_swaps")
+async def api_get_snapshot_dataset_swaps(snapshot_id: str):
+    """Read a stored snapshot's own dataset_swap event list.
+
+    P2-7 follow-up (Issue #3) — proxies cascor's
+    ``GET /v1/snapshots/{id}/history/dataset_swaps`` (cascor #259). The
+    Replay timeline reads this when a snapshot is loaded so markers
+    reflect the snapshot's own history (parent spec §4.4 full flavor)
+    rather than the live event feed.
+
+    Backend failure (including cascor 404 for a missing snapshot) → 502
+    with the error string. The timeline treats a 502 as "no markers for
+    this snapshot" and degrades to the live-event-only render so a
+    missing or unreadable snapshot never produces a hard UI error.
+    """
+    try:
+        result = await offload(backend.get_snapshot_dataset_swaps, snapshot_id=snapshot_id)
+        if isinstance(result, dict) and not result.get("ok", True):
+            error_msg = result.get("error", "unknown")
+            system_logger.warning("Backend rejected snapshot dataset_swap events fetch (%s): %s", snapshot_id, error_msg)
+            return JSONResponse({"error": f"Backend rejected: {error_msg}"}, status_code=502)
+        events = (result or {}).get("events", []) or []
+        return {"status": "success", "data": {"events": events}}
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Failed to fetch snapshot dataset_swap events [error_id=%s, snapshot_id=%s]", error_id, snapshot_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
 
 
 # =========================================================================
@@ -2902,7 +4869,7 @@ async def api_remote_status():
         Dictionary with remote worker status information.
     """
     if backend.backend_type == "service" and hasattr(backend, "_adapter"):
-        return backend._adapter.get_remote_worker_status()
+        return await asyncio.to_thread(backend._adapter.get_remote_worker_status)
     return {"available": False, "connected": False, "workers_active": False, "error": "Not available in demo mode"}
 
 
@@ -2933,7 +4900,7 @@ async def api_remote_connect(request: RemoteConnectRequest):
         return JSONResponse({"error": "Not available in demo mode"}, status_code=503)
 
     try:
-        success = backend._adapter.connect_remote_workers((request.host, request.port), request.authkey.get_secret_value())
+        success = await asyncio.to_thread(backend._adapter.connect_remote_workers, (request.host, request.port), request.authkey.get_secret_value())
         if success:
             return {"status": "connected", "address": f"{request.host}:{request.port}"}
         return JSONResponse({"error": "Connection failed"}, status_code=500)
@@ -2961,7 +4928,7 @@ async def api_remote_start_workers(num_workers: int = 1):
     if backend.backend_type != "service" or not hasattr(backend, "_adapter"):
         return JSONResponse({"error": "Not available in demo mode"}, status_code=503)
 
-    success = backend._adapter.start_remote_workers(num_workers)
+    success = await asyncio.to_thread(backend._adapter.start_remote_workers, num_workers)
     if success:
         return {"status": "started", "num_workers": num_workers}
     return JSONResponse({"error": "Failed to start workers"}, status_code=500)
@@ -2983,7 +4950,7 @@ async def api_remote_stop_workers(timeout: int = 10):  # noqa: ASYNC109
     if backend.backend_type != "service" or not hasattr(backend, "_adapter"):
         return JSONResponse({"error": "Not available in demo mode"}, status_code=503)
 
-    success = backend._adapter.stop_remote_workers(timeout)
+    success = await asyncio.to_thread(backend._adapter.stop_remote_workers, timeout)
     if success:
         return {"status": "stopped"}
     return JSONResponse({"error": "Failed to stop workers"}, status_code=500)
@@ -2999,7 +4966,7 @@ async def api_remote_disconnect():
     if backend.backend_type != "service" or not hasattr(backend, "_adapter"):
         return JSONResponse({"error": "Not available in demo mode"}, status_code=503)
 
-    success = backend._adapter.disconnect_remote_workers()
+    success = await asyncio.to_thread(backend._adapter.disconnect_remote_workers)
     if success:
         return {"status": "disconnected"}
     return JSONResponse({"error": "Failed to disconnect"}, status_code=500)

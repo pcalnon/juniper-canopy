@@ -226,8 +226,9 @@ class TestServiceModeProxying:
 
     @pytest.mark.integration
     def test_adapter_failure_returns_route_specific_500(self, service_client):
+        """cascor's ANSWER is surfaced verbatim (CAN-015h h-5): its client error carries the HTTP status."""
         client, adapter = service_client
-        adapter.patch_weights.side_effect = RuntimeError("cascor rejected invalid shape")
+        adapter.patch_weights.side_effect = _answered("cascor rejected invalid shape", status_code=422)
 
         response = client.patch(
             "/api/v1/network/weights",
@@ -237,3 +238,25 @@ class TestServiceModeProxying:
         assert response.status_code == 500
         assert "patch_weights failed" in response.json()["detail"]
         assert "invalid shape" in response.json()["detail"]
+
+    @pytest.mark.integration
+    def test_a_transport_failures_text_never_reaches_the_detail(self, service_client):
+        """#683 validation: a failure with no HTTP status is transport -- its text can quote the key a client refused
+        to send -- so the detail names its type only."""
+        client, adapter = service_client
+        adapter.patch_weights.side_effect = RuntimeError("Request to http://cascor:8200/v1/network/weights failed: ... header value: ' LEAKME-key'")
+
+        response = client.patch(
+            "/api/v1/network/weights",
+            json={"target": "output_weights", "field": "weights", "values": [0.1]},
+        )
+
+        assert response.status_code == 500
+        assert response.json()["detail"] == "patch_weights failed: RuntimeError"
+
+
+def _answered(text: str, status_code: int) -> RuntimeError:
+    """An exception an upstream's HTTP answer produced: it carries the status code, as the juniper clients' do."""
+    exc = RuntimeError(text)
+    exc.status_code = status_code  # type: ignore[attr-defined]
+    return exc

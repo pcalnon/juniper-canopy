@@ -1,0 +1,644 @@
+"""Unit tests for ``src/model_registry.py`` (model-selection A0).
+
+Locks the behavior-preserving contract (the dataset-type dropdown options + default are
+identical to the previously inlined list) and the registry shape / seeds.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import logging
+
+import httpx
+import pytest
+
+from backend.recurrence_service_adapter import RecurrenceServiceAdapter
+from model_registry import (
+    DATASET_TYPES,
+    DEFAULT_DATASET_TYPE,
+    DEFAULT_MODEL_KEY,
+    MODELS,
+    RECURRENCE_PROVIDER,
+    SERVICE_VERSION_UNAVAILABLE,
+    DatasetTypeSpec,
+    ModelSpec,
+    compatible,
+    compatible_datasets,
+    compatible_models,
+    dataset_default_params,
+    dataset_model_hint,
+    dataset_reason,
+    dataset_type_options,
+    gated_dataset_options,
+    get_dataset_spec,
+    get_model_spec,
+    model_is_trainable,
+    model_matches_search,
+    model_options,
+    model_reason,
+    refresh_model_versions,
+    temporal_ok,
+)
+
+# The exact options list that was previously hardcoded inline in dashboard_manager.
+_PREVIOUS_HARDCODED_OPTIONS = [
+    {"label": "Spirals", "value": "spirals"},
+    {"label": "XOR", "value": "xor"},
+    {"label": "MNIST", "value": "mnist"},
+    {"label": "Circles", "value": "circles"},
+    {"label": "Moons", "value": "moons"},
+]
+
+
+def test_dataset_type_options_preserve_2d_order_then_append_3d_seed():
+    """The five original 2-D options are preserved in order (A0 contract); A1-iv-3b appends
+    the equities_seq 3-D entry for the recurrence model."""
+    options = dataset_type_options()
+    assert options[:5] == _PREVIOUS_HARDCODED_OPTIONS
+    assert {"label": "Equities (sequence)", "value": "equities_seq"} in options
+
+
+def test_default_dataset_type_preserved():
+    assert DEFAULT_DATASET_TYPE == "spirals"
+    assert DEFAULT_DATASET_TYPE in {spec.value for spec in DATASET_TYPES}
+
+
+def test_dataset_values_are_unique():
+    values = [spec.value for spec in DATASET_TYPES]
+    assert len(values) == len(set(values))
+
+
+def test_dataset_seeds_2d_classification_plus_3d_sequence():
+    by_value = {spec.value: spec for spec in DATASET_TYPES}
+    # The five incumbents plus §12's three rank-2 seeds. All are 2-D, classification and
+    # non-temporal; `equities` is the only one of the eight that carries default_params, because
+    # it is the only one that imports an external universe.
+    for value in ("spirals", "xor", "mnist", "circles", "moons", "gaussian", "checkerboard", "equities"):
+        spec = by_value[value]
+        assert spec.ndim == 2 and spec.task_type == "classification" and spec.temporal == "none"
+    for value in ("gaussian", "checkerboard"):
+        assert by_value[value].default_params == {}
+    # equities' three keys are each load-bearing and each was measured; TestEquitiesSeedIsGenerableAndFinite
+    # in tests/regression/test_dataset_generator_contract.py pins WHY, this pins WHAT.
+    assert by_value["equities"].default_params == {
+        "symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"],
+        "fundamentals_fill": "drop",
+        "normalize_features": True,
+    }
+    # A1-iv-3b: the 3-D irregular-Δt regression seed that makes the recurrence model selectable.
+    seq = by_value["equities_seq"]
+    assert seq.ndim == 3 and seq.task_type == "regression" and seq.temporal == "irregular"
+    # §12: the five synthetic rank-3 seeds. All regression (matching juniper-data's own
+    # declaration, as equities_seq has since juniper-data#437 closed X8), and their
+    # ``temporal`` matches the measured Δt: multi_sine / mackey_glass / ar_p emit a constant
+    # per-step Δt, irregular_sine / delay_product a genuinely non-uniform one. Measured
+    # 2026-09-09 by executing the registry — and note the measurement only reads correctly when
+    # dt column 0 is EXCLUDED, since that column is a 0.0 "no previous step" sentinel that makes
+    # every generator look irregular.
+    for value in ("multi_sine", "mackey_glass", "ar_p"):
+        spec = by_value[value]
+        assert spec.ndim == 3 and spec.task_type == "regression" and spec.temporal == "regular"
+    for value in ("irregular_sine", "delay_product"):
+        spec = by_value[value]
+        assert spec.ndim == 3 and spec.task_type == "regression" and spec.temporal == "irregular"
+    # They carry no default_params, and that is correct: they synthesise from their own bounded
+    # defaults (1,574 windows, ~0.1s to generate AND fit). See ``SEEDED_GENERATOR_BOUNDS`` (G11) in
+    # model_registry.py — the unbounded axis is an imported universe, not generator parameters.
+    for value in ("multi_sine", "mackey_glass", "ar_p", "irregular_sine", "delay_product"):
+        assert by_value[value].default_params == {}
+
+
+def test_default_params_seeded_only_for_equities_seq():
+    """A1-iv-3c: the synthetic 2-D types carry no start params; equities_seq carries the
+    bounded + stationary registry seed (the single source of truth for a one-shot fit)."""
+    by_value = {spec.value: spec for spec in DATASET_TYPES}
+    for value in ("spirals", "xor", "circles", "moons"):
+        assert by_value[value].default_params == {}
+    # ``mnist`` is the exception among the 2-D synthetics, and for a different reason than
+    # equities_seq's: not to make the fit work, but to make canopy's own ``ndim=2`` declaration
+    # SELF-ENFORCING. juniper-data's MNIST_DEFAULT_FLATTEN is True today, so this changes no
+    # bytes on the wire -- it stops the declaration being true only by upstream coincidence
+    # (canopy#623). The knob is withheld from the form, so nothing can override this.
+    assert by_value["mnist"].default_params == {"flatten": True}
+    # The seed's three keys. ``symbols`` (not ``max_symbols`` -- that is a cap juniper-data
+    # REFUSES against, so the former seed generated nothing) and ``fundamentals_fill`` (at
+    # juniper-data's "nan" default X_train comes back non-finite and the LMU rejects it) are
+    # each load-bearing; TestEquitiesSeedIsGenerableAndFinite in
+    # tests/regression/test_dataset_generator_contract.py pins WHY, this pins WHAT.
+    assert by_value["equities_seq"].default_params == {
+        "symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"],
+        "regression_target": "return",
+        "fundamentals_fill": "drop",
+    }
+
+
+def test_dataset_default_params_returns_seed_copy():
+    """A1-iv-3c: the resolver returns the seed for a known value, ``{}`` for an unknown one, and a
+    COPY so a caller mutating the result can never corrupt the frozen registry constant."""
+    by_value = {spec.value: spec for spec in DATASET_TYPES}
+    assert dataset_default_params("equities_seq") == by_value["equities_seq"].default_params
+    assert dataset_default_params("spirals") == {}
+    assert dataset_default_params("nonexistent") == {}
+    # Copy semantics, asserted without naming a key the seed may stop carrying: replace one
+    # existing entry and add a new one, then re-read.
+    before = dataset_default_params("equities_seq")
+    first = dataset_default_params("equities_seq")
+    first["regression_target"] = "next_close"
+    first["injected_by_this_test"] = 999
+    assert dataset_default_params("equities_seq") == before
+
+
+def test_dataset_default_params_copy_is_deep():
+    """The copy must survive mutation of a NESTED value, not just of a top-level key.
+
+    ``equities_seq`` seeds a ``symbols`` list. Under the previous ``dict(...)`` shallow copy
+    every caller received the very same list object as the frozen registry constant, so a
+    single in-place ``append``/``clear`` anywhere would have rewritten the seed for the life
+    of the process — and the next Start would have sent a universe nobody selected, with
+    nothing in the UI showing it had changed. No caller mutates in place today; this pins
+    that none may start.
+    """
+    seeded = dataset_default_params("equities_seq")
+    assert isinstance(seeded.get("symbols"), list), "seed no longer carries a list; retarget this test rather than deleting it"
+    seeded["symbols"].append("INJECTED")
+    seeded["symbols"][0] = "MUTATED"
+    fresh = dataset_default_params("equities_seq")
+    assert "INJECTED" not in fresh["symbols"]
+    assert fresh["symbols"][0] != "MUTATED"
+
+
+def test_model_keys_are_unique():
+    keys = [model.key for model in MODELS]
+    assert len(keys) == len(set(keys))
+
+
+def test_cascor_seed():
+    cascor = next(model for model in MODELS if model.key == "cascor")
+    assert cascor.is_live
+    assert cascor.status == "live"
+    assert cascor.category == "feedforward"
+    assert cascor.input_ndim == frozenset({2})
+    assert cascor.supported_task_types == frozenset({"classification", "regression"})
+
+
+def test_recurrence_seed_is_live_and_3d():
+    recurrence = next(model for model in MODELS if model.key == "recurrence")
+    # A1-iv-5: flipped coming_soon -> live (service deployed + canopy-wired, juniper-deploy #132).
+    assert recurrence.is_live
+    assert recurrence.status == "live"
+    assert recurrence.input_ndim == frozenset({3})
+    assert recurrence.requires_dt is True
+    assert recurrence.supported_task_types == frozenset({"regression"})
+    assert recurrence.execution == "one_shot"  # still a single blocking fit (drives the one-shot UI)
+
+
+def test_specs_are_frozen():
+    """Registry specs are immutable constants."""
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        DATASET_TYPES[0].value = "mutated"  # type: ignore[misc]
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        MODELS[0].status = "broken"  # type: ignore[misc]
+
+
+def test_spec_types_are_constructible():
+    """Sanity: the public dataclasses build with the documented required fields."""
+    ds = DatasetTypeSpec(value="seq", label="Seq", task_type="regression", ndim=3, temporal="irregular")
+    assert ds.ndim == 3 and ds.temporal == "irregular"
+    model = ModelSpec(
+        key="demo",
+        label="Demo",
+        category="ts_growth",
+        input_ndim=frozenset({3}),
+        supported_task_types=frozenset({"regression"}),
+    )
+    assert model.is_live  # default status="live"
+    assert model.tags == frozenset()
+
+
+# Compatibility engine (A1-iv-1): the pure predicate + resolvers (design §4). These ARE the
+# correctness guarantee (D5), so they carry the bulk of the browser-free (B0) coverage.
+# Synthetic specs exercise the task_type / temporal axes that the all-2-D-classification seeds
+# cannot reach on their own.
+
+_SEQ_IRREGULAR = DatasetTypeSpec(value="seq_irr", label="Seq (irregular)", task_type="regression", ndim=3, temporal="irregular")
+_SEQ_REGULAR = DatasetTypeSpec(value="seq_reg", label="Seq (regular)", task_type="regression", ndim=3, temporal="regular")
+_TABULAR_REGRESSION = DatasetTypeSpec(value="tab_reg", label="Tabular (regression)", task_type="regression", ndim=2, temporal="none")
+
+_DT_AWARE_3D = ModelSpec(key="dt3d", label="dt-aware 3-D", category="ts_established", input_ndim=frozenset({3}), supported_task_types=frozenset({"regression"}), requires_dt=True)
+_PLAIN_3D = ModelSpec(key="plain3d", label="plain 3-D", category="ts_established", input_ndim=frozenset({3}), supported_task_types=frozenset({"regression"}), requires_dt=False)
+_CLASSIFIER_2D = ModelSpec(key="clf2d", label="2-D classifier", category="feedforward", input_ndim=frozenset({2}), supported_task_types=frozenset({"classification"}))
+
+
+def _model(key: str) -> ModelSpec:
+    return next(model for model in MODELS if model.key == key)
+
+
+def test_compatible_seeded_ndim_gate():
+    """The ndim axis gates the two real seeds: spirals(2-D) ↔ cascor only."""
+    spirals = next(spec for spec in DATASET_TYPES if spec.value == "spirals")
+    assert compatible(spirals, _model("cascor")) is True
+    assert compatible(spirals, _model("recurrence")) is False  # 2-D dataset, 3-D model
+
+
+def test_temporal_ok_only_irregular_constrains():
+    """Only irregular-Δt data requires a Δt-consuming model; regular/none never constrain."""
+    assert temporal_ok(_SEQ_IRREGULAR, _DT_AWARE_3D) is True
+    assert temporal_ok(_SEQ_IRREGULAR, _PLAIN_3D) is False
+    assert temporal_ok(_SEQ_REGULAR, _PLAIN_3D) is True
+    assert temporal_ok(_TABULAR_REGRESSION, _CLASSIFIER_2D) is True
+
+
+def test_compatible_task_type_axis():
+    """task_type is enforced even when ndim matches."""
+    assert compatible(_TABULAR_REGRESSION, _model("cascor")) is True  # cascor supports regression
+    assert compatible(_TABULAR_REGRESSION, _CLASSIFIER_2D) is False  # classification-only model
+
+
+def test_compatible_temporal_axis_is_the_fine_discriminator():
+    """Two same-ndim/same-task 3-D regressors are separated ONLY by the temporal clause."""
+    assert compatible(_SEQ_IRREGULAR, _DT_AWARE_3D) is True
+    assert compatible(_SEQ_IRREGULAR, _PLAIN_3D) is False  # ndim+task pass; temporal fails
+    assert compatible(_SEQ_REGULAR, _PLAIN_3D) is True  # regular data is fine for the non-dt model
+
+
+def test_compatible_is_independent_of_status():
+    """Compatibility is orthogonal to lifecycle status (D8): a non-live model ≠ incompatible."""
+    # A1-iv-5 flipped recurrence to live, so assert the orthogonality with a synthetic non-live model.
+    coming_soon = ModelSpec(key="cs3d", label="Coming Soon 3-D", category="ts_established", input_ndim=frozenset({3}), supported_task_types=frozenset({"regression"}), requires_dt=True, status="coming_soon")
+    assert not coming_soon.is_live
+    assert compatible(_SEQ_IRREGULAR, coming_soon) is True  # compatible despite being non-live
+
+
+def test_compatible_models_resolver_over_seeds():
+    spirals = next(spec for spec in DATASET_TYPES if spec.value == "spirals")
+    assert compatible_models(spirals) == [_model("cascor")]
+    # A 3-D irregular regression dataset resolves to recurrence from the real MODELS table.
+    assert compatible_models(_SEQ_IRREGULAR) == [_model("recurrence")]
+
+
+def test_compatible_datasets_resolver_over_seeds():
+    # cascor (2-D, classification+regression) matches the EIGHT 2-D classification seeds — the five
+    # incumbents plus §12's gaussian, checkerboard and equities — and NONE of the six rank-3 ones.
+    # That the rank-3 additions never entered this list, and the rank-2 additions never entered the
+    # recurrence one below, is §12.2's claim that the expansion adds no deadlock surface: the graph
+    # still has exactly two components, asserted rather than assumed.
+    assert [dataset.value for dataset in compatible_datasets(_model("cascor"))] == ["spirals", "xor", "mnist", "circles", "moons", "gaussian", "checkerboard", "equities"]
+    # recurrence (3-D, Δt-aware) matches all six rank-3 seeds, in registry order. multi_sine leads
+    # because registry order is the order the dropdown OFFERS and the restart modal's fallback
+    # (its owner-ruled ``enabled[0]`` swap). The SIDEBAR gate no longer picks for the operator:
+    # since OQ-6 (canopy#652) it clears a stranded dataset to ⊥.
+    assert [dataset.value for dataset in compatible_datasets(_model("recurrence"))] == [
+        "multi_sine",
+        "mackey_glass",
+        "irregular_sine",
+        "ar_p",
+        "delay_product",
+        "equities_seq",
+    ]
+
+
+def test_resolvers_are_injectable_and_order_preserving():
+    seq_types = (_SEQ_IRREGULAR, _SEQ_REGULAR, _TABULAR_REGRESSION)
+    assert compatible_datasets(_DT_AWARE_3D, dataset_types=seq_types) == [_SEQ_IRREGULAR, _SEQ_REGULAR]
+    assert compatible_models(_SEQ_IRREGULAR, models=(_PLAIN_3D, _DT_AWARE_3D)) == [_DT_AWARE_3D]
+
+
+def test_compatible_models_preserves_input_order():
+    """When several models match, the resolver yields them in input order (no reordering)."""
+    m1 = ModelSpec(key="m1", label="m1", category="feedforward", input_ndim=frozenset({2}), supported_task_types=frozenset({"regression"}))
+    m2 = ModelSpec(key="m2", label="m2", category="feedforward", input_ndim=frozenset({2}), supported_task_types=frozenset({"regression"}))
+    assert compatible_models(_TABULAR_REGRESSION, models=(m1, m2)) == [m1, m2]
+    assert compatible_models(_TABULAR_REGRESSION, models=(m2, m1)) == [m2, m1]
+
+
+def test_resolvers_agree_with_predicate_over_seeds():
+    """Resolvers are exactly the predicate filtered over the registry (no hidden criteria)."""
+    for dataset in DATASET_TYPES:
+        assert compatible_models(dataset) == [model for model in MODELS if compatible(dataset, model)]
+    for model in MODELS:
+        assert compatible_datasets(model) == [dataset for dataset in DATASET_TYPES if compatible(dataset, model)]
+
+
+@pytest.mark.parametrize("dataset", DATASET_TYPES, ids=lambda d: d.value)
+def test_every_seeded_dataset_has_a_compatible_model(dataset):
+    """A-N9 — a seed no model can train is greyed out under EVERY model, and nothing else says so.
+
+    juniper-data emits a third ``task_type``, ``"structured"`` (juniper-data#402, for ``arc_agi``),
+    and no ``ModelSpec.supported_task_types`` contains it. ``arc_agi`` is deliberately unseeded
+    (G10), but a ``structured`` seed -- or any seed whose rank or task type no model accepts --
+    would be disabled in the dropdown under every model and could never be trained, with no
+    failing test. ``test_dataset_model_hint_non_none_for_every_seed_dataset`` below read like this
+    guard and was not one: the hint for such a seed is the non-``None`` string "no compatible
+    models", so it passed.
+    """
+    dt_clause = " and requires_dt=True (the dataset's Δt is irregular)" if dataset.temporal == "irregular" else ""
+    assert compatible_models(dataset, models=MODELS), f"seed {dataset.value!r} (task_type={dataset.task_type!r}, ndim={dataset.ndim}, temporal={dataset.temporal!r}) is compatible with NO model, " f"so it is greyed out under every model and can never be trained. Add a ModelSpec whose supported_task_types contains {dataset.task_type!r} " f"and whose input_ndim contains {dataset.ndim}{dt_clause} -- or do not seed it, and record why in UNSEEDED_GENERATORS instead."
+
+
+# Model-picker options (A1-iv-3a): the registry source for the sidebar nn-model-dropdown.
+
+
+def test_default_model_key_is_a_live_seed():
+    """The picker boots to a real, trainable model (the cascor in-process default)."""
+    spec = get_model_spec(DEFAULT_MODEL_KEY)
+    assert spec is not None
+    assert spec.is_live
+
+
+def test_model_options_cover_all_models_in_registry_order():
+    assert [option["value"] for option in model_options()] == [model.key for model in MODELS]
+
+
+def test_model_options_all_live_have_plain_labels_post_iv5():
+    # Post A1-iv-5 every shipped model is live -> no lifecycle-hint suffix in the real options.
+    for option in model_options():
+        assert " — " not in option["label"]
+
+
+def test_model_options_label_carries_lifecycle_hint_for_non_live():
+    # A1-iv-5 made every shipped model live, so inject a synthetic non-live model to assert the
+    # lifecycle-hint label path (model_options is now injectable).
+    live = next(model for model in MODELS if model.status == "live")
+    coming_soon = ModelSpec(key="cs", label="Future Model", category="ts_growth", input_ndim=frozenset({3}), supported_task_types=frozenset({"regression"}), status="coming_soon")
+    by_value = {option["value"]: option["label"] for option in model_options(models=(live, coming_soon))}
+    assert by_value[live.key] == live.label  # live -> plain label (no hint)
+    assert by_value["cs"] == "Future Model — coming soon"  # non-live -> lifecycle hint suffix
+
+
+# D8 Train-gate predicate (A1-iv-5): model_is_trainable.
+
+
+def test_model_is_trainable_live_unknown_and_synthetic_non_live():
+    # Both shipped models are live post A1-iv-5 -> trainable.
+    assert model_is_trainable("cascor") is True
+    assert model_is_trainable("recurrence") is True
+    # Unknown / empty key -> True (never strand Start on a desync; the service fails closed, FR9).
+    assert model_is_trainable("does-not-exist") is True
+    assert model_is_trainable("") is True
+    assert model_is_trainable(None) is True
+    # A synthetic non-live model -> NOT trainable (the D8 gate; injected since no shipped model is non-live).
+    coming_soon = ModelSpec(key="cs", label="CS", category="ts_growth", input_ndim=frozenset({3}), supported_task_types=frozenset({"regression"}), status="coming_soon")
+    assert model_is_trainable("cs", models=(coming_soon,)) is False
+
+
+# Model-table search predicate (A1b search; §5.2): model_matches_search.
+
+
+def test_model_matches_search_over_label_family_category_tags():
+    cascor = next(model for model in MODELS if model.key == "cascor")
+    recurrence = next(model for model in MODELS if model.key == "recurrence")
+    # Case-insensitive substring over label / family / category.
+    assert model_matches_search(cascor, "cascor") is True  # label + family
+    assert model_matches_search(recurrence, "lmu") is True  # family (label also carries "LMU")
+    assert model_matches_search(recurrence, "ESTABLISHED") is True  # category ts_established, case-insensitive
+    assert model_matches_search(cascor, "lmu") is False  # not in cascor's label/family/category/tags
+    # Blank / whitespace query matches everything (no filter).
+    assert model_matches_search(cascor, "") is True
+    assert model_matches_search(cascor, "   ") is True
+    # Tags are searchable too (not label-only, §8).
+    tagged = ModelSpec(key="t", label="T", category="ts_growth", input_ndim=frozenset({3}), supported_task_types=frozenset({"regression"}), tags=frozenset({"experimental-xyz"}))
+    assert model_matches_search(tagged, "experimental-xyz") is True
+    assert model_matches_search(tagged, "nope") is False
+
+
+# Dataset gate (A1-iv-3b): the model->dataset greying source for the sidebar dropdown.
+
+
+def _spec(key):
+    spec = get_model_spec(key)
+    assert spec is not None
+    return spec
+
+
+def test_rank3_seeds_make_recurrence_trainable():
+    """The rank-3 seeds give the recurrence (LMU) model compatible datasets (was [] before iv-3b).
+
+    ``equities_seq`` alone held this open from A1-iv-3b until §12, and it was a thin thread:
+    it was unavailable in the deployed container through juniper-deploy's juniper-data 0.15.0 pin
+    (no juniper-data image before 0.16.0 carries ``yfinance``; juniper-data#421 added it), so
+    in the deployment that matters the LMU had ZERO available datasets and picking it raised
+    §4.7's empty-set alert. The five synthetics are numpy-only.
+    """
+    reachable = [dataset.value for dataset in compatible_datasets(_spec("recurrence"))]
+    assert reachable == ["multi_sine", "mackey_glass", "irregular_sine", "ar_p", "delay_product", "equities_seq"]
+    # The one that must not need an optional extra is the one offered FIRST, and the one the
+    # restart modal falls back to for a stranded dataset. The sidebar gate clears instead (OQ-6).
+    assert reachable[0] == "multi_sine"
+
+
+def test_dataset_reason_none_when_compatible():
+    spirals = next(dataset for dataset in DATASET_TYPES if dataset.value == "spirals")
+    assert dataset_reason(spirals, _spec("cascor")) is None
+
+
+def test_dataset_reason_names_the_failing_axis():
+    spirals = next(dataset for dataset in DATASET_TYPES if dataset.value == "spirals")  # 2-D
+    equities = next(dataset for dataset in DATASET_TYPES if dataset.value == "equities_seq")  # 3-D
+    # 2-D dataset vs the 3-D recurrence model -> ndim reason (what model the dataset needs).
+    assert dataset_reason(spirals, _spec("recurrence")) == "needs a 2-D model"
+    # 3-D dataset vs the 2-D cascor model -> ndim reason.
+    assert dataset_reason(equities, _spec("cascor")) == "needs a 3-D model"
+
+
+def test_dataset_reason_task_and_temporal_axes():
+    # ndim matches, task mismatches -> task reason (a non-ndim axis of the dropdown suffix).
+    assert dataset_reason(_TABULAR_REGRESSION, _CLASSIFIER_2D) == "needs a regression model"
+    # ndim + task match; irregular-Δt data vs a non-Δt model -> temporal reason.
+    assert dataset_reason(_SEQ_IRREGULAR, _PLAIN_3D) == "needs a Δt-aware model"
+
+
+# Model-table compatibility cell (A1b-1): model_reason is the model-perspective inverse.
+
+
+def test_model_reason_none_when_compatible():
+    spirals = next(dataset for dataset in DATASET_TYPES if dataset.value == "spirals")  # 2-D
+    equities = next(dataset for dataset in DATASET_TYPES if dataset.value == "equities_seq")  # 3-D
+    assert model_reason(_spec("cascor"), spirals) is None
+    assert model_reason(_spec("recurrence"), equities) is None
+
+
+def test_model_reason_names_the_failing_axis():
+    spirals = next(dataset for dataset in DATASET_TYPES if dataset.value == "spirals")  # 2-D
+    equities = next(dataset for dataset in DATASET_TYPES if dataset.value == "equities_seq")  # 3-D
+    # The 3-D recurrence model vs a 2-D dataset -> it needs 3-D data (inverse of "needs a 3-D model").
+    assert model_reason(_spec("recurrence"), spirals) == "needs 3-D data"
+    # The 2-D cascor model vs a 3-D dataset -> it needs 2-D data.
+    assert model_reason(_spec("cascor"), equities) == "needs 2-D data"
+
+
+def test_model_reason_task_and_temporal_axes():
+    # ndim matches, task mismatches -> the classifier needs classification data.
+    assert model_reason(_CLASSIFIER_2D, _TABULAR_REGRESSION) == "needs classification data"
+    # ndim + task match; the non-Δt 3-D model vs irregular-Δt data -> temporal reason.
+    assert model_reason(_PLAIN_3D, _SEQ_IRREGULAR) == "needs regularly-sampled data"
+
+
+def test_model_reason_inverse_consistent_with_dataset_reason_over_seeds():
+    """model_reason and dataset_reason agree with the predicate on every seed pair (both directions)."""
+    for dataset in DATASET_TYPES:
+        for model in MODELS:
+            same_verdict = (model_reason(model, dataset) is None) == (dataset_reason(dataset, model) is None)
+            assert same_verdict
+            assert (model_reason(model, dataset) is None) == compatible(dataset, model)
+
+
+def test_get_dataset_spec_resolves_and_misses():
+    spec = get_dataset_spec("equities_seq")
+    assert spec is not None
+    assert spec.value == "equities_seq" and spec.ndim == 3
+    assert get_dataset_spec("nonexistent") is None
+    assert get_dataset_spec("") is None
+
+
+# Sidebar reverse-gate annotation (A1b-2; §5.3): dataset_model_hint.
+
+
+def test_dataset_model_hint_names_the_constraint_per_dataset():
+    # N7 (I-7): rank-clarifying phrasing — spirals = rank-2 (tabular); equities_seq = rank-3
+    # (sequence) irregular-Δt. The "rank-N (<shape>)" wording replaces the pre-N7 "N-D models only"
+    # that read as a feature-count constraint (misleading for MNIST, a rank-2 784-feature tensor).
+    assert dataset_model_hint("spirals") == "rank-2 (tabular) models only"
+    assert dataset_model_hint("equities_seq") == "rank-3 (sequence) Δt-aware models only"
+
+
+def test_dataset_model_hint_none_without_a_dataset():
+    assert dataset_model_hint("") is None
+    assert dataset_model_hint("does-not-exist") is None
+
+
+def test_dataset_model_hint_empty_compatible_set_warns():
+    # Degenerate (§5.8): inject an empty model population so nothing is compatible.
+    assert dataset_model_hint("spirals", models=()) == "no compatible models"
+
+
+def test_dataset_model_hint_non_none_for_every_seed_dataset():
+    """Each seed dataset gets a real constraint phrase — never ``None``, and never the empty-set warning.
+
+    This asserted only ``is not None``, which could not fail on what the docstring claimed ("each
+    seed dataset has ≥1 compatible model"): for a seed no model accepts, the hint is the non-``None``
+    string "no compatible models". The compatibility guarantee itself is
+    ``test_every_seeded_dataset_has_a_compatible_model``; this pins that the sidebar says so.
+    """
+    for dataset in DATASET_TYPES:
+        hint = dataset_model_hint(dataset.value)
+        assert hint is not None and hint != "no compatible models", f"{dataset.value!r}: {hint!r}"
+
+
+def test_gated_dataset_options_greys_incompatible_for_recurrence():
+    by_value = {option["value"]: option for option in gated_dataset_options("recurrence")}
+    # equities_seq (3-D) is compatible -> plain, selectable.
+    assert by_value["equities_seq"] == {"label": "Equities (sequence)", "value": "equities_seq"}
+    # the 2-D types are disabled with a reason-suffix label.
+    assert by_value["spirals"]["disabled"] is True
+    assert by_value["spirals"]["label"] == "Spirals — needs a 2-D model"
+
+
+def test_gated_dataset_options_all_plain_for_cascor_then_3d_greyed():
+    # cascor (2-D, classification+regression) accepts every 2-D type; only the 3-D seed is greyed.
+    by_value = {option["value"]: option for option in gated_dataset_options("cascor")}
+    for value in ("spirals", "xor", "mnist", "circles", "moons"):
+        assert "disabled" not in by_value[value]
+    assert by_value["equities_seq"]["disabled"] is True
+    assert by_value["equities_seq"]["label"] == "Equities (sequence) — needs a 3-D model"
+
+
+def test_gated_dataset_options_unknown_model_is_ungated():
+    # No spec -> fall back to all-plain options (never hide every dataset on a desync).
+    options = gated_dataset_options("nonexistent")
+    assert all("disabled" not in option for option in options)
+    assert [option["value"] for option in options] == [dataset.value for dataset in DATASET_TYPES]
+
+
+# --- W1.7 / F-C8: the recurrence model's version is what its service reports -----------------
+
+
+def _service(handler):
+    """The production version source: a real adapter's ``service_version``, over an ``httpx.MockTransport``."""
+    return RecurrenceServiceAdapter("http://recurrence.test:8210", "k", transport=httpx.MockTransport(handler)).service_version
+
+
+def _recurrence_version(models):
+    return get_model_spec("recurrence", models=models).version
+
+
+@pytest.mark.unit
+class TestRefreshModelVersions:
+    """W1.7 / F-C8: the registry said ``0.1.0`` while the service was 0.5.0. The version now comes from the service."""
+
+    def test_the_recurrence_seed_hard_codes_no_version(self):
+        assert _recurrence_version(MODELS) == ""
+
+    def test_the_version_is_read_from_a_fake_health_payload(self):
+        def serve(request):
+            assert request.url.path == "/v1/health", "a health body with a version answers in one call"
+            return httpx.Response(200, json={"status": "ok", "version": "0.5.0"})
+
+        refreshed = refresh_model_versions({RECURRENCE_PROVIDER: _service(serve)})
+        assert _recurrence_version(refreshed) == "0.5.0"
+
+    def test_the_live_services_shape_is_read_from_openapi(self):
+        """juniper-recurrence 0.5.0 answers health with ``{"status": "ok"}``; its version is ``info.version`` on ``/openapi.json``."""
+        bodies = {"/v1/health": {"status": "ok"}, "/openapi.json": {"openapi": "3.1.0", "info": {"title": "Juniper Recurrence", "version": "0.5.0"}}}
+        refreshed = refresh_model_versions({RECURRENCE_PROVIDER: _service(lambda request: httpx.Response(200, json=bodies[request.url.path]))})
+        assert _recurrence_version(refreshed) == "0.5.0"
+
+    def test_a_timed_out_lookup_is_labelled_not_raised(self, caplog):
+        def stall(request):
+            raise httpx.ReadTimeout("read timed out", request=request)
+
+        with caplog.at_level(logging.WARNING, logger="juniper_canopy.model_registry"):
+            refreshed = refresh_model_versions({RECURRENCE_PROVIDER: _service(stall)})
+        assert _recurrence_version(refreshed) == SERVICE_VERSION_UNAVAILABLE == "unknown (version lookup failed)"
+        assert any("RecurrenceServiceTimeoutError" in record.getMessage() for record in caplog.records), "the WARNING names the failure"
+
+    def test_an_unreachable_service_is_labelled_not_raised(self):
+        def refuse(request):
+            raise httpx.ConnectError("connection refused", request=request)
+
+        assert _recurrence_version(refresh_model_versions({RECURRENCE_PROVIDER: _service(refuse)})) == SERVICE_VERSION_UNAVAILABLE
+
+    def test_any_raising_source_is_labelled_not_raised(self):
+        def broken():
+            raise RuntimeError("not an adapter error at all")
+
+        assert _recurrence_version(refresh_model_versions({RECURRENCE_PROVIDER: broken})) == SERVICE_VERSION_UNAVAILABLE
+
+    @pytest.mark.parametrize("answer", ["", "   ", None, 0.5, b"0.5.0"], ids=["empty", "blank", "none", "float", "bytes"])
+    def test_an_answer_that_is_not_a_version_is_labelled(self, answer, caplog):
+        with caplog.at_level(logging.WARNING, logger="juniper_canopy.model_registry"):
+            refreshed = refresh_model_versions({RECURRENCE_PROVIDER: lambda: answer})
+        assert _recurrence_version(refreshed) == SERVICE_VERSION_UNAVAILABLE
+        assert any("reported no version" in record.getMessage() for record in caplog.records)
+
+    def test_surrounding_whitespace_is_stripped(self):
+        assert _recurrence_version(refresh_model_versions({RECURRENCE_PROVIDER: lambda: " 0.5.0\n"})) == "0.5.0"
+
+    def test_each_source_is_asked_once_per_refresh(self):
+        """Cached per refresh: one lookup however many models the service serves; the next refresh asks again."""
+        calls = []
+
+        def source():
+            calls.append(None)
+            return "0.5.0"
+
+        twin = dataclasses.replace(get_model_spec("recurrence"), key="recurrence-twin")
+        models = (*MODELS, twin)
+        refreshed = refresh_model_versions({RECURRENCE_PROVIDER: source}, models=models)
+        assert len(calls) == 1
+        assert [spec.version for spec in refreshed if spec.provider == RECURRENCE_PROVIDER] == ["0.5.0", "0.5.0"]
+        # Reading the refreshed registry -- through the resolvers that take ``models=`` -- asks nothing.
+        get_model_spec("recurrence-twin", models=refreshed)
+        model_options(models=refreshed)
+        assert len(calls) == 1
+        refresh_model_versions({RECURRENCE_PROVIDER: source}, models=models)
+        assert len(calls) == 2
+
+    def test_a_model_without_a_source_is_returned_unchanged(self):
+        refreshed = refresh_model_versions({})
+        assert all(new is old for new, old in zip(refreshed, MODELS, strict=True))
+
+    def test_only_the_version_changes_and_the_seed_is_untouched(self):
+        seed = get_model_spec("recurrence")
+        refreshed = get_model_spec("recurrence", models=refresh_model_versions({RECURRENCE_PROVIDER: lambda: "0.6.0"}))
+        assert refreshed == dataclasses.replace(seed, version="0.6.0")
+        assert get_model_spec("recurrence") is seed and seed.version == ""

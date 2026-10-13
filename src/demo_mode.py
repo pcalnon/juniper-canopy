@@ -64,6 +64,7 @@ import torch
 
 from backend.training_state_machine import Command, TrainingPhase, TrainingStateMachine  # TrainingStatus,
 from canopy_constants import BackendConstants, TrainingConstants
+from secrets_util import bind_outbound_key
 from settings import get_settings
 
 # import copy
@@ -545,6 +546,13 @@ class DemoMode:
         # Create mock network
         self.network = MockCascorNetwork(input_size=2, output_size=1)
 
+        # §4.12 / G9 — whether this instance is running on a LOCALLY generated dataset rather than
+        # one from juniper-data. Defaulted here, before the try/except below, because that block
+        # can set it during __init__ itself. Demo mode's job is to dogfood the platform; when it
+        # cannot, it must say so rather than quietly presenting non-platform data as a demo of the
+        # platform.
+        self.local_dataset_fallback = False
+
         # Generate demo dataset — fall back to local generation if JuniperData
         # is unreachable (e.g., Docker standalone, CI smoke test).
         try:
@@ -566,6 +574,12 @@ class DemoMode:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._pause = threading.Event()
+
+        # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 / Issue #3 Phase 1 — staged
+        # dataset config (cascor parity). Set by stage_dataset, cleared by
+        # cancel_pending_dataset; the canopy banner reads this via the status
+        # payload's pending_dataset field.
+        self._pending_dataset_config: Optional[Dict[str, Any]] = None
 
         self.max_epochs = int(training_defaults.get("epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS))
         self.max_hidden_units = int(training_defaults.get("hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS))
@@ -592,7 +606,7 @@ class DemoMode:
 
         # Phase 3 progress fields (mirror cascor TrainingState semantics so the
         # canopy progress UI displays non-zero values during demo training).
-        # See juniper-ml/notes/code-review/CANOPY_CASCOR_INTERFACE_ROADMAP_2026-04-08.md §5.
+        # See juniper-ml/notes/code-review/JUNIPER_2026-04-08_JUNIPER-ECOSYSTEM_CANOPY-CASCOR-INTERFACE-ROADMAP.md §5.
         self._best_correlation_state: float = 0.0
         self._candidates_trained_count: int = 0
         self._candidates_total_count: int = 0
@@ -783,7 +797,9 @@ class DemoMode:
         """
         from juniper_data_client.exceptions import JuniperDataConfigurationError
 
-        juniper_data_url = get_settings().juniper_data_url
+        settings = get_settings()
+        juniper_data_url = settings.juniper_data_url
+        juniper_data_api_key = settings.juniper_data_api_key
 
         if not juniper_data_url:
             raise JuniperDataConfigurationError("JUNIPER_DATA_URL environment variable is required. " "All datasets must be fetched from the JuniperData service. " "Set JUNIPER_DATA_URL=http://localhost:8100 to connect to a local instance.")
@@ -792,11 +808,34 @@ class DemoMode:
             n_rotations = getattr(self, "spiral_rotations", TrainingConstants.DEFAULT_SPIRAL_ROTATIONS)
 
         self.logger.info("Fetching dataset from JuniperData at %s (n_rotations=%s)", juniper_data_url, n_rotations)
-        return self._generate_spiral_dataset_from_juniper_data(n_samples, juniper_data_url, algorithm=algorithm, n_rotations=n_rotations)
+        return self._generate_spiral_dataset_from_juniper_data(
+            n_samples,
+            juniper_data_url,
+            algorithm=algorithm,
+            n_rotations=n_rotations,
+            juniper_data_api_key=juniper_data_api_key,
+        )
+
+    #: NPZ partitions this ladder validates, in contract order. ``train`` is required;
+    #: the other two are validated when present. ``full`` is deliberately NOT here --
+    #: decision 11 removed it from the contract, and a legacy artifact that still carries
+    #: it is tolerated, not validated.
+    _VALIDATED_PARTITIONS = ("train", "val", "test")
 
     @staticmethod
     def _validate_npz_arrays(npz_data: Dict[str, Any]) -> None:
         """Validate NPZ dataset arrays for dtype, shape, and consistency.
+
+        This validated ``X_full`` / ``y_full`` ONLY. That was canopy's single artifact
+        guard, and decision 11 removes the keys it was reading -- so re-pointing it is
+        not cosmetic: leaving it would have made the guard raise on every new artifact,
+        and deleting it would have lost the check entirely. Design §9.5.4 item 2 calls
+        this out by name for exactly that reason.
+
+        It now walks the partitions. ``train`` must be present -- an artifact with no
+        training rows is not a dataset -- and ``val`` / ``test`` are checked whenever they
+        appear, so an artifact carrying a malformed validation split is rejected rather
+        than half-validated.
 
         Args:
             npz_data: Dictionary of numpy arrays from NPZ artifact.
@@ -804,23 +843,167 @@ class DemoMode:
         Raises:
             ValueError: If validation fails (wrong dtype, shape, or mismatched counts).
         """
-        inputs = npz_data.get("X_full")
-        targets = npz_data.get("y_full")
+        if npz_data.get("X_train") is None or npz_data.get("y_train") is None:
+            raise ValueError("JuniperData artifact missing required keys: X_train, y_train")
 
-        if inputs is None or targets is None:
-            raise ValueError("JuniperData artifact missing required keys: X_full, y_full")
+        for split in DemoMode._VALIDATED_PARTITIONS:
+            x_key, y_key = f"X_{split}", f"y_{split}"
+            inputs = npz_data.get(x_key)
+            targets = npz_data.get(y_key)
+            if inputs is None and targets is None:
+                continue
+            if inputs is None or targets is None:
+                present, missing = (x_key, y_key) if inputs is not None else (y_key, x_key)
+                raise ValueError(f"JuniperData artifact has a partial {split} split: {present} without {missing}")
 
-        if not isinstance(inputs, np.ndarray) or not isinstance(targets, np.ndarray):
-            raise ValueError(f"Expected numpy arrays, got X_full={type(inputs).__name__}, y_full={type(targets).__name__}")
+            if not isinstance(inputs, np.ndarray) or not isinstance(targets, np.ndarray):
+                raise ValueError(f"Expected numpy arrays, got {x_key}={type(inputs).__name__}, {y_key}={type(targets).__name__}")
 
-        if inputs.dtype != np.float32:
-            raise ValueError(f"X_full dtype must be float32, got {inputs.dtype}")
+            if inputs.dtype != np.float32:
+                raise ValueError(f"{x_key} dtype must be float32, got {inputs.dtype}")
 
-        if inputs.ndim != 2:
-            raise ValueError(f"X_full must be 2D (samples, features), got shape {inputs.shape}")
+            if inputs.ndim != 2:
+                raise ValueError(f"{x_key} must be 2D (samples, features), got shape {inputs.shape}")
 
-        if inputs.shape[0] != targets.shape[0]:
-            raise ValueError(f"Sample count mismatch: X_full has {inputs.shape[0]} samples, y_full has {targets.shape[0]}")
+            if inputs.shape[0] != targets.shape[0]:
+                raise ValueError(f"Sample count mismatch: {x_key} has {inputs.shape[0]} samples, {y_key} has {targets.shape[0]}")
+
+    #: Per-row / per-window key naming the entity a row belongs to, when the generator
+    #: emits one (``equities`` and ``equities_seq`` both do, for every partition). Its
+    #: presence is what makes the legacy ENTITY-major ``*_full`` row order exactly
+    #: reconstructible -- see :meth:`_entity_major_order`.
+    _ENTITY_STEM = "ticker_code"
+
+    @staticmethod
+    def _entity_major_order(npz_data: Dict[str, Any]) -> Optional[np.ndarray]:
+        """Permutation restoring juniper-data's ENTITY-major ``*_full`` row order, or ``None``.
+
+        juniper-data built ``*_full`` ENTITY-major for ``equities`` / ``equities_seq`` --
+        each ticker's train rows, then its val, then its test, concatenated across tickers
+        -- while the partitions it emits are SPLIT-major (every ticker's train, then every
+        ticker's val, ...). Same rows, different permutation, identical only for a
+        single-ticker request. So a plain concatenation renders a DIFFERENT order from a
+        legacy artifact's ``X_full`` for the same logical dataset, and canopy would show
+        two orders depending on artifact vintage.
+
+        The reconstruction mirrors ``juniper_recurrence_model.data.derive_full_split``:
+        concatenate, then ONE stable argsort over the concatenated ``ticker_code_<split>``
+        arrays. Within one ticker the stable sort preserves the concatenation order (train,
+        then val, then test) and within each (ticker, split) block it preserves
+        chronological order -- exactly the entity-major layout juniper-data wrote. The sort
+        MUST be stable; numpy's default quicksort would permute equal keys arbitrarily and
+        silently reorder rows.
+
+        Returns ``None`` when the artifact carries no ``ticker_code`` for every partition
+        present (every non-equities generator), and equally when the resulting permutation
+        is the identity (a single-entity artifact) -- there is nothing to reorder, and the
+        caller then skips a full copy of every array.
+        """
+        splits = tuple(s for s in DemoMode._VALIDATED_PARTITIONS if npz_data.get(f"X_{s}") is not None)
+        if not splits or any(npz_data.get(f"{DemoMode._ENTITY_STEM}_{s}") is None for s in splits):
+            return None
+        codes = np.concatenate([np.asarray(npz_data[f"{DemoMode._ENTITY_STEM}_{s}"]).reshape(-1) for s in splits])
+        order = np.argsort(codes, kind="stable")
+        return None if np.array_equal(order, np.arange(order.size)) else order
+
+    def _advise_npz_contract(self, npz_data: Dict[str, Any], source_label: str) -> Optional[str]:
+        """Run the shared NPZ contract validator as an ADVISORY second check (canopy#559).
+
+        ``juniper_data_client.validate_npz_contract`` is the ecosystem's contract gate. It
+        dispatches on ``X_train``'s rank and, for a 3-D artifact, enforces the sequence
+        rules canopy's own install does not check: a ``t`` / ``dt`` channel present,
+        ``dt >= 0`` with ``dt[:, 0] == 0``, ``t`` and ``dt`` consistent, masks binary and
+        well-shaped. It is **warn-only** here, and never the reason an install fails:
+
+        * the ecosystem rule is "tolerate ``*_full``, never require it", and the helper
+          cannot read a legacy artifact that carries only ``X_full`` (it raises
+          ``KeyError``), so canopy is still obliged to load what it rejects;
+        * the rank probe in :meth:`regenerate_dataset_from_generator` stays the gate that
+          decides tabular vs sequence, and ``_validate_npz_arrays`` stays the strict check
+          on the tabular path.
+
+        A violation is logged at WARNING and the install proceeds exactly as it did before
+        this check existed. Any exception is caught, including an unexpected type: an
+        advisory check that can abort the thing it advises on is a gate.
+
+        Args:
+            npz_data: The downloaded artifact.
+            source_label: Where it came from, for the log line (e.g. ``"generator:xor"``).
+
+        Returns:
+            The contract kind (``"tabular"`` or ``"sequence"``) when the artifact validates,
+            or ``None`` when it does not.
+        """
+        try:
+            # Inside the try: a client that predates the helper (< 0.5.0) must degrade to a
+            # warning like any other failure here, not abort the install with ImportError.
+            from juniper_data_client import validate_npz_contract
+
+            # Annotated: under the pre-commit mypy env juniper_data_client is not installed, so the
+            # import is `Any`, and returning it unannotated trips no-any-return.
+            kind: str = validate_npz_contract(npz_data)
+        except KeyError as exc:
+            legacy = " (a legacy pre-decision-11 artifact that carries only X_full)" if "X_full" in npz_data else ""
+            self.logger.warning("Advisory NPZ contract check could not run for %s: no %s key%s; installing anyway (canopy#559)", source_label, exc, legacy)
+            return None
+        except ValueError as exc:  # JuniperDataContractError subclasses ValueError
+            self.logger.warning("Advisory NPZ contract check FAILED for %s: %s; installing anyway (canopy#559)", source_label, exc)
+            return None
+        except Exception as exc:  # advisory: an unexpected error type must not block the install either
+            self.logger.warning("Advisory NPZ contract check raised %s for %s: %s; installing anyway (canopy#559)", type(exc).__name__, source_label, exc)
+            return None
+        self.logger.debug("Advisory NPZ contract check passed for %s: %s", source_label, kind)
+        return kind
+
+    @staticmethod
+    def _whole_dataset(npz_data: Dict[str, Any], stem: str, optional: bool = False, order: Optional[np.ndarray] = None) -> Optional[np.ndarray]:
+        """Assemble one key's whole dataset from its partitions.
+
+        Every canopy use of ``X_full`` was "give me the whole dataset", never "give me
+        the array the partitions were cut from" (design §9.5.1's census). So the
+        replacement is a concatenation, in contract order.
+
+        A legacy artifact's ``<stem>_full`` is used directly when present -- decision 11
+        drops the REQUIREMENT, not the tolerance, and re-deriving it would be slower and
+        could differ in row order from what that artifact actually shipped. It is never
+        reordered: it already IS the producer's order.
+
+        ``np.concatenate``, not ``np.vstack``: they agree for 2-D and above, but ``vstack``
+        promotes 1-D partitions, so a ``(W,)`` regression target would come back as a
+        ``(k, W)`` matrix -- k rows of "the whole dataset" instead of one.
+
+        Args:
+            npz_data: Dictionary of numpy arrays from NPZ artifact.
+            stem: Key stem to assemble, e.g. ``"X"`` / ``"y"`` / ``"dt"``.
+            optional: When True, a stem with no partition at all yields ``None`` rather
+                than raising -- ``dt`` and ``y`` are genuinely absent from some artifacts.
+            order: Entity-major permutation from :meth:`_entity_major_order`. Pass the
+                SAME one to every stem of an artifact so ``X`` / ``dt`` / ``y`` stay
+                row-aligned; leave it ``None`` and it is derived here (same value, since
+                it depends only on the artifact). A stem whose partition coverage differs
+                from ``X``'s cannot be aligned to it and is left in concatenation order
+                rather than mis-permuted.
+
+        Returns:
+            The assembled array, or ``None`` when ``optional`` and no partition exists.
+
+        Raises:
+            ValueError: No ``<stem>_*`` partition exists and ``optional`` is False.
+        """
+        legacy = npz_data.get(f"{stem}_full")
+        if legacy is not None:
+            return np.asarray(legacy)
+        blocks = [np.asarray(npz_data[f"{stem}_{s}"]) for s in DemoMode._VALIDATED_PARTITIONS if npz_data.get(f"{stem}_{s}") is not None]
+        if not blocks:
+            if optional:
+                return None
+            raise ValueError(f"JuniperData artifact carries no {stem}_* partitions to assemble")
+        whole = np.concatenate(blocks, axis=0) if len(blocks) > 1 else blocks[0]
+        if order is None:
+            order = DemoMode._entity_major_order(npz_data)
+        if order is not None and order.shape[0] == whole.shape[0]:
+            whole = whole[order]
+        return whole
 
     @staticmethod
     def _user_friendly_data_error(exc: Exception) -> str:
@@ -864,6 +1047,7 @@ class DemoMode:
         juniper_data_url: str,
         algorithm: Optional[str] = None,
         n_rotations: Optional[float] = None,
+        juniper_data_api_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate spiral dataset using JuniperData service.
@@ -876,6 +1060,14 @@ class DemoMode:
             juniper_data_url: URL of the JuniperData service
             algorithm: Optional algorithm parameter for backward compatibility
             n_rotations: Number of spiral rotations
+            juniper_data_api_key: Optional outbound API key sent as the
+                ``X-API-Key`` header on every juniper-data call -- canopy's
+                resolution, ``settings.juniper_data_api_key``. When it is falsy
+                (``None`` or ``""``), no key is sent: ``JuniperDataClient``
+                falls back to its own ``JUNIPER_DATA_API_KEY[_FILE]`` lookup
+                for ANY falsy key (``api_key or ...``), and
+                ``secrets_util.bind_outbound_key`` undoes it, so a value canopy
+                refused cannot come back raw (#683 validation).
 
         Returns:
             Dataset dictionary
@@ -895,9 +1087,13 @@ class DemoMode:
         # ``juniper_canopy_data_client_request_duration_ms``. The hook
         # is built fresh per client construction so test-side resets of
         # ``_canopy_metrics`` see a usable closure on the next call.
-        client = JuniperDataClient(
-            base_url=juniper_data_url,
-            on_request=build_data_client_request_hook(),
+        client = bind_outbound_key(
+            JuniperDataClient(
+                base_url=juniper_data_url,
+                api_key=juniper_data_api_key,
+                on_request=build_data_client_request_hook(),
+            ),
+            juniper_data_api_key,
         )
 
         params: Dict[str, Any] = {
@@ -941,8 +1137,8 @@ class DemoMode:
 
         self._validate_npz_arrays(npz_data)
 
-        inputs = npz_data["X_full"]
-        targets_one_hot = npz_data["y_full"]
+        inputs = self._whole_dataset(npz_data, "X")
+        targets_one_hot = self._whole_dataset(npz_data, "y")
 
         targets = np.argmax(targets_one_hot, axis=1).astype(np.float32)
 
@@ -969,6 +1165,12 @@ class DemoMode:
             "num_samples": len(inputs),
             "num_features": inputs.shape[1] if len(inputs.shape) > 1 else 2,
             "num_classes": 2,
+            # §4.10: every installed dataset names where it came from, in the one form
+            # ``DemoBackend.get_status`` reads back as ``current_dataset``. The generator
+            # loaders already stamp ``generator:<name>``; the two spiral builders did not, so
+            # a spiral was identifiable only by the ABSENCE of a label -- which any future
+            # install that forgot one would silently satisfy.
+            "source": "generator:spiral",
         }
         if "dataset_name" in meta:
             result["dataset_name"] = meta["dataset_name"]
@@ -993,6 +1195,16 @@ class DemoMode:
         """
         import warnings
 
+        # §4.12 / G9 — mark the instance degraded HERE rather than at the call sites. There are
+        # three of them (__init__, restart_dataset, and the spiral-rotations regeneration); the
+        # design named one, so a per-caller flag would have left demo mode able to BECOME degraded
+        # mid-session unannounced. Setting it inside the degraded path covers all three and any
+        # fourth added later.
+        self.local_dataset_fallback = True
+
+        # The existing warning + DeprecationWarning are log-channel only: A1's audit of the "it
+        # degrades silently" claim found it degrades silently *in the UI*, which is the channel a
+        # researcher actually reads. This flag is what reaches the badge.
         warnings.warn(
             "DemoMode._generate_spiral_dataset_local() is deprecated and will be removed in a future release. " "Dataset generation is now handled by the JuniperData service.",
             DeprecationWarning,
@@ -1027,6 +1239,9 @@ class DemoMode:
             "num_samples": len(inputs),
             "num_features": 2,
             "num_classes": 2,
+            # §4.10: same stamp as the juniper-data builder -- a local spiral is still a spiral.
+            # Whether it is the degraded local one is ``local_dataset_fallback``'s business (G9).
+            "source": "generator:spiral",
         }
 
     def _simulate_training_step(self) -> Tuple[float, float]:
@@ -1358,6 +1573,26 @@ class DemoMode:
             self.network.history["val_accuracy"].append(val_accuracy)
 
             phase_name = self.state_machine.get_phase().name.lower()
+
+            # N9 (C7 display / U-4): additive scalar classification metrics so the
+            # DEFAULT demo surface exercises the metrics-visualization overhaul —
+            # the F1/precision/recall/ROC-AUC series and the eval_metrics
+            # legend/annotation. Derived from the demo accuracy on output-training
+            # rows (where accuracy is meaningful) and left as None through
+            # candidate phases, mirroring the real cascor gap/sparsity behavior.
+            # Best-effort n_samples; never raises.
+            if "output" in phase_name:
+                precision = float(min(1.0, max(0.0, accuracy + np.random.randn() * 0.02)))
+                recall = float(min(1.0, max(0.0, accuracy + np.random.randn() * 0.02)))
+                f1 = float(2.0 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+                roc_auc = float(min(1.0, max(0.5, 0.5 + 0.5 * accuracy + np.random.randn() * 0.01)))
+            else:
+                precision = recall = f1 = roc_auc = None
+            try:
+                n_samples = int(len(self.network.train_y)) if getattr(self.network, "train_y", None) is not None else None
+            except (TypeError, AttributeError):
+                n_samples = None
+
             metrics = {
                 "epoch": self.current_epoch,
                 "iteration": self.current_iteration,
@@ -1366,6 +1601,11 @@ class DemoMode:
                     "accuracy": float(accuracy),
                     "val_loss": float(val_loss),
                     "val_accuracy": float(val_accuracy),
+                    # C7 (U-4) scalar classification metrics (nullable).
+                    "f1": f1,
+                    "precision": precision,
+                    "recall": recall,
+                    "roc_auc": roc_auc,
                 },
                 "network_topology": {
                     "input_units": self.network.input_size,
@@ -1374,6 +1614,15 @@ class DemoMode:
                 },
                 "phase": phase_name,
                 "timestamp": datetime.now().isoformat(),
+                # C7 (U-4) self-describing metadata for the scalar metrics.
+                "eval_metrics": {
+                    "enabled": True,
+                    "average": "binary",
+                    "split": "training",
+                    "n_samples": n_samples,
+                    "n_classes": 2,
+                    "undefined": {},
+                },
             }
             self.metrics_history.append(metrics)
 
@@ -1444,6 +1693,14 @@ class DemoMode:
         with self._lock:
             if reset:
                 self._reset_state_and_history()
+                # Cold-swap restart consumes any staged dataset change. The real
+                # cascor backend clears its pending_dataset on
+                # start_training(reset=True); the canopy banner reconcile loop
+                # (reconcile_pending_dataset_banner) relies on that signal to
+                # dismiss the "Stop & Restart with new dataset" banner. Mirror it
+                # here so demo mode closes the banner instead of re-opening it on
+                # the next /api/status poll.
+                self._pending_dataset_config = None
             self.is_running = True
             self._stop.clear()
 
@@ -1732,6 +1989,91 @@ class DemoMode:
         self.logger.info("Dataset regenerated: n_samples=%s, n_rotations=%s", n_samples, n_rotations)
         return self.dataset
 
+    def regenerate_dataset_from_generator(self, generator: str, n_samples: int = 200) -> Dict[str, Any]:
+        """Fetch a JuniperData generator's dataset and install it as the active dataset.
+
+        Non-spiral generators (xor, circles, moon, …) are synthesized by the
+        JuniperData service — the demo simulator only builds spirals locally.
+        Mirrors ``_generate_spiral_dataset_from_juniper_data``'s client construction
+        + NPZ handling, then installs via ``import_dataset`` (atomic swap + network
+        reset, CONC-07). Raises on a missing URL or any JuniperData failure so the
+        ``/api/dataset/generate`` route can surface a clean error.
+
+        Args:
+            generator: JuniperData generator registry key (e.g. "xor", "circles").
+            n_samples: requested sample count (server defaults apply when the
+                generator's param schema differs; reserved for future per-generator
+                param mapping).
+
+        Returns:
+            Dataset dict (same shape as ``import_dataset``).
+        """
+        import numpy as np
+        from juniper_data_client import JuniperDataClient
+        from juniper_data_client.exceptions import JuniperDataClientError, JuniperDataConfigurationError
+
+        from observability import build_data_client_request_hook
+
+        settings = get_settings()
+        juniper_data_url = settings.juniper_data_url
+        if not juniper_data_url:
+            raise JuniperDataConfigurationError("JUNIPER_DATA_URL is required to load non-spiral generators.")
+
+        self.logger.info("Loading generator '%s' from JuniperData at %s (n_samples=%s; server defaults applied)", generator, juniper_data_url, n_samples)
+        # bind_outbound_key: with no key, the client reads JUNIPER_DATA_API_KEY[_FILE] itself (#683 validation).
+        client = bind_outbound_key(
+            JuniperDataClient(
+                base_url=juniper_data_url,
+                api_key=settings.juniper_data_api_key,
+                on_request=build_data_client_request_hook(),
+            ),
+            settings.juniper_data_api_key,
+        )
+        try:
+            response = client.create_dataset(generator=generator, params={"seed": 42}, persist=True)
+            dataset_id = response.get("dataset_id")
+            if not dataset_id:
+                raise ValueError("JuniperData response missing dataset_id")
+            npz_data = client.download_artifact_npz(dataset_id)
+        except JuniperDataClientError as exc:
+            self.logger.error("JuniperData generator '%s' fetch failed: %s", generator, exc)
+            raise
+
+        # juniper_data_client.validate_npz_contract runs first, as an ADVISORY check: a
+        # violation is logged, never enforced (canopy#559, owner ruling 2026-09-22). See
+        # ``_advise_npz_contract``. It is the ecosystem's contract gate but not canopy's,
+        # because it fails CLOSED: it reads ``X_train`` alone, so a legacy artifact carrying
+        # only ``X_full`` raises ``KeyError``, and it raises on any sequence-rule violation.
+        # The ecosystem contract is "tolerate ``*_full``, never require it", so canopy is
+        # obliged to keep loading artifacts the helper would refuse.
+        #
+        # The reason this comment first gave for not calling the helper -- that it "is
+        # absent from the pinned / published juniper-data-client (0.4.x)" -- was true when
+        # written and is false since the 0.5.0 floor in pyproject.toml: the helper is
+        # guaranteed present.
+        self._advise_npz_contract(npz_data, source_label=f"generator:{generator}")
+
+        # Dispatch on input rank (CANOPY-3D-1) -- this probe, not the helper above, is the
+        # gate. 3-D sequence (irregular-Δt time series) -> a display-only install (cascor
+        # cannot ingest 3-D yet, OQ-4); 2-D tabular -> the existing classification path.
+        # A rank probe only, so the legacy ``X_full`` arm stays: any partition answers
+        # "how many dimensions", and a legacy artifact has no other key to ask. The
+        # message names ``X_train`` alone, because that is the one the CONTRACT requires
+        # (decision 11); naming ``X_full`` there told the reader to go looking for a key
+        # no producer has emitted since juniper-data#369.
+        x_probe = npz_data.get("X_full")
+        if x_probe is None:
+            x_probe = npz_data.get("X_train")
+        if x_probe is None:
+            raise ValueError("JuniperData artifact missing required key: X_train")
+        if getattr(x_probe, "ndim", 0) == 3:
+            return self._install_sequence_dataset(npz_data, source_label=f"generator:{generator}")
+
+        self._validate_npz_arrays(npz_data)
+        inputs = self._whole_dataset(npz_data, "X")
+        targets = np.argmax(self._whole_dataset(npz_data, "y"), axis=1).astype(np.int64)
+        return self.import_dataset(inputs, targets, source_label=f"generator:{generator}")
+
     def import_dataset(self, inputs: Any, targets: Any, source_label: str = "imported") -> Dict[str, Any]:
         """CAN-016b: install a pre-parsed dataset (file upload, URL fetch, etc).
 
@@ -1805,6 +2147,131 @@ class DemoMode:
             new_dataset["n_classes"],
         )
         return new_dataset
+
+    def _install_sequence_dataset(self, npz_data: Dict[str, Any], source_label: str = "sequence") -> Dict[str, Any]:
+        """CANOPY-3D-1: install a 3-D sequence dataset for DISPLAY ONLY.
+
+        Sequence (irregular-Δt time-series) artifacts cannot train the cascor-like demo
+        simulator (OQ-4: cascor has no 3-D ingestion), so this stores a small,
+        JSON-serializable view (a capped set of windows' feature channels + per-step Δt)
+        into ``self.dataset`` for the dataset-plotter to render, and deliberately does NOT
+        touch ``self.network.train_x`` / ``train_y``. Mirrors ``import_dataset``'s lock
+        discipline for the visible-state swap. The installed dict is what reaches the
+        frontend, because ``DemoBackend.regenerate_dataset_from_generator`` returns
+        ``get_dataset()``.
+
+        The installed view is the WHOLE dataset, assembled from the partitions by
+        :meth:`_whole_dataset`. It used to read ``X_full`` / ``dt_full`` / ``y_full`` and
+        fall back to the ``_train`` partition alone -- so from decision 11 (juniper-ml
+        ``notes/JUNIPER_2026-08-29_JUNIPER-ECOSYSTEM_TRAIN-EVAL-TEST-PARTITION-DESIGN.md``
+        §9.5) onward, when juniper-data#369 stopped emitting ``*_full``, every sequence
+        install silently showed TRAIN ONLY while ``n_windows`` / ``lookback`` /
+        ``n_features``, the stored windows and the histograms below all claimed the whole
+        dataset. Nothing errored. The 2-D path was migrated by #589; this is its 3-D twin.
+
+        One permutation is computed for the artifact and passed to all three stems, so
+        ``X`` / ``dt`` / ``y`` stay row-aligned -- reordering them independently would
+        pair each window with another window's Δt.
+
+        Args:
+            npz_data: dict of NPZ arrays validated as the 3-D sequence contract
+                (``X_train`` + any ``X_val`` / ``X_test``, each ``(W, L, F)``; ``dt_*``
+                ``(W, L)``; legacy ``*_full`` tolerated and used as-is when present).
+            source_label: short tag for logging / dataset provenance.
+
+        Returns:
+            The display-only dataset dict (also installed as ``self.dataset``).
+        """
+        import numpy as np
+
+        order = self._entity_major_order(npz_data)
+        # ``optional=True`` for X too, so the rank check below stays the single gate on a
+        # missing / non-3-D X and keeps its own message. X is still REQUIRED: this raises.
+        X = self._whole_dataset(npz_data, "X", optional=True, order=order)
+        if X is None or getattr(X, "ndim", 0) != 3:
+            shape = None if X is None else getattr(X, "shape", None)
+            raise ValueError(f"sequence install expects a 3-D X (W, L, F); got shape {shape}")
+        dt = self._whole_dataset(npz_data, "dt", optional=True, order=order)
+
+        n_windows, lookback, n_features = (int(d) for d in X.shape)
+        # Phase 2b: store a capped set of windows (display-only) so the plotter's
+        # compare-windows mode can switch windows without re-fetching; window 0 remains the
+        # default single view. The cap bounds the JSON payload pushed to the browser store.
+        window_cap = 50
+        n_stored = min(n_windows, window_cap)
+        windows_X = [np.asarray(X[w], dtype=np.float32).tolist() for w in range(n_stored)]
+        if dt is not None:
+            windows_dt = [np.asarray(dt[w], dtype=np.float32).tolist() for w in range(n_stored)]
+        else:
+            zeros = np.zeros(lookback, dtype=np.float32).tolist()
+            windows_dt = [list(zeros) for _ in range(n_stored)]
+
+        # Phase 2c companions (display-only): the regression target per stored window for the
+        # optional target view, plus whole-dataset Δt / target histograms (computed over ALL
+        # windows, then bounded to ~30 bins) for the characterization companion.
+        y = self._whole_dataset(npz_data, "y", optional=True, order=order)
+        windows_y: list = []
+        if y is not None:
+            y_arr = np.asarray(y)
+            windows_y = [np.asarray(y_arr[w], dtype=np.float32).ravel().tolist() for w in range(min(n_stored, y_arr.shape[0]))]
+
+        def _bounded_hist(values):
+            arr = np.asarray(values, dtype=np.float64).ravel()
+            arr = arr[np.isfinite(arr)]
+            if arr.size == 0:
+                return None
+            counts, edges = np.histogram(arr, bins=30)
+            return {"edges": edges.astype(float).tolist(), "counts": counts.astype(int).tolist()}
+
+        if dt is not None:
+            dt_arr = np.asarray(dt)
+            dt_values = dt_arr[:, 1:] if dt_arr.ndim == 2 and dt_arr.shape[1] > 1 else dt_arr  # drop the leading per-window 0
+            dt_hist = _bounded_hist(dt_values)
+        else:
+            dt_hist = None
+        target_hist = _bounded_hist(y) if y is not None else None
+
+        dataset = {
+            "dataset_kind": "sequence",
+            "source": source_label,
+            "n_windows": n_windows,
+            "n_windows_stored": n_stored,
+            "lookback": lookback,
+            "n_features": n_features,
+            "inputs": [],  # legacy-consumer safety: 2-D readers see empty, not KeyError
+            "targets": [],
+            "sequence": {
+                "X": windows_X[0],  # window 0, shape (L, F) — default single view (back-compat)
+                "dt": windows_dt[0],  # window 0 per-step Δt, shape (L,)
+                "feature_labels": [f"Feature {i}" for i in range(n_features)],
+                "windows_X": windows_X,  # up to window_cap windows, each (L, F), JSON-serializable
+                "windows_dt": windows_dt,  # matching per-window Δt, each (L,)
+                "windows_y": windows_y,  # per-window regression target (flattened), capped
+                "dt_hist": dt_hist,  # whole-dataset Δt histogram {edges, counts} (or None)
+                "target_hist": target_hist,  # whole-dataset target histogram {edges, counts} (or None)
+            },
+        }
+
+        if self.running:  # CONC-08: stop training before swapping the visible dataset.
+            self.stop()
+        with self._lock:
+            self.dataset = dataset
+            self.current_epoch = 0
+            self.current_loss = 1.0
+            self.current_accuracy = 0.5
+            self.metrics_history.clear()
+            # Display-only (OQ-4): deliberately NOT setting network.train_x / train_y —
+            # the cascor-like demo simulator cannot train a 3-D sequence dataset.
+
+        self.logger.info(
+            "Sequence dataset loaded for display only (%s): n_windows=%d (stored %d), lookback=%d, n_features=%d (NOT installed for training)",
+            source_label,
+            n_windows,
+            n_stored,
+            lookback,
+            n_features,
+        )
+        return dataset
 
     def get_dataset(self) -> Dict[str, Any]:
         """
@@ -1906,14 +2373,27 @@ class DemoMode:
                 # Update Adam optimizer's learning rate to take effect immediately
                 for param_group in self.network.output_optimizer.param_groups:
                     param_group["lr"] = learning_rate
+                # FRONTEND_ISSUES_PLAN_2026-05-09 §2.5 / Issue #2 — also seed the
+                # ``nn_*``-aliased attribute so ``/api/state``'s
+                # ``getattr(demo, 'nn_learning_rate', …)`` reflects the user's
+                # value. The earlier kwargs.pop folds the prefixed name into
+                # the positional, but the ``setattr(self, name, value)`` loop
+                # below only iterates over the keys still in ``kwargs`` — so
+                # without this line the prefixed read-back path returns the
+                # default forever after a successful Apply.
+                self.nn_learning_rate = float(learning_rate)
                 self.logger.info("Demo mode: learning_rate set to %s", learning_rate)
 
             if max_hidden_units is not None:
                 self.max_hidden_units = max_hidden_units
+                # Mirror to the nn_*-aliased attr (see learning_rate above).
+                self.nn_max_hidden_units = int(max_hidden_units)
                 self.logger.info("Demo mode: max_hidden_units set to %s", max_hidden_units)
 
             if max_epochs is not None:
                 self.max_epochs = int(max_epochs)
+                # Mirror to the nn_*-aliased attr.
+                self.nn_max_total_epochs = int(max_epochs)
                 self.logger.info("Demo mode: max_epochs set to %s", max_epochs)
 
             if convergence_enabled is not None:
@@ -1925,6 +2405,8 @@ class DemoMode:
                     TrainingConstants.MIN_CONVERGENCE_THRESHOLD,
                     min(float(convergence_threshold), TrainingConstants.MAX_CONVERGENCE_THRESHOLD),
                 )
+                # Mirror to the nn_*-aliased attr.
+                self.nn_growth_convergence_threshold = float(self.convergence_threshold)
                 self.logger.info("Demo mode: convergence_threshold set to %s", self.convergence_threshold)
 
             if spiral_rotations is not None:
@@ -1932,6 +2414,8 @@ class DemoMode:
                     TrainingConstants.MIN_SPIRAL_ROTATIONS,
                     min(float(spiral_rotations), TrainingConstants.MAX_SPIRAL_ROTATIONS),
                 )
+                # Mirror to the nn_*-aliased attr (regardless of regen-needed).
+                self.nn_spiral_rotations = float(new_rotations)
                 if new_rotations != self.spiral_rotations:
                     self.spiral_rotations = new_rotations
                     self.logger.info("Demo mode: spiral_rotations set to %s — regenerating dataset", self.spiral_rotations)
@@ -1960,6 +2444,7 @@ class DemoMode:
                 "nn_spiral_number": int,
                 "nn_dataset_elements": int,
                 "nn_dataset_noise": float,
+                "nn_init_output_weights": str,
             }
 
             # ── Store cn_* prefixed parameters ──
@@ -1997,6 +2482,174 @@ class DemoMode:
 
         # Update TrainingState if available
         self._update_training_state()
+
+        # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1a + Resolution log Q1: match the
+        # cascor adapter's return shape so the /api/set_params handler can
+        # uniformly extract ``skipped`` regardless of which backend served the
+        # call. Demo recognises every nn_*/cn_* key it knows about (see the
+        # nn_param_map and cn_param_map above), so unrecognised keys are
+        # genuinely unmapped here too — surface them by name for parity with
+        # the real backend.
+        known_demo_keys = {
+            "learning_rate",
+            "max_hidden_units",
+            "max_epochs",
+            "convergence_enabled",
+            "convergence_threshold",
+            "spiral_rotations",
+            *nn_param_map.keys(),
+            *cn_param_map.keys(),
+        }
+        skipped = sorted(k for k in kwargs if k not in known_demo_keys)
+        return {"ok": True, "data": {}, "skipped": skipped}
+
+    # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 + §3.5.2 P1 / Resolution log Q1 —
+    # demo mirrors of the cascor pending-dataset surface added in cascor #242.
+    # The actual dataset regen happens at restart_dataset / _generate_spiral_dataset
+    # time; staging just records the intent so the canopy banner stays in
+    # parity between demo and real backends.
+
+    def stage_dataset(self, **canopy_params: Any) -> Dict[str, Any]:
+        with self._lock:
+            cfg = {k: v for k, v in canopy_params.items() if v is not None}
+            if not cfg:
+                self._pending_dataset_config = None
+                return {"ok": True, "data": {"status": "cleared", "config": None}}
+            self._pending_dataset_config = dict(cfg)
+            return {"ok": True, "data": {"status": "staged", "config": dict(cfg)}}
+
+    def cancel_pending_dataset(self) -> Dict[str, Any]:
+        with self._lock:
+            prior = getattr(self, "_pending_dataset_config", None)
+            self._pending_dataset_config = None
+        return {"ok": True, "data": {"status": "cleared", "discarded": dict(prior) if prior else None}}
+
+    def get_pending_dataset(self) -> Dict[str, Any]:
+        cfg = getattr(self, "_pending_dataset_config", None)
+        return {"ok": True, "pending": dict(cfg) if cfg else None}
+
+    # Phase 2 P2-4 (Issue #3): demo parity for the experimental-functions
+    # gate. State is kept on the simulator instance so the toggle survives
+    # callback round-trips within a session. Demo mode never actually
+    # honours the gate (no live swap), so the toggle is purely UI-state.
+
+    def get_experimental_functions(self) -> Dict[str, Any]:
+        with self._lock:
+            return {"ok": True, "enabled": bool(getattr(self, "_experimental_functions_enabled", False))}
+
+    def set_experimental_functions(self, enabled: bool) -> Dict[str, Any]:
+        with self._lock:
+            self._experimental_functions_enabled = bool(enabled)
+            return {"ok": True, "enabled": self._experimental_functions_enabled}
+
+    # Phase 2 P2-5 (Issue #3): demo parity for the Live Dataset Switch.
+    # Demo doesn't actually carry a cascade-correlation network to resize,
+    # so the swap is purely UI-state: we update the active dataset config
+    # and return a fabricated §3.3-shaped response so the canopy callback
+    # layer can render the full success flow without cascor.
+    #
+    # Cancel is a no-op in demo (there's no real in-flight HTTP request to
+    # interrupt) — returns ``ok=False`` with a "no swap in progress" error
+    # mirroring cascor's 404 response when nothing is live.
+
+    def swap_dataset_live(self, **canopy_params: Any) -> Dict[str, Any]:
+        with self._lock:
+            cfg = {k: v for k, v in canopy_params.items() if v is not None}
+            if not cfg:
+                return {"ok": False, "error": "no dataset config provided"}
+            # Mirror the cold-swap effect on the demo simulator: clear any
+            # pending staged config (the live swap supersedes it) and
+            # adopt the new config as the active one. Demo's simulator
+            # doesn't carry an input/output dim concept worth resizing,
+            # so arch_changes is reported as zero-delta.
+            self._pending_dataset_config = None
+            # Phase 2 P2-7: each successful demo swap appends a fabricated
+            # ``dataset_swap`` event to ``self._dataset_swap_events`` so
+            # the canopy panels (replay markers / paired-diff / snapshot
+            # badges) can render the demo's swap history without cascor.
+            # Unique snapshot IDs per call so the Snapshots tab badge
+            # cross-reference works as it would against real cascor.
+            from datetime import datetime, timezone
+
+            event_index = len(getattr(self, "_dataset_swap_events", []))
+            timestamp = datetime.now(timezone.utc).isoformat()
+            pre_id = f"demo_snapshot_pre_{event_index:03d}"
+            post_id = f"demo_snapshot_post_{event_index:03d}"
+            data = {
+                "status": "swapped",
+                "before_cfg": {"dataset_type": "demo-prior"},
+                "after_cfg": dict(cfg),
+                "arch_changes": {
+                    "input_delta": 0,
+                    "output_delta": 0,
+                    "hidden_preserved": 0,
+                    "appended_nodes": {"input": 0, "output": 0},
+                    "prepended_layers": [],
+                    "abandoned_candidate_pool_size": 0,
+                    "active_output_dim": 0,
+                },
+                "pre_swap_snapshot_id": pre_id,
+                "post_swap_snapshot_id": post_id,
+                "mode": "output_training_first",
+            }
+            if not hasattr(self, "_dataset_swap_events"):
+                self._dataset_swap_events = []
+            self._dataset_swap_events.append(
+                {
+                    "timestamp": timestamp,
+                    "before_cfg": data["before_cfg"],
+                    "after_cfg": data["after_cfg"],
+                    "arch_changes": data["arch_changes"],
+                    "pre_swap_snapshot_id": pre_id,
+                    "post_swap_snapshot_id": post_id,
+                }
+            )
+            return {"ok": True, "data": data, "config": dict(cfg)}
+
+    def cancel_swap_dataset_live(self) -> Dict[str, Any]:
+        # Demo has no real in-flight HTTP; nothing to cancel. Surface as
+        # ok=False to mirror cascor's 404 response for the same scenario.
+        return {"ok": False, "error": "no_swap_in_progress"}
+
+    # Phase 2 P2-7 (Issue #3): demo parity for the dataset_swap event feed.
+
+    def get_dataset_swap_events(self, since: Optional[str] = None) -> Dict[str, Any]:
+        with self._lock:
+            events = list(getattr(self, "_dataset_swap_events", []))
+        if since is not None:
+            events = [e for e in events if isinstance(e.get("timestamp"), str) and e["timestamp"] > since]
+        return {"ok": True, "events": events}
+
+    # Phase 2 P2-7 follow-up (Issue #3): per-snapshot history slice for the
+    # canopy Replay timeline (mirrors cascor's GET /v1/snapshots/{id}/history/dataset_swaps).
+    # Demo snapshot IDs are emitted by :meth:`swap_dataset_live` as
+    # ``demo_snapshot_pre_<NNN>`` and ``demo_snapshot_post_<NNN>`` where
+    # ``NNN`` is the zero-padded index of the swap that produced them.
+    # The slice we return matches what a real cascor snapshot of the same
+    # role would carry:
+    #   * pre-swap snapshot id ``..._pre_NNN`` → events ``[0:NNN]``
+    #     (the snapshot is taken **before** swap NNN appends itself).
+    #   * post-swap snapshot id ``..._post_NNN`` → events ``[0:NNN+1]``
+    #     (the snapshot is taken **after** swap NNN appends itself).
+    # Any other ID returns ``ok=False`` to mirror cascor's 404.
+
+    def get_snapshot_dataset_swaps(self, snapshot_id: str) -> Dict[str, Any]:
+        with self._lock:
+            events = list(getattr(self, "_dataset_swap_events", []))
+
+        if isinstance(snapshot_id, str) and snapshot_id.startswith("demo_snapshot_pre_"):
+            try:
+                idx = int(snapshot_id[len("demo_snapshot_pre_") :])
+                return {"ok": True, "events": events[:idx]}
+            except ValueError:
+                pass
+        if isinstance(snapshot_id, str) and snapshot_id.startswith("demo_snapshot_post_"):
+            try:
+                idx = int(snapshot_id[len("demo_snapshot_post_") :])
+                return {"ok": True, "events": events[: idx + 1]}
+            except ValueError:
+                pass
+        return {"ok": False, "error": f"Snapshot '{snapshot_id}' not found", "events": []}
 
 
 # Global demo mode instance (singleton)

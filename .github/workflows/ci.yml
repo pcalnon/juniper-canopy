@@ -32,11 +32,18 @@ name: CI/CD Pipeline
 
 on:
   push:
+    # Topic-branch globs (feature/**, fix/**) removed 2026-08-13: once a PR is open,
+    # `push` and `pull_request` BOTH fire for the same commit, so every job ran twice.
+    # The concurrency group is keyed on github.ref, which differs between a branch push
+    # (refs/heads/...) and a PR (refs/pull/N/merge), so cancel-in-progress never
+    # collapsed the pair. canopy has the fleet's longest suite (~10 min incl. the
+    # Playwright UI sub-suite and four Unit Tests + Coverage legs), so the duplicate was
+    # the most expensive in the ecosystem. Same fix as juniper-recurrence#108 and
+    # juniper-ml#1076. `pull_request` covers every commit once a PR exists;
+    # workflow_dispatch remains for a branch with no PR.
     branches:
       - main
       - develop
-      - feature/**
-      - fix/**
   pull_request:
     branches:
       - main
@@ -70,10 +77,10 @@ jobs:
         python-version: ["3.12", "3.13", "3.14"]
     steps:
       - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -84,7 +91,7 @@ jobs:
           pip install pre-commit
 
       - name: Cache pre-commit hooks
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('.pre-commit-config.yaml') }}
@@ -127,12 +134,12 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 1
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -140,8 +147,8 @@ jobs:
       - name: Install dependencies
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
-          echo "║       Juniper Canopy - Install Dependencies                ║"
-          echo "║       Python ${{ matrix.python-version }} on ${{ matrix.os }}              ║"
+          echo "║    Juniper Canopy - Install Dependencies                   ║"
+          echo "║    Python ${{ matrix.python-version }} on ${{ matrix.os }} ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           python -m pip install --upgrade "pip>=26.1.1"
           # METRICS-MON R3.7: torch wheel resolution differs by OS.
@@ -153,10 +160,47 @@ jobs:
           else
             pip install torch --index-url https://download.pytorch.org/whl/cpu
           fi
-          # Install all other CI dependencies
-          pip install -r conf/requirements_ci.txt
-          # Install project as editable so source-tree path resolution works
-          pip install -e .
+          # conf/requirements_ci.txt is NOT installed here. It is generator output
+          # (juniper-generate-dep-docs) -- a pip freeze in which most lines are transitives
+          # declared as direct -- so installing it pulled packages no lane uses and coupled this
+          # job to their version conflicts (juniper-ml#1994). The declared surface lives in
+          # pyproject extras, which is what the security job and every sibling repo install.
+          # Install project as editable so source-tree path resolution works.
+          # CL2 (juniper-ml training-runtime defects plan §7/§13): install the
+          # [juniper-cascor] extra so the REAL juniper-cascor-client (>=0.7.0) is
+          # present in this required lane. Without it src/tests/conftest.py injects
+          # a stub and src/tests/unit/backend/test_stream_liveness.py (the 510-line
+          # N2 stream-liveness + CL2 seam suite) silently importorskips — it had
+          # only ever run in client-equipped local envs. With the extra the suite
+          # executes here, and the floor-drift preflight + coverage gate below both
+          # exercise the real cascor-client seam path.
+          pip install -e ".[test,juniper-cascor,observability]"
+          # h5py is an OPTIONAL runtime dependency: the HDF5 snapshot routes in
+          # src/main.py lazy-import it and soft-fail with a 500 "h5py not
+          # available" guard when it is absent, so it is intentionally NOT a hard
+          # project dependency (kept out of pyproject / the lockfile / the base
+          # conf/requirements_ci.txt to keep the base install slim). The per-file
+          # coverage gate below measures the whole src tree, so the coverage lane
+          # installs h5py explicitly to exercise (and cover) the snapshot code
+          # paths. Scoped to this job only — the integration / ui / build jobs do
+          # not run the snapshot unit tests and keep the slim install.
+          pip install "h5py>=3.0"
+
+      # Preflight (test-suite audit §10.1): assert the juniper-* distributions
+      # installed above (plain wheels included) satisfy canopy's pyproject.toml
+      # floors AND that requirements.lock pins satisfy them (catches
+      # lock-below-floor drift). Guards the 2026-06-26 incident class — a live
+      # env that drifted below floors while CI stayed green. The shared checker
+      # ships as the juniper-env-drift-check console script in
+      # juniper-ci-tools>=0.5.1 (juniper-ml#579/#590). Runs inside this already
+      # required job (see required-checks `needs`), so a failure blocks the PR.
+      - name: Preflight - Environment Floor-Drift Check
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Environment Floor-Drift Check       ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          python -m pip install "juniper-ci-tools>=0.9.0,<0.10.0"
+          juniper-env-drift-check --repo-root . --check-lock
 
       - name: Create required directories
         run: |
@@ -173,9 +217,24 @@ jobs:
           echo "╚════════════════════════════════════════════════════════════╝"
 
           set +e
+          # contract/ and performance/ are listed here because they were listed NOWHERE.
+          # The three pytest invocations in this file named unit/, regression/, integration
+          # and ui; the scheduled lane's `-m "slow or integration"` selector deselects both
+          # directories' tests (contract/ is all @pytest.mark.unit, performance/ is
+          # unmarked). So:
+          #   contract/    — test_param_map_completeness.py, which pins that every
+          #                  Apply-button input has a param-map entry (the N5 silent-drop
+          #                  class), had never executed in CI. Its only trace was a
+          #                  collection error in the scheduled lane, so repairing that lane
+          #                  would have removed the last sign it existed.
+          #   performance/ — test_button_responsiveness.py: 5 tests, 1 explicitly skipped,
+          #                  the other 4 live and never run anywhere.
+          # Both directories pass under this lane's selector today (3 and 4 tests). The
+          # selector is negative, so unmarked tests are selected rather than dropped.
+          # test_ci_lane_wiring.py keeps any future directory from going unwired.
           python -m pytest \
             -m "not requires_cascor and not requires_server and not slow" \
-            src/tests/unit/ src/tests/regression/ \
+            src/tests/unit/ src/tests/regression/ src/tests/contract/ src/tests/performance/ \
             --verbose \
             --timeout=60 \
             --maxfail=5 \
@@ -183,6 +242,7 @@ jobs:
             --cov=src \
             --cov-report=term-missing \
             --cov-report=xml:reports/coverage.xml \
+            --cov-report=json:reports/coverage.json \
             --cov-report=html:reports/htmlcov \
             --cov-fail-under=${COVERAGE_FAIL_UNDER} \
             2>&1 | tee reports/junit/pytest-unit.log
@@ -199,6 +259,25 @@ jobs:
 
           exit $PYTEST_EXIT
 
+      # Per-file coverage rollout C-5 (juniper-ml
+      # notes/JUNIPER_ECOSYSTEM_PER_FILE_COVERAGE_ROLLOUT_SCOPING_2026-06-30.md):
+      # a BLOCKING per-file gate over the whole src tree measured by the unit
+      # lane above. Exit 1 if any source file's statement coverage < 90% OR any
+      # packaged sub-module's pooled (statement-weighted) coverage < 95%. The
+      # shared juniper-coverage-gap-map computes statement % itself from
+      # coverage.json, so this repo's ``branch = true`` coverage config does not
+      # change the gate basis. Complements the aggregate ``--cov-fail-under=80``
+      # gate above (which a single well-covered file can mask). juniper-ci-tools
+      # (>=0.9.0,<0.10.0) is already installed by the preflight step; the pin here
+      # keeps the step self-contained.
+      - name: Enforce per-file coverage gate (blocking)
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║   Juniper Canopy - Per-File Coverage Gate (>=90 file/>=95) ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          pip install "juniper-ci-tools>=0.9.0,<0.10.0"
+          juniper-coverage-gap-map --coverage-json reports/coverage.json --enforce
+
       - name: Upload Coverage Artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         if: always()
@@ -210,7 +289,7 @@ jobs:
           retention-days: 30
 
       - name: Upload Coverage to Codecov
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2  # v6.0.0
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
         if: always()
         with:
           files: reports/coverage.xml
@@ -237,12 +316,12 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 1
 
       - name: Set up Python ${{ env.PYTHON_TEST_VERSION }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: ${{ env.PYTHON_TEST_VERSION }}
           cache: pip
@@ -251,8 +330,13 @@ jobs:
         run: |
           python -m pip install --upgrade "pip>=26.1.1"
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -r conf/requirements_ci.txt
-          pip install -e .
+          # N3: the adapter now imports juniper_cascor_client.constants at
+          # module level (ENDPOINT_TRAINING_START for the start_fresh POST),
+          # so the integration lane needs the real >=0.7.0 client — the same
+          # [juniper-cascor] extra CL2 (#453) added to the unit lane. Without
+          # it this env resolved an ancient client and the adapter import
+          # (hence three integration modules) failed to collect.
+          pip install -e ".[test,juniper-cascor,observability]"
 
       - name: Create required directories
         run: |
@@ -285,6 +369,75 @@ jobs:
           retention-days: 30
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # UI Tests: Playwright browser-automation sub-suite
+  # FRONTEND_ISSUES_PLAN_2026-05-09.md §5 (Issue #4) / Resolution log Q3
+  #   Budget commitment: must add ≤5 min to overall CI wall-clock. Runs in
+  #   parallel with unit-tests so wall-clock cost is max(unit, ui) - unit.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  ui-tests:
+    name: UI Sub-suite (Playwright)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.ref_name == 'main' || github.ref_name == 'develop'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python ${{ env.PYTHON_TEST_VERSION }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_TEST_VERSION }}
+          cache: pip
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('**/pyproject.toml') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade "pip>=26.1.1"
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[test,ui-test,observability]"
+
+      - name: Install Playwright browser
+        run: |
+          playwright install --with-deps chromium
+
+      - name: Create required directories
+        run: |
+          mkdir -p logs src/logs reports/junit
+
+      - name: Run UI Tests
+        env:
+          JUNIPER_CANOPY_DEMO_MODE: "1"
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - UI Sub-suite (Playwright)           ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+
+          python -m pytest \
+            -m "ui and not slow" \
+            src/tests/ui \
+            --verbose \
+            --timeout=120 \
+            --maxfail=3 \
+            --junitxml=reports/junit/junit-ui.xml
+
+      - name: Upload UI Test Results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        if: always()
+        with:
+          name: ui-test-results
+          path: reports/junit/
+          retention-days: 30
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
   # Build: Build distribution packages
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   build:
@@ -294,10 +447,10 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Python ${{ env.PYTHON_TEST_VERSION }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: ${{ env.PYTHON_TEST_VERSION }}
           cache: pip
@@ -343,7 +496,7 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -353,7 +506,7 @@ jobs:
         # event is not yet supported"), so the action errors out
         # before any scanning happens. Other event types still scan.
         if: github.event_name != 'repository_dispatch'
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2.3.9
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e  # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # gitleaks-action v2.3.9 ships as a Node.js 20 action.
@@ -367,7 +520,7 @@ jobs:
         # non-zero on leaks by default, which is the behavior we want.
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           # python-version: ["3.12", "3.13", "3.14"]
           python-version: "3.14"
@@ -398,7 +551,7 @@ jobs:
           fi
 
       - name: Upload Bandit SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7  # v4.35.3
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2  # v4.38.2
         if: always()
         with:
           sarif_file: reports/security/bandit.sarif
@@ -441,16 +594,16 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Python ${{ env.PYTHON_TEST_VERSION }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: ${{ env.PYTHON_TEST_VERSION }}
           cache: pip
 
       - name: Set up Conda (Miniforge)
-        uses: conda-incubator/setup-miniconda@8ee1f361103df19b6f8c8655fd3967a8ecb162d5  # v4.0.1
+        uses: conda-incubator/setup-miniconda@be893c923ea9cf1cf7cd510fbdde27c7e18cbdcb  # v4.1.0
         with:
           miniforge-version: latest
           auto-activate-base: true
@@ -461,8 +614,18 @@ jobs:
         run: |
           python -m pip install --upgrade "pip>=26.1.1"
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -r conf/requirements_ci.txt
-          pip install -e .
+          pip install -e ".[test,juniper-data,juniper-cascor,observability]"
+
+      # Wave 2 of the dep-docs PyPI migration -- replaces the inline
+      # bash scripts/generate_dep_docs.sh with the juniper-ci-tools
+      # console script from PyPI. See juniper-ml plan
+      # notes/JUNIPER_CI_TOOLS_PYPI_MIGRATION_PLAN_2026-05-20.md.
+      # The inline script will be removed in Wave 4.
+      - name: Install juniper-ci-tools
+        shell: bash -l {0}
+        run: |
+          python -m pip install --upgrade "pip>=26.1.1"
+          pip install "juniper-ci-tools>=0.9.0,<0.10.0"
 
       - name: Generate Dependency Documentation
         shell: bash -l {0}
@@ -470,19 +633,7 @@ jobs:
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - Dependency Documentation            ║"
           echo "╚════════════════════════════════════════════════════════════╝"
-          bash scripts/generate_dep_docs.sh
-
-      - name: Validate Generated YAML
-        shell: bash -l {0}
-        run: |
-          python -c "
-          import yaml
-          with open('conf/conda_environment_ci.yaml') as f:
-              data = yaml.safe_load(f)
-          deps = data.get('dependencies', [])
-          print(f'  Validated: {len(deps)} dependencies in conda_environment_ci.yaml')
-          assert len(deps) > 0, 'No dependencies found — generation may have failed'
-          "
+          juniper-generate-dep-docs
 
       - name: Upload Dependency Documentation
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -505,10 +656,10 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           # python-version: ["3.12", "3.13", "3.14"]
           python-version: "3.14"
@@ -556,32 +707,99 @@ jobs:
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   # Documentation Links: Validate internal markdown links
-  # ════════════════════════════════════════════��══════════════════════════════════════════════════
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
   docs:
     name: Documentation Links
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           # python-version: ["3.12", "3.13", "3.14"]
           python-version: "3.14"
+
+      # Doc-link validator is installed from the published juniper-doc-tools
+      # PyPI package. The inline scripts/check_doc_links.py copy was removed
+      # in Wave 4 (PR #288, 2026-05-19); the PyPI install is now the only
+      # path. Migration history:
+      # juniper-ml notes/JUNIPER_DOC_TOOLS_PYPI_MIGRATION_PLAN_2026-05-18.md.
+      - name: Install juniper-doc-tools
+        run: |
+          python -m pip install --upgrade "pip>=26.1.1"
+          pip install "juniper-doc-tools>=0.1.0,<0.2.0" "pyyaml>=6.0"
 
       - name: Validate Documentation Links
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - Documentation Link Validation       ║"
           echo "╚════════════════════════════════════════════════════════════╝"
-          python scripts/check_doc_links.py \
-            --exclude templates --exclude history \
-            --exclude pull_requests --exclude releases \
-            --exclude analysis --exclude fixes --exclude development \
+          juniper-check-doc-links \
+            --exclude templates \
+            --exclude history \
+            --exclude legacy \
+            --exclude pull_requests \
+            --exclude releases \
+            --exclude analysis \
+            --exclude fixes \
+            --exclude development \
             --exclude CHANGELOG.md \
             --cross-repo skip
+
+      # Catches the failure class that broke 3 juniper-X CIs on
+      # 2026-05-18: a workflow that invokes ``python|bash <path>`` after
+      # the path was renamed or moved. Wave 4 of the dep-docs PyPI
+      # migration (juniper-ml notes/JUNIPER_CI_TOOLS_PYPI_MIGRATION_PLAN_2026-05-20.md)
+      # ships this lint as the ``juniper-lint-workflow-paths`` console
+      # script in ``juniper-ci-tools>=0.2.0``; the inline byte-identical
+      # copy at ``util/test_workflow_script_paths.py`` was deleted in
+      # this PR. The shared tool discovers the repo root via a
+      # ``.github/workflows/`` walk-up so it works out-of-the-box.
+      - name: Install juniper-ci-tools (workflow-path + agents-md lints)
+        run: |
+          python -m pip install --upgrade "pip>=26.1.1"
+          pip install "juniper-ci-tools>=0.9.0,<0.10.0"
+
+      - name: Lint .github/workflows/ script paths
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Workflow script-path lint                            ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          juniper-lint-workflow-paths
+
+      # Pins AGENTS.md's `**Version**:` header to pyproject.toml's
+      # [project].version so version bumps stay in sync with the
+      # agent-facing contract. Shipped as the
+      # ``juniper-lint-agents-md-version`` console script in
+      # ``juniper-ci-tools>=0.3.0`` (juniper-ml#310); the inline
+      # byte-identical copy at ``util/test_agents_md_version_drift.py``
+      # was deleted in this PR.
+      - name: Lint AGENTS.md version vs pyproject.toml
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       AGENTS.md version-drift lint                         ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          juniper-lint-agents-md-version
+
+      # Pins AGENTS.md's header bullet block to the canonical six-field
+      # schema (Project / Repository / Author / License / Version /
+      # Last Updated, in that relative order). Currency of the
+      # `**Last Updated**` field is maintained by the
+      # `.github/workflows/agents-md-touch-up.yml` workflow (auto-bumps
+      # on every PR push). Shipped as the
+      # ``juniper-lint-agents-md-header`` console script in
+      # ``juniper-ci-tools>=0.4.0`` (juniper-ml#319). Canopy adopts the
+      # full schema in this PR (was on a minimal `**Version**:`-only
+      # header until now).
+      - name: Lint AGENTS.md header schema
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       AGENTS.md header-schema lint                         ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          juniper-lint-agents-md-header
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   # Async-route audit (Phase 4 — enforced).
@@ -597,10 +815,10 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.14"
 
@@ -610,7 +828,7 @@ jobs:
       - name: Run async-route audit
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
-          echo "║       Juniper Canopy - Async-route audit (BUG-JD-10)      ║"
+          echo "║       Juniper Canopy - Async-route audit (BUG-JD-10)       ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           ruff check --select ASYNC --output-format=github src/
 
@@ -625,22 +843,32 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Build Docker Image
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
-          echo "║       Juniper Canopy - Docker Build                       ║"
+          echo "║       Juniper Canopy - Docker Build                        ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           docker build -t juniper-canopy:ci-${{ github.sha }} .
 
       - name: Verify Container Starts
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
-          echo "║       Juniper Canopy - Docker Smoke Test                  ║"
+          echo "║       Juniper Canopy - Docker Smoke Test                   ║"
           echo "╚════════════════════════════════════════════════════════════╝"
+          # SEC-F22 / D2: the Dockerfile ships a loopback in-container default
+          # (JUNIPER_CANOPY_SERVER__HOST=127.0.0.1), which a published port
+          # cannot reach (docker forwards to the container's eth0, not its
+          # loopback) -- the in-container HEALTHCHECK passes while the runner's
+          # curl gets connection-refused. Per the Dockerfile's documented
+          # published-port posture, override the in-container bind to 0.0.0.0
+          # AND attest it, and keep the runner-side publish loopback-only so
+          # the attested loopback-publish perimeter is actually true here.
           docker run -d --name juniper-canopy-test \
-            -p 8050:8050 \
+            -p 127.0.0.1:8050:8050 \
+            -e JUNIPER_CANOPY_SERVER__HOST=0.0.0.0 \
+            -e JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true \
             juniper-canopy:ci-${{ github.sha }}
 
           echo "Waiting for service to become healthy..."
@@ -672,13 +900,84 @@ jobs:
           docker rm juniper-canopy-test 2>/dev/null || true
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # Memory Budget (BLOCKING, standalone): P5 port of juniper-ml's size ratchet.
+  # Plan: juniper-ml notes/JUNIPER_2026-08-18_JUNIPER-ML_SHARED-SESSION-MEMORY-PLAN.md (§P5).
+  #
+  # WHY THE RATE AXIS SHIPS FIRST, AND ALONE. juniper-ml's AGENTS.md grew ~20x in six months
+  # WHILE UNDER FOUR ACTIVE CI GATES -- every one of them enforced structure or currency and
+  # none enforced SIZE; 172 of 200 main-line merges grew it against 14 that shrank it, by 2,628
+  # bytes between them. A cut without a ceiling is undone in ~44 days, and a ceiling set AFTER a
+  # cut locks in the inflated level. So the ceiling lands first and the cut comes later; this job
+  # carries no relocation check yet, because canopy has not cut anything to check.
+  #
+  # STANDALONE, and deliberately ABSENT from the `required-checks` Quality Gate `needs:` (plan
+  # correction C9). A `needs:` entry is the wrong promotion mechanism: it makes a skip on a
+  # non-PR event fail the gate. Promotion happens in the branch RULESET, the same way Sequence
+  # Safety was promoted -- and only after the soak below, which ended 2026-08-26.
+  #
+  # BLOCKING as of 2026-08-26 (plan §P5 step d). The job soaked with `--advisory` from the port's merge,
+  # and the flag was removed only after three negative controls passed IN THIS REPO against the
+  # non-advisory invocation -- clean tree exits 0, growth past the ceiling exits 1, and a waiver
+  # trailer exits 0 -- because a blocking gate that cannot fail is worse than none. Whether this
+  # context is REQUIRED is decided in the branch ruleset, never here.
+  #
+  # SLACK, MEASURED HERE. The ceiling was seeded at the exact size on the day the port landed
+  # (95,133 chars, zero slack) and raised 2026-08-26 to 97,133 (+2,000) under an Allow-Ceiling-
+  # Raise: AGENTS.md trailer. The slack is the largest single AGENTS.md-growing commit re-measured
+  # over the 30 days to 2026-08-26 (1,982; median 1,982, 2 grew / 0 shrank, ~81 chars/day),
+  # floored at 2,000 because one fleet-wide docs fan-out (2026-08-21) added 1,982 chars to six
+  # repos' AGENTS.md at once -- the shape a zero-slack ceiling cannot absorb. Growth past the
+  # ceiling now FAILS this check; Allow-Budget-Overrun: AGENTS.md is the loan for a warranted
+  # overrun, and a cut is what brings the ceiling back down (hand-edit with slack, never bare
+  # --ratchet).
+  memory-budget:
+    name: Memory Budget
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Code (full history)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # need the base tip to apply the no-worsening rule
+
+      - name: Set up Python ${{ env.PYTHON_TEST_VERSION }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_TEST_VERSION }}
+
+      - name: Check memory-file size budget
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      juniper-canopy - Memory File Size Budget (BLOCKING)   ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          # canopy targets main AND develop, so the base is read from the event rather
+          # than hardcoded; merge_group has no github.base_ref, hence the fallback.
+          BASE_REF="${{ github.base_ref || 'main' }}"
+          git fetch --no-tags origin "$BASE_REF"
+          # Allow-Budget-Overrun is a LOAN, not a pass: it suppresses the failure without moving
+          # the ceiling, so the debt still blocks the next author. Trailers are injected from an
+          # explicit file (the checker never shells out for them) so the classifier stays pure.
+          # Two-dot FETCH_HEAD..HEAD = exactly the commits this PR adds on top of base.
+          git log --format=%B FETCH_HEAD..HEAD > memory-budget-trailers.txt
+          # BLOCKING as of 2026-08-26: `--advisory` (the soak setting) is gone, so a violation exits 1 and
+          # fails this check. Escape hatch, when the growth is genuinely warranted: add the commit trailer
+          #   Allow-Budget-Overrun: AGENTS.md
+          # and carry it into the SQUASH message -- squash composes from the commit messages, so
+          # a trailer left only in the PR body is silently discarded.
+          python3 util/memory_budget_check.py \
+            --base-ref FETCH_HEAD \
+            --trailers-file memory-budget-trailers.txt
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
   # Required Checks Aggregator: Final quality gate
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   required-checks:
     name: Quality Gate
     runs-on: ubuntu-latest
     if: always()
-    needs: [pre-commit, unit-tests, integration-tests, security, build, dependency-docs, lockfile-check, docs, docker-build]
+    needs: [pre-commit, unit-tests, integration-tests, ui-tests, security, build, dependency-docs, lockfile-check, docs, docker-build]
 
     steps:
       - name: Check Quality Gate Status
@@ -690,6 +989,7 @@ jobs:
           echo "Pre-commit:        ${{ needs.pre-commit.result }}"
           echo "Unit Tests:        ${{ needs.unit-tests.result }}"
           echo "Integration Tests: ${{ needs.integration-tests.result }}"
+          echo "UI Tests:          ${{ needs.ui-tests.result }}"
           echo "Security:          ${{ needs.security.result }}"
           echo "Build:             ${{ needs.build.result }}"
           echo "Dependency Docs:   ${{ needs.dependency-docs.result }}"
@@ -715,6 +1015,12 @@ jobs:
 
           if [[ "${{ needs.integration-tests.result }}" == "failure" ]]; then
             echo "::error::Integration tests failed"
+            exit 1
+          fi
+
+          # UI tests: failure = error, skipped = OK (only runs on PRs and main/develop)
+          if [[ "${{ needs.ui-tests.result }}" == "failure" ]]; then
+            echo "::error::UI sub-suite (Playwright) failed"
             exit 1
           fi
 

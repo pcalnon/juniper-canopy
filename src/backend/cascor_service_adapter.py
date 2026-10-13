@@ -11,7 +11,7 @@
 # File Path:     Juniper/juniper-canopy/src/backend/
 #
 # Date Created:  2026-02-21
-# Last Modified: 2026-02-27
+# Last Modified: 2026-09-24
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -36,16 +36,19 @@
 
 import asyncio
 import contextlib
-import json
 import logging
+import threading
 import time
 from typing import Any, Callable, Dict, Optional, Tuple, Union, cast
 
 from juniper_cascor_client import CascorControlStream, CascorTrainingStream, JuniperCascorClient, JuniperCascorClientError
-from juniper_cascor_client.exceptions import JuniperCascorConnectionError
+from juniper_cascor_client.constants import ENDPOINT_TRAINING_START
+from juniper_cascor_client.exceptions import JuniperCascorConnectionError, JuniperCascorNotFoundError
 
 from backend.circuit_breaker import CircuitBreaker
 from canopy_constants import BackendConstants
+from outbound_errors import outbound_error_text
+from secrets_util import bind_outbound_key
 
 # from juniper_cascor_client.juniper_cascor_client.client import CascorTrainingStream, JuniperCascorClient
 # from juniper_cascor_client.client import CascorTrainingStream, JuniperCascorClient
@@ -69,6 +72,149 @@ def _first_defined(*values, default=None):
     return default
 
 
+def _ws_open(ws: Any) -> bool:
+    """Return True iff a raw ``websockets`` connection object is usable (OPEN).
+
+    N2 (training-runtime defects plan §4 I-1 root cause 3 / §5 T2): the old
+    liveness notion was ``_ws is not None``, which is blind to half-open /
+    peer-closed sockets — the ``websockets`` ``ClientConnection`` object stays
+    non-None forever after the peer closes (its ``state`` flips to CLOSED, set
+    either by the inbound close frame or by the library's own protocol-level
+    keepalive detecting a dead peer). The 2026-07-10 incident: cascor closed
+    the control WS at 18:17:03 and the supervisor never noticed for 12+ hours.
+
+    Compares ``state.name`` against ``"OPEN"`` (``websockets.protocol.State``)
+    via ``getattr`` so canopy takes no direct import dependency on the
+    ``websockets`` package and degrades gracefully for fakes/mocks that expose
+    no ``state`` surface (presence then remains the best available signal).
+
+    CL1 seam: when juniper-cascor-client ships first-class half-open detection
+    (roadmap unit CL1 — liveness surfaced on the stream classes), this helper
+    collapses to that surface instead of reaching into ``_ws``.
+    """
+    if ws is None:
+        return False
+    state = getattr(ws, "state", None)
+    if state is None:
+        return True
+    return getattr(state, "name", None) == "OPEN"
+
+
+def _stream_is_alive(stream: Any, window_sec: float) -> bool:
+    """Consult a cascor-client stream's CL1 ``is_alive(window)`` frame-recency surface.
+
+    CL2 (training-runtime defects plan §7): cascor-client >=0.7.0 answers cascor's
+    heartbeat pings at the transport layer (auto-pong) and records every inbound
+    frame, exposing :meth:`is_alive` — connected AND a frame seen within
+    ``window_sec``. This is the half-open detector that survives the pings no
+    longer reaching canopy's own iterators once the client consumes them.
+
+    Returns the client's own liveness verdict only when the stream exposes the
+    surface as a real ``bool`` (the real streams and ``FakeCascorTrainingStream``
+    from cascor-client >=0.7.0). Fakes / pre-CL1 clients without the surface — and
+    test doubles whose attribute auto-vivifies (``MagicMock``) — return ``False``,
+    preserving the pre-CL2 reconnect-on-timeout behaviour those doubles rely on.
+    """
+    is_alive = getattr(stream, "is_alive", None)
+    if is_alive is None:
+        return False
+    try:
+        alive = is_alive(window_sec)
+    except TypeError:
+        # A surface that takes no window argument — still honour it.
+        alive = is_alive()
+    return alive if isinstance(alive, bool) else False
+
+
+class StreamHealth:
+    """Thread-safe liveness + throughput snapshot for one canopy→cascor stream.
+
+    N2 (training-runtime defects plan §4 I-1 / §5 T2/T5): both the metrics
+    relay and the control-stream supervisor keep one of these updated so that
+    (a) the periodic relay summary can make silence visible in the logs, and
+    (b) ``/api/state`` staleness marking and the dashboard's degraded-mode
+    indicator can report end-to-end stream health instead of merely
+    "browser socket open".
+
+    Status classification:
+        - ``reconnecting`` — not currently connected (includes pre-first-connect).
+        - ``degraded``     — connected, but the last inbound activity is older than
+                             ``stale_after_seconds`` (only when that bound is set;
+                             cascor pings every ~30 s, so a quiet-but-healthy relay
+                             stream still shows activity well inside 60 s).
+        - ``healthy``      — connected with recent activity (or activity not required).
+    """
+
+    def __init__(self, name: str, stale_after_seconds: Optional[float] = None):
+        self._name = name
+        self._stale_after = stale_after_seconds
+        self._lock = threading.Lock()
+        self._connected = False
+        self._ever_connected = False
+        self._last_activity: Optional[float] = None
+        self._reconnect_count = 0
+        self._last_disconnect_reason: Optional[str] = None
+        self._frames_total = 0
+        self._frames_by_type: Dict[str, int] = {}
+        self._interval_counts: Dict[str, int] = {}
+
+    def mark_connected(self) -> None:
+        with self._lock:
+            if self._ever_connected:
+                self._reconnect_count += 1
+            self._ever_connected = True
+            self._connected = True
+            self._last_activity = time.monotonic()
+
+    def mark_disconnected(self, reason: str) -> None:
+        with self._lock:
+            self._connected = False
+            self._last_disconnect_reason = reason
+
+    def mark_activity(self, frame_type: Optional[str] = None) -> None:
+        """Record inbound activity; ``frame_type`` additionally bumps the forwarded-frame counters."""
+        with self._lock:
+            self._last_activity = time.monotonic()
+            if frame_type:
+                self._frames_total += 1
+                self._frames_by_type[frame_type] = self._frames_by_type.get(frame_type, 0) + 1
+                self._interval_counts[frame_type] = self._interval_counts.get(frame_type, 0) + 1
+
+    def _status_locked(self) -> str:
+        if not self._connected:
+            return "reconnecting"
+        if self._stale_after is not None:
+            if self._last_activity is None or (time.monotonic() - self._last_activity) > self._stale_after:
+                return "degraded"
+        return "healthy"
+
+    def status(self) -> str:
+        with self._lock:
+            return self._status_locked()
+
+    def snapshot(self) -> Dict[str, Any]:
+        """Return a JSON-safe health snapshot for /api/stream_health and the UI badge."""
+        with self._lock:
+            age = (time.monotonic() - self._last_activity) if self._last_activity is not None else None
+            return {
+                "name": self._name,
+                "connected": self._connected,
+                "status": self._status_locked(),
+                "last_activity_age_seconds": round(age, 1) if age is not None else None,
+                "reconnect_count": self._reconnect_count,
+                "last_disconnect_reason": self._last_disconnect_reason,
+                "frames_forwarded_total": self._frames_total,
+                "frames_by_type": dict(self._frames_by_type),
+            }
+
+    def take_interval_counts(self) -> Dict[str, int]:
+        """Return and reset the per-summary-interval frame counters (relay summary loop)."""
+        with self._lock:
+            counts = self._interval_counts
+            self._interval_counts = {}
+            return counts
+
+
 class ControlStreamSupervisor:
     """Phase C: persistent /ws/control connection to cascor for set_params.
 
@@ -78,26 +224,77 @@ class ControlStreamSupervisor:
 
     The supervisor runs on the event loop passed at construction time.
     ``apply_params`` calls it via ``asyncio.run_coroutine_threadsafe``.
+
+    N2 liveness posture (training-runtime defects plan §4 I-1 root cause 3 /
+    §5 T2): ``is_connected`` consults the real socket state (``_ws_open``),
+    and the connect loop runs a periodic protocol-level keepalive probe
+    (``ws.ping()`` — an existing capability of the underlying ``websockets``
+    connection; cascor's server answers protocol pings at the WS layer). On
+    liveness loss the supervisor logs one WARNING with the reason, closes the
+    stream, and reconnects with logged backoff — the 12-hour-silent-death
+    class of the 2026-07-10 incident is thereby impossible: every disconnect
+    and every reconnect attempt logs exactly one line.
     """
 
     _BACKOFF = [1, 2, 5, 10, 30]
 
-    def __init__(self, ws_url: str, api_key: Optional[str] = None) -> None:
+    def __init__(self, ws_url: str, api_key: Optional[str] = None, ws_origin: Optional[str] = None) -> None:
         self._ws_url = ws_url
         self._api_key = api_key
+        # E.2 PR-2-C: forward Origin to ``CascorControlStream(origin=…)``
+        # so cascor's fail-closed ``/ws/control`` allowlist
+        # (juniper-cascor#129) accepts canopy's docker-compose upgrade.
+        # None → preserve pre-0.5.0 behaviour (no Origin header sent).
+        self._ws_origin = ws_origin
         self._stream: Optional[CascorControlStream] = None
         self._connect_task: Optional[asyncio.Task] = None
         self._shutdown = False
         self.loop: Optional[asyncio.AbstractEventLoop] = None
+        # N2: liveness knobs (refreshed from settings in ``start()``; defaults
+        # here keep direct ``_connect_loop()`` invocation in tests working).
+        self._probe_interval: float = 30.0
+        self._probe_pong_timeout: float = BackendConstants.CONTROL_PROBE_PONG_TIMEOUT_SECONDS
+        # CL2: window (seconds) for the client's passive ``is_alive`` frame-recency
+        # probe — three cascor heartbeats by default (matches the relay's bound).
+        self._liveness_window: float = 90.0
+        # N2: health snapshot for /api/stream_health + the degraded-mode badge.
+        # No stale_after bound: /ws/control is command/response — quiet-but-open
+        # is its normal state, so "connected" alone classifies healthy.
+        self.health = StreamHealth("control")
 
     @property
     def is_connected(self) -> bool:
-        return self._stream is not None and self._stream._ws is not None
+        """Real socket liveness — half-open/peer-closed sockets read as disconnected.
+
+        Pre-N2 this was ``self._stream._ws is not None``, which stayed True for
+        12+ hours after cascor closed the socket (2026-07-10 incident).
+        CL2 (training-runtime defects plan §7): consume the cascor-client CL1
+        liveness surface (``CascorControlStream.is_connected``, >=0.7.0) instead
+        of reaching into ``_ws``. The client property applies the identical
+        transport-state test (protocol state is OPEN), so this is a like-for-like
+        swap onto the owned surface. Falls back to ``_ws_open`` for fakes /
+        pre-CL1 clients that do not expose it; only a real ``bool`` is trusted so
+        the N2 suite's ``SimpleNamespace`` / ``MagicMock`` stubs (whose attribute
+        would auto-vivify) still exercise the ``_ws`` fallback.
+        """
+        stream = self._stream
+        if stream is None:
+            return False
+        client_liveness = getattr(stream, "is_connected", None)
+        if isinstance(client_liveness, bool):
+            return client_liveness
+        return _ws_open(getattr(stream, "_ws", None))
 
     async def start(self) -> None:
         """Start the supervisor background connect loop."""
         self.loop = asyncio.get_running_loop()
         self._shutdown = False
+        from settings import get_settings
+
+        app_settings = get_settings()
+        self._probe_interval = float(getattr(app_settings, "ws_stream_probe_interval_seconds", self._probe_interval))
+        # CL2: the passive-probe window mirrors the relay's liveness bound.
+        self._liveness_window = float(getattr(app_settings, "ws_stream_liveness_timeout_seconds", self._liveness_window))
         self._connect_task = asyncio.create_task(self._connect_loop())
 
     async def stop(self) -> None:
@@ -110,25 +307,82 @@ class ControlStreamSupervisor:
         if self._stream:
             await self._stream.disconnect()
             self._stream = None
+        self.health.mark_disconnected("supervisor stopped")
 
     async def set_params(self, params: dict, *, timeout: float = 1.0) -> dict:
         """Send set_params via the persistent control stream."""
         if not self.is_connected or self._stream is None:
             raise JuniperCascorConnectionError("Control stream not connected")
         result = await self._stream.set_params(params, timeout=timeout)
+        # N2: a correlated ack is inbound activity — feed the liveness clock.
+        self.health.mark_activity("ack")
         return result if isinstance(result, dict) else {}
 
+    async def _probe_liveness(self) -> bool:
+        """Liveness probe for the persistent control channel.
+
+        CL2 (training-runtime defects plan §7): when the stream exposes the
+        cascor-client CL1 liveness surface (>=0.7.0 — whose eager control
+        recv-loop answers cascor's ~30s heartbeat and records every inbound
+        frame), prefer its passive ``is_alive(window)`` frame-recency view over
+        an active protocol ping. This retires the canopy-originated ``ws.ping()``
+        reach-in: with auto-pong the client already keeps the socket read and
+        answered, so a redundant ping from canopy would race the client's own
+        recv loop on the same connection.
+
+        Falls back to the historical active ``ws.ping()`` keepalive for fakes /
+        pre-CL1 clients lacking ``is_alive`` (only a real ``bool`` result is
+        trusted, so the N2 suite's ``SimpleNamespace`` / ``MagicMock`` stubs
+        still drive the active-ping path). Returns True when alive (marking
+        activity), True when no probe surface exists at all (``is_connected``
+        remains authoritative), and False on a missed pong / send failure /
+        stale frame-recency window.
+        """
+        stream = self._stream
+        # CL2 fast path: the client's own frame-recency surface.
+        is_alive = getattr(stream, "is_alive", None) if stream is not None else None
+        if is_alive is not None:
+            try:
+                alive = is_alive(self._liveness_window)
+            except TypeError:
+                alive = is_alive()
+            if isinstance(alive, bool):
+                if alive:
+                    self.health.mark_activity()
+                return alive
+        # Fallback: active protocol-level keepalive ping (pre-CL1 clients / fakes).
+        ws = getattr(stream, "_ws", None) if stream is not None else None
+        ping = getattr(ws, "ping", None)
+        if ws is None or ping is None or not callable(ping):
+            return True
+        try:
+            pong_waiter = await ping()
+            await asyncio.wait_for(pong_waiter, timeout=self._probe_pong_timeout)
+            self.health.mark_activity()
+            return True
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return False
+
     async def _connect_loop(self) -> None:
-        """Auto-reconnect loop with backoff."""
+        """Auto-reconnect loop with backoff and keepalive probing."""
         attempt = 0
         while not self._shutdown:
             try:
-                self._stream = CascorControlStream(
-                    base_url=self._ws_url,
-                    api_key=self._api_key,
+                # bind_outbound_key: with no key, the stream would read JUNIPER_CASCOR_API_KEY
+                # itself -- the raw value canopy refused (#683 validation).
+                self._stream = bind_outbound_key(
+                    CascorControlStream(
+                        base_url=self._ws_url,
+                        api_key=self._api_key,
+                        origin=self._ws_origin,
+                    ),
+                    self._api_key,
                 )
                 await self._stream.connect()
                 logger.info("Control stream supervisor connected to %s", self._ws_url)
+                self.health.mark_connected()
                 attempt = 0
                 # Stay connected until disconnect. ASYNC110 prefers an
                 # ``asyncio.Event`` here; for this supervisor a 1-second
@@ -137,13 +391,35 @@ class ControlStreamSupervisor:
                 # would require touching the stream class, and (b) the
                 # one-second granularity is well below any reconnect
                 # latency we care about.
+                disconnect_reason = None
+                last_probe = time.monotonic()
                 while not self._shutdown and self.is_connected:  # noqa: ASYNC110
                     await asyncio.sleep(1)
+                    if self._probe_interval > 0 and time.monotonic() - last_probe >= self._probe_interval:
+                        last_probe = time.monotonic()
+                        if not await self._probe_liveness():
+                            disconnect_reason = f"keepalive probe failed (no pong within {self._probe_pong_timeout:.0f}s)"
+                            break
+                if not self._shutdown:
+                    if disconnect_reason is None:
+                        ws = getattr(self._stream, "_ws", None) if self._stream is not None else None
+                        close_code = getattr(ws, "close_code", None)
+                        disconnect_reason = f"socket no longer open (close_code={close_code})"
+                    # N2: the pre-fix loop fell through here SILENTLY and
+                    # re-connected without a trace (and with the blind
+                    # ``_ws is not None`` check it never fell through at all).
+                    logger.warning("Control stream liveness lost: %s — reconnecting", disconnect_reason)
+                    self.health.mark_disconnected(disconnect_reason)
+                    if self._stream is not None:
+                        with contextlib.suppress(Exception):
+                            await self._stream.disconnect()
             except asyncio.CancelledError:
                 return
             except Exception as e:
                 delay = self._BACKOFF[min(attempt, len(self._BACKOFF) - 1)]
                 logger.warning("Control stream supervisor disconnected (%s), reconnecting in %ds", e, delay)
+                # /api/stream_health serves this reason: the type, never the transport text (#683 validation).
+                self.health.mark_disconnected(outbound_error_text(e))
                 attempt += 1
                 try:
                     await asyncio.sleep(delay)
@@ -229,13 +505,38 @@ class CascorServiceAdapter:
         service_url: str = BackendConstants.DEFAULT_CASCOR_SERVICE_URL,
         api_key: Optional[str] = None,
         client: Optional[JuniperCascorClient] = None,
+        ws_origin: Optional[str] = None,
     ):
         self._service_url = service_url
         self._api_key = api_key
-        self._client = client or JuniperCascorClient(base_url=service_url, api_key=api_key)
+        # E.2 PR-2-C: store + forward to the control-stream supervisor.
+        # See ``settings.cascor_ws_origin`` for the env-binding contract.
+        self._ws_origin = ws_origin
+        # X7 slice 1b: pass the HTTP budget explicitly. Inheriting the client's
+        # defaults (timeout=30, retries=3) cost 123.1 s per call against a hung
+        # cascor and 3.0 s against a stopped one -- almost all of the latter being
+        # urllib3 backoff sleep -- on canopy's event loop. See
+        # ``BackendConstants.CASCOR_CLIENT_RETRIES`` for why zero is correct for a
+        # service that already re-polls on its own interval.
+        # #683 validation: ``bind_outbound_key`` -- handed no key, the client reads
+        # JUNIPER_CASCOR_API_KEY itself, raw, which is how a key canopy refused came back.
+        self._client = client or bind_outbound_key(
+            JuniperCascorClient(
+                base_url=service_url,
+                api_key=api_key,
+                timeout=BackendConstants.CASCOR_CLIENT_TIMEOUT_SECONDS,
+                retries=BackendConstants.CASCOR_CLIENT_RETRIES,
+            ),
+            api_key,
+        )
         self.training_monitor = _ServiceTrainingMonitor(self._client)
         self._training_stream: Optional[CascorTrainingStream] = None
         self._relay_task: Optional[asyncio.Task] = None
+        # N2: periodic relay throughput summary task (started with the relay).
+        self._relay_summary_task: Optional[asyncio.Task] = None
+        # N2: relay stream health (also reachable via the lazy ``relay_health``
+        # property for ``__new__``-created instances — same pattern as ``_cb``).
+        self._relay_health = StreamHealth("training-relay", stale_after_seconds=BackendConstants.RELAY_STALE_AFTER_SECONDS)
         self._attached_to_existing: bool = False
         self._state_update_callback: Optional[Callable] = None
         self._circuit = CircuitBreaker(name=BackendConstants.CIRCUIT_BREAKER_NAME, failure_threshold=BackendConstants.CIRCUIT_BREAKER_FAILURE_THRESHOLD, recovery_timeout=BackendConstants.CIRCUIT_BREAKER_RECOVERY_TIMEOUT)
@@ -249,7 +550,7 @@ class CascorServiceAdapter:
         self._ws_url = ws_url
 
         # Phase C: control stream supervisor for hot-param WS routing
-        self._control_supervisor = ControlStreamSupervisor(ws_url=ws_url, api_key=api_key)
+        self._control_supervisor = ControlStreamSupervisor(ws_url=ws_url, api_key=api_key, ws_origin=ws_origin)
 
     @property
     def service_url(self) -> str:
@@ -284,7 +585,7 @@ class CascorServiceAdapter:
     async def connect(self) -> bool:
         """Connect to the CasCor service and verify it is reachable."""
         try:
-            return bool(self._client.is_alive())
+            return bool(await asyncio.to_thread(self._client.is_alive))
         except Exception:
             logger.error(f"Failed to connect to CasCor service at {self._service_url}")
             return False
@@ -315,12 +616,31 @@ class CascorServiceAdapter:
         """
         Open a WebSocket training stream and relay messages to Canopy's
         websocket_manager for broadcast to dashboard clients.
+
+        N2 hardening (training-runtime defects plan §4 I-1 / §5 T2/T5): the
+        relay now (a) bounds every frame wait by a liveness window so a
+        half-open socket cannot starve it silently, (b) counts inbound frames
+        by type into ``relay_health`` and emits a periodic INFO summary
+        (zero-counts included — silence becomes visible), and (c) logs one
+        line for EVERY disconnect and reconnect attempt, reconnecting with
+        backoff on all failure classes. Pre-N2, a ``connect()`` failure raised
+        ``JuniperCascorConnectionError`` (not an ``OSError``), fell into the
+        generic ``except Exception`` arm, and ``break``-ed the loop — killing
+        the relay permanently after a single failed reconnect.
         """
 
         async def _relay_loop():
             import random
 
             from communication.websocket_manager import websocket_manager
+            from settings import get_settings
+
+            relay_settings = get_settings()
+            liveness_timeout = float(getattr(relay_settings, "ws_stream_liveness_timeout_seconds", 90.0))
+
+            def _backoff_delay(attempt_n: int) -> float:
+                # Phase F: jitter backoff — matches JS formula (GAP-WS-30/31)
+                return float(max(random.random() * min(60, 0.5 * (2 ** min(attempt_n, 7))), 0.5))  # Floor at 500ms
 
             attempt = 0
             relay_enabled = True
@@ -336,11 +656,55 @@ class CascorServiceAdapter:
             last_training_seq: Optional[int] = None
             while relay_enabled:
                 try:
-                    stream = CascorTrainingStream(base_url=self._ws_url, api_key=self._api_key)
+                    # bind_outbound_key: with no key the stream reads JUNIPER_CASCOR_API_KEY itself (#683 validation).
+                    stream = bind_outbound_key(CascorTrainingStream(base_url=self._ws_url, api_key=self._api_key), self._api_key)
                     await stream.connect()
+                    logger.info("Cascor metrics stream connected to %s", self._ws_url)
+                    self.relay_health.mark_connected()
                     attempt = 0
                     last_training_seq = None
-                    async for message in stream.stream():
+                    # N2: pull frames through an explicit iterator so each wait is
+                    # bounded — with a bare ``async for`` a half-open socket parks
+                    # the relay on ``recv()`` forever (the 2026-07-10 silent-death
+                    # class).
+                    # CL2 (training-runtime defects plan §7): poll the frame wait at
+                    # the cascor heartbeat cadence (not the full liveness window) so
+                    # the client's ``is_alive`` surface can keep the relay-health
+                    # clock fresh between sparse data frames. With >=0.7.0 auto-pong
+                    # consuming cascor's heartbeat pings, those pings no longer reach
+                    # this iterator to feed the clock, so a healthy-but-idle stream
+                    # would otherwise drift to "degraded" (and, unbounded, churn
+                    # reconnects) — ``is_alive`` is the replacement liveness signal.
+                    disconnect_reason = "stream ended (peer closed)"
+                    liveness_poll = min(liveness_timeout, BackendConstants.RELAY_LIVENESS_POLL_SECONDS) if liveness_timeout > 0 else 0.0
+                    frame_iter = stream.stream().__aiter__()
+                    while True:
+                        try:
+                            if liveness_poll > 0:
+                                message = await asyncio.wait_for(frame_iter.__anext__(), timeout=liveness_poll)
+                            else:
+                                message = await frame_iter.__anext__()
+                        except StopAsyncIteration:
+                            break
+                        except asyncio.TimeoutError:
+                            # No frame this poll. If the client confirms the socket
+                            # saw a frame (heartbeat included) within the full
+                            # liveness window, the stream is healthy-but-idle: feed
+                            # the relay clock (no per-type bump), re-arm the iterator
+                            # on the same live connection, and keep relaying — no
+                            # reconnect. The timed-out recv had no frame in flight
+                            # (the timeout fired because it was still pending), so
+                            # re-arming loses nothing. Only a truly silent peer
+                            # (is_alive False past the window) — or a fake / pre-CL1
+                            # client without the surface — counts as liveness expiry.
+                            if _stream_is_alive(stream, liveness_timeout):
+                                self.relay_health.mark_activity()
+                                with contextlib.suppress(Exception):
+                                    await frame_iter.aclose()
+                                frame_iter = stream.stream().__aiter__()
+                                continue
+                            disconnect_reason = f"liveness expired (no frames in {liveness_timeout:.0f}s)"
+                            break
                         # METRICS-MON R2.2.5 / seed-05: validate the inbound
                         # frame against juniper-cascor-protocol's canonical
                         # envelope schemas. Validation is observational —
@@ -386,11 +750,26 @@ class CascorServiceAdapter:
 
                         msg_type = message.get("type", "")
 
-                        # Phase F: respond to cascor heartbeat pings with pong
-                        if msg_type == "ping":
-                            if stream._ws:
-                                await stream._ws.send(json.dumps({"type": "pong"}))
-                            continue
+                        # N2/CL2: every inbound frame feeds the liveness clock and
+                        # the per-type counters. cascor-client >=0.7.0 consumes
+                        # heartbeat pings at the transport layer (they never reach
+                        # here), so the census now reflects real data/ack frames —
+                        # metric silence surfaces as ``metrics=0`` in the summary,
+                        # and true socket silence is caught by the client's
+                        # ``is_alive`` surface (the TimeoutError arm above), not by
+                        # counting heartbeat pings the relay no longer receives.
+                        self.relay_health.mark_activity(msg_type or "untyped")
+
+                        # CL2 (training-runtime defects plan §7): the manual
+                        # heartbeat-pong workaround is retired. cascor-client
+                        # >=0.7.0's ``CascorTrainingStream`` auto-pongs and consumes
+                        # ``ping`` frames at the transport layer, so a ``ping`` never
+                        # reaches this relay — canopy no longer reaches into
+                        # ``stream._ws`` to answer it. ``ping`` therefore drops out
+                        # of the relay's frame census (StreamHealth's per-type
+                        # counters simply stop seeing it); the liveness clock is fed
+                        # by data/ack frames plus the client's own ``is_alive``
+                        # surface (the TimeoutError arm above).
 
                         data = message.get("data", message)
 
@@ -403,7 +782,7 @@ class CascorServiceAdapter:
                         # On cascade_add, fetch fresh topology and broadcast
                         if msg_type == "cascade_add":
                             try:
-                                topology = self.extract_network_topology()
+                                topology = await asyncio.to_thread(self.extract_network_topology)
                                 if topology:
                                     await websocket_manager.broadcast({"type": "topology", "data": topology})
                             except Exception as te:
@@ -487,22 +866,89 @@ class CascorServiceAdapter:
                                 except Exception as ee:  # nosec B110
                                     logger.debug(f"Event callback error: {ee}")
 
-                    await stream.disconnect()
+                    # N2: liveness expiry abandons the (possibly cancelled)
+                    # generator; close both it and the socket best-effort
+                    # before reconnecting.
+                    with contextlib.suppress(Exception):
+                        await frame_iter.aclose()
+                    with contextlib.suppress(Exception):
+                        await stream.disconnect()
+                    # N2: one line per disconnect — never reconnect silently
+                    # (the pre-fix stream-ended path re-connected with no log
+                    # and no backoff).
+                    delay = _backoff_delay(attempt)
+                    logger.warning(f"Cascor metrics stream disconnected ({disconnect_reason}). Reconnecting in {delay:.1f}s")
+                    self.relay_health.mark_disconnected(disconnect_reason)
+                    attempt += 1
+                    await asyncio.sleep(delay)
                 except asyncio.CancelledError:
                     relay_enabled = False
-                except OSError as e:
-                    # Phase F: jitter backoff — matches JS formula (GAP-WS-30/31)
-                    delay = random.random() * min(60, 0.5 * (2 ** min(attempt, 7)))
-                    delay = max(delay, 0.5)  # Floor at 500ms
+                    self.relay_health.mark_disconnected("relay stopped")
+                except (OSError, JuniperCascorClientError) as e:
+                    # N2: ``JuniperCascorClientError`` added — ``connect()``
+                    # wraps socket errors in ``JuniperCascorConnectionError``
+                    # (NOT an OSError), which previously fell through to the
+                    # generic arm below and permanently killed the relay after
+                    # one failed reconnect.
+                    delay = _backoff_delay(attempt)
                     logger.warning(f"Cascor metrics stream disconnected ({e}). Reconnecting in {delay:.1f}s")
+                    # /api/stream_health serves this reason: the type, never the transport text (#683 validation).
+                    self.relay_health.mark_disconnected(outbound_error_text(e))
                     attempt += 1
                     try:
                         await asyncio.sleep(delay)
                     except asyncio.CancelledError:
                         relay_enabled = False
                 except Exception as e:
-                    logger.error("Unexpected error in relay loop: %s", e, exc_info=True)
-                    break
+                    # N2: an unexpected error must not kill the relay silently
+                    # (this arm used to ``break``, creating a permanent,
+                    # unlogged-thereafter relay death). Log loudly, then
+                    # reconnect with the same backoff.
+                    delay = _backoff_delay(attempt)
+                    logger.error("Unexpected error in relay loop: %s — reconnecting in %.1fs", e, delay, exc_info=True)
+                    self.relay_health.mark_disconnected(f"unexpected error: {outbound_error_text(e)}")
+                    attempt += 1
+                    try:
+                        await asyncio.sleep(delay)
+                    except asyncio.CancelledError:
+                        relay_enabled = False
+
+        # N2 (§5 T5): periodic INFO throughput summary — the relay previously
+        # had no lifecycle/throughput logging after its single start line, so
+        # a starved stream was indistinguishable from a quiet one. Counts are
+        # per-type since the last summary, zero-counts included: silence is
+        # itself the signal.
+        # CL2 (training-runtime defects plan §7): ``ping`` retired from the
+        # core-types roster — cascor-client >=0.7.0 consumes heartbeat pings at
+        # the transport layer, so the relay never sees them and a forced
+        # ``ping=0`` would be a permanently-misleading zero. The remaining core
+        # types still print explicit zeros so metric silence stays visible; any
+        # other observed type is appended (sorted) as before.
+        _SUMMARY_CORE_TYPES = ("metrics", "state", "topology")
+
+        async def _relay_summary_loop(interval: float):
+            while True:
+                await asyncio.sleep(interval)
+                try:
+                    counts = self.relay_health.take_interval_counts()
+                    snap = self.relay_health.snapshot()
+                    total = sum(counts.values())
+                    parts = [f"{t}={counts.get(t, 0)}" for t in _SUMMARY_CORE_TYPES]
+                    parts += [f"{t}={n}" for t, n in sorted(counts.items()) if t not in _SUMMARY_CORE_TYPES]
+                    age = snap.get("last_activity_age_seconds")
+                    logger.info(
+                        "Metrics relay summary: %d frame(s) in last %.0fs (%s); status=%s; last-frame-age=%s; reconnects=%d",
+                        total,
+                        interval,
+                        ", ".join(parts),
+                        snap.get("status"),
+                        f"{age:.1f}s" if age is not None else "never",
+                        snap.get("reconnect_count", 0),
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:  # noqa: BLE001 — observability MUST NOT break the relay
+                    logger.debug("Relay summary emission failed; continuing", exc_info=True)
 
         self._relay_task = asyncio.create_task(_relay_loop())
         logger.info("Metrics relay started")
@@ -511,6 +957,9 @@ class CascorServiceAdapter:
         from settings import get_settings
 
         app_settings = get_settings()
+        summary_interval = float(getattr(app_settings, "ws_relay_summary_interval_seconds", 60.0))
+        if summary_interval > 0:
+            self._relay_summary_task = asyncio.create_task(_relay_summary_loop(summary_interval))
         if getattr(app_settings, "use_websocket_set_params", False):
             await self._control_supervisor.start()
             logger.info("Control stream supervisor started (use_websocket_set_params=True)")
@@ -523,12 +972,65 @@ class CascorServiceAdapter:
         # Phase C: stop control supervisor
         await self._control_supervisor.stop()
 
+        # N2: stop the throughput summary task alongside the relay.
+        summary_task = getattr(self, "_relay_summary_task", None)
+        if summary_task and not summary_task.done():
+            summary_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await summary_task
+        self._relay_summary_task = None
+
         if self._relay_task and not self._relay_task.done():
             self._relay_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._relay_task
         self._relay_task = None
         logger.info("Metrics relay stopped")
+
+    # ------------------------------------------------------------------
+    # N2: stream health (relay + control) for /api/stream_health + UI badge
+    # ------------------------------------------------------------------
+
+    @property
+    def relay_health(self) -> StreamHealth:
+        """Lazy relay-health accessor (safe for __new__-created instances)."""
+        try:
+            return self._relay_health
+        except AttributeError:
+            self._relay_health = StreamHealth("training-relay", stale_after_seconds=BackendConstants.RELAY_STALE_AFTER_SECONDS)
+            return self._relay_health
+
+    def get_stream_health(self) -> Dict[str, Any]:
+        """Combined canopy→cascor stream-health snapshot (N2 degraded-mode indicator).
+
+        Returns ``{"overall", "relay", "control"}`` where ``overall`` is
+        ``healthy`` / ``degraded`` / ``reconnecting``:
+
+        - the relay (metrics stream) drives ``overall`` directly — it is the
+          path that feeds tiles/charts/state, so its loss IS the degradation;
+        - an unhealthy control stream degrades an otherwise-healthy overall to
+          ``degraded`` only while WS set_params is enabled (apply falls back
+          to REST — degraded, not broken).
+
+        The UI badge consumes this via ``GET /api/stream_health`` so that
+        "browser socket open" can no longer masquerade as end-to-end healthy.
+        """
+        relay = self.relay_health.snapshot()
+        control: Dict[str, Any]
+        supervisor = getattr(self, "_control_supervisor", None)
+        from settings import get_settings
+
+        control_enabled = bool(getattr(get_settings(), "use_websocket_set_params", False)) and supervisor is not None
+        if supervisor is not None:
+            control = supervisor.health.snapshot()
+        else:
+            control = {"name": "control", "connected": False, "status": "reconnecting"}
+        control["enabled"] = control_enabled
+
+        overall = relay.get("status", "reconnecting")
+        if overall == "healthy" and control_enabled and control.get("status") != "healthy":
+            overall = "degraded"
+        return {"overall": overall, "relay": relay, "control": control}
 
     # ------------------------------------------------------------------
     # Network property (lines 491, 1803 in main.py)
@@ -574,19 +1076,44 @@ class CascorServiceAdapter:
             return result
         except JuniperCascorClientError as e:
             logger.error(f"Failed to create network: {e}")
-            return {"error": str(e)}
+            return {"error": outbound_error_text(e)}
 
     # ------------------------------------------------------------------
     # Training control
     # ------------------------------------------------------------------
 
-    def start_training_background(self, *args, **kwargs) -> bool:
+    def start_training_background(self, *args, start_fresh: bool = False, **kwargs) -> "Tuple[bool, Optional[str]]":
+        """Kick off training via REST. Returns ``(started, error_message)``.
+
+        PR-B2 (training-start diagnosis 2026-07-09): the cascor 409 detail
+        (e.g. "Training cannot be started: Training data not provided") used to
+        be flattened to a bare ``False`` here, so the §S10 surfacing could only
+        show a generic failure. The message now rides back to ServiceBackend's
+        ControlResult. It is cascor's ANSWER that rides back: a failure with no
+        HTTP status -- a refused header, an unreachable cascor -- is named by its
+        type alone (``outbound_errors.outbound_error_text``), because its text
+        reached the 409 body an anonymous caller reads (#683 validation).
+
+        N3 / Q4 / cascor C5: ``start_fresh=True`` forwards the top-level
+        ``start_fresh`` body field to ``POST /v1/training/start`` (cascor#408 —
+        discard the model + retained metrics/history, snapshots preserved). The
+        cascor-client 0.7.0 ``start_training()`` cannot carry that field yet, so
+        the fresh path posts through the client's own transport (reusing its
+        base_url / auth headers / error mapping — this avoids the I-3
+        headers-in-comment class of auth-drift bug). This ``_post`` reach-in is a
+        documented CL2 swap seam: when the client exposes ``start_fresh`` on its
+        public ``start_training`` surface (CL2 + Fake parity), collapse this back
+        onto the ``else`` branch.
+        """
         try:
-            self._client.start_training(**kwargs)
-            return True
+            if start_fresh:
+                self._client._post(ENDPOINT_TRAINING_START, json={"start_fresh": True})
+            else:
+                self._client.start_training(**kwargs)
+            return True, None
         except JuniperCascorClientError as e:
             logger.error(f"Failed to start training: {e}")
-            return False
+            return False, outbound_error_text(e)
 
     def is_training_in_progress(self) -> bool:
         try:
@@ -615,7 +1142,7 @@ class CascorServiceAdapter:
             return {"ok": True, "data": result}
         except JuniperCascorClientError as e:
             logger.error(f"Failed to pause training: {e}")
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": outbound_error_text(e)}
 
     def resume_training(self) -> Dict[str, Any]:
         try:
@@ -623,7 +1150,7 @@ class CascorServiceAdapter:
             return {"ok": True, "data": result}
         except JuniperCascorClientError as e:
             logger.error(f"Failed to resume training: {e}")
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": outbound_error_text(e)}
 
     def reset_training(self) -> Dict[str, Any]:
         try:
@@ -632,7 +1159,7 @@ class CascorServiceAdapter:
             return {"ok": True, "data": result}
         except JuniperCascorClientError as e:
             logger.error(f"Failed to reset training: {e}")
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": outbound_error_text(e)}
 
     # Parameter mapping: canopy nn_*/cn_* names -> cascor API parameter names
     _CANOPY_TO_CASCOR_PARAM_MAP = {
@@ -652,9 +1179,55 @@ class CascorServiceAdapter:
         "cn_pool_size": "candidate_pool_size",
         "cn_correlation_threshold": "correlation_threshold",
         "cn_candidate_learning_rate": "candidate_learning_rate",
+        # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1b / Issue #1 — candidate-pool
+        # selection knobs. Schema landed in cascor #241 (PR-4a) with the
+        # post-merge invariant validator (_validate_candidate_pool_triple).
+        # Canopy adds a clientside C2.2 fast-feedback validator (see
+        # dashboard_manager); the server remains authoritative.
+        "cn_multi_candidate": "multi_candidate",
+        "cn_candidate_selection": "candidate_selection",
+        "cn_selected_candidates": "selected_candidates",
+        "cn_top_candidates": "top_candidates",
+        "cn_random_candidates": "random_candidates",
     }
 
+    # FRONTEND_ISSUES_PLAN_2026-05-09 §1.6 — params that are conceptually
+    # canopy-only (drive demo-side dataset generation, UI behavior, etc.) and
+    # should never be reported as "skipped" in the toast. Used by the
+    # test_param_map_completeness contract test to allow-list intentionally-
+    # local fields without weakening the check.
+    _CANOPY_LOCAL_PARAMS: frozenset = frozenset(
+        {
+            "nn_spiral_rotations",
+            "nn_spiral_number",
+            "nn_dataset_elements",
+            "nn_dataset_noise",
+            "nn_multi_node_layers",
+            "nn_growth_trigger",
+            "nn_growth_preset_epochs",
+            "cn_training_complete",
+        }
+    )
+
     _CASCOR_TO_CANOPY_PARAM_MAP = {v: k for k, v in _CANOPY_TO_CASCOR_PARAM_MAP.items()}
+
+    # F-CANOPY-022 — VALUE vocabulary translation, keyed by CASCOR param name.
+    # The map above renames canopy's form fields to cascor's parameter names;
+    # a field can additionally disagree on the VALUE vocabulary, and the key
+    # rename alone then ships a value cascor's schema rejects.
+    #
+    # ``candidate_selection`` is the standing case: canopy's radio shipped
+    # ``top_tier`` while cascor declares Literal["top","random","mixed"]
+    # (juniper-cascor api/models/training.py:159,:327), so selecting "Add Top
+    # Tier Candidates" and applying returned a pydantic literal_error that the
+    # dashboard surfaced as HTTP 502 — the option could never be applied. The
+    # radio now ships ``top``; this map is the back-compat leg, so a persisted
+    # ``applied-params-store``, a browser session open across the upgrade, or a
+    # direct ``POST /api/set_params`` caller using the old value still lands.
+    # ``random`` matches on both sides and needs no entry.
+    _CANOPY_TO_CASCOR_VALUE_MAP: Dict[str, Dict[Any, Any]] = {
+        "candidate_selection": {"top_tier": "top"},
+    }
 
     # Phase C: hot params route over /ws/control; cold stay on REST PATCH (§S9)
     _HOT_CASCOR_PARAMS: frozenset = frozenset(
@@ -671,6 +1244,14 @@ class CascorServiceAdapter:
             "convergence_threshold",
             "candidate_convergence_threshold",
             "candidate_patience",
+            # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1b — pool resize knobs are
+            # safe mid-training; the cascade-correlation outer loop reads them
+            # at the next growth iteration boundary (PR-4b will wire the
+            # selection logic; today they're storage-only but still hot since
+            # the read is fully snapshot at iteration start).
+            "selected_candidates",
+            "top_candidates",
+            "random_candidates",
         }
     )
 
@@ -689,6 +1270,42 @@ class CascorServiceAdapter:
             # _init_activation_function on PATCH so activation_fn /
             # activation_fn_no_diff actually refresh from the registry.
             "activation_function_name",
+            # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1b — selection-strategy
+            # changes (multi-candidate flag + top/random/mixed mode) need a
+            # next-iteration boundary to take effect cleanly; classifying as
+            # cold avoids racing the in-flight candidate-training pass.
+            "multi_candidate",
+            "candidate_selection",
+        }
+    )
+
+    # F-CANOPY-023 — cascor params that are DERIVED read-only. cascor accepts
+    # them at the request boundary so a full-form canopy apply keeps working,
+    # then reports them as ``skipped(not-updatable)`` rather than storing them,
+    # so their post-PATCH value is EXPECTED to differ from what was sent.
+    #
+    # ``epochs_max`` is the standing case (cascor C2b / Q1 outcome (c),
+    # juniper-cascor ``src/api/lifecycle/manager.py:1618-1640``): it is derived
+    # as ``output_epochs + effective_iterations * (candidate_epochs +
+    # output_epochs)`` from the granular limits that actually gate training.
+    #
+    # This is the STATIC backstop; the primary rule is data-driven off cascor's
+    # own C2a skipped partition (see ``_verify_apply_roundtrip``). It exists for
+    # a backend that returns no partition, where the data-driven rule alone
+    # would let one expected divergence fail every apply.
+    _DERIVED_READONLY_CASCOR_PARAMS: frozenset = frozenset({"epochs_max"})
+
+    # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C3 — params whose verify step uses
+    # math.isclose(rel_tol=1e-6) instead of equality. Float round-trips through
+    # JSON / pydantic / numpy lose enough precision that exact equality is the
+    # wrong test for these.
+    _FLOAT_TOLERANT_PARAMS: frozenset = frozenset(
+        {
+            "learning_rate",
+            "candidate_learning_rate",
+            "correlation_threshold",
+            "convergence_threshold",
+            "candidate_convergence_threshold",
         }
     )
 
@@ -705,11 +1322,30 @@ class CascorServiceAdapter:
         hot params fall back to REST unconditionally.
         """
         mapped = {self._CANOPY_TO_CASCOR_PARAM_MAP[k]: v for k, v in params.items() if k in self._CANOPY_TO_CASCOR_PARAM_MAP}
-        skipped = [k for k in params if k not in self._CANOPY_TO_CASCOR_PARAM_MAP]
+        # F-CANOPY-022: translate legacy VALUE vocabulary after the key rename.
+        # Unmapped values pass through verbatim so cascor stays authoritative on
+        # what it will accept; an unhashable value simply is not a legacy token.
+        for cascor_key, value_map in self._CANOPY_TO_CASCOR_VALUE_MAP.items():
+            if cascor_key in mapped:
+                try:
+                    mapped[cascor_key] = value_map.get(mapped[cascor_key], mapped[cascor_key])
+                except TypeError:
+                    pass
+        # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1a (Issue #1) + #2b: surface
+        # GENUINELY-unsupported keys (neither cascor-mappable nor known
+        # canopy-local) so they aren't silently dropped — but exclude
+        # ``_CANOPY_LOCAL_PARAMS``, which are handled canopy-side and must never
+        # be reported as "skipped" in the apply toast (they were the bogus
+        # "N not supported" entries). Sorted for deterministic toast + warn log.
+        skipped = sorted(k for k in params if k not in self._CANOPY_TO_CASCOR_PARAM_MAP and k not in self._CANOPY_LOCAL_PARAMS)
         if skipped:
-            logger.debug(f"Canopy-only params (no cascor mapping): {skipped}")
+            logger.warning(
+                "apply_params dropped %d unmapped key(s) — add to _CANOPY_TO_CASCOR_PARAM_MAP " "or document as canopy-only: %s",
+                len(skipped),
+                skipped,
+            )
         if not mapped:
-            return {"ok": True, "data": {}, "message": "No cascor-mappable params provided"}
+            return {"ok": True, "data": {}, "skipped": skipped, "applied": [], "skipped_detail": [], "message": "No cascor-mappable params provided"}
 
         from settings import get_settings
 
@@ -748,10 +1384,421 @@ class CascorServiceAdapter:
                 logger.info(f"Cascor params updated via REST: {list(cold.keys())}")
             except JuniperCascorClientError as e:
                 logger.error(f"Failed to update cascor params via REST: {e}")
-                return {"ok": False, "error": str(e)}
+                return {"ok": False, "error": outbound_error_text(e), "skipped": skipped}
 
+        # N5 (I-4/T3): surface cascor's C2a applied/skipped(reason) partition so
+        # the canopy toast can show what actually landed and what the live
+        # network declined (and why) — distinct from the adapter's own
+        # ``skipped`` (canopy keys with no cascor mapping, never sent).
+        #
+        # F-CANOPY-023: this MUST be extracted before the roundtrip verify below,
+        # which consumes it. Extracting it afterwards meant the verify compared
+        # keys cascor had explicitly declined and failed the whole apply on a
+        # divergence cascor had already explained.
+        applied_keys, skipped_detail = self._extract_cascor_partition(result_data)
+
+        # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C3 — roundtrip verify. Confirm
+        # the running cascor config moved to the requested values; surface any
+        # divergence via ``mismatches`` so the canopy toast can route it
+        # through the same machinery as ``skipped``. Failures of the verify
+        # call itself are logged but never silently swallow the original
+        # write — the PATCH already returned 200; if cascor's GET broke we
+        # still want the user to see "applied", just without the second-line
+        # confirmation.
+        verify = self._verify_apply_roundtrip(mapped, skipped_detail=skipped_detail)
+        if verify is not None:
+            logger.warning("apply_params verify mismatch: %s", verify)
+            return {
+                "ok": False,
+                "error": "verification_failed",
+                "mismatches": verify,
+                "skipped": skipped,
+            }
         logger.info(f"Cascor params updated: {list(mapped.keys())}")
-        return {"ok": True, "data": result_data}
+        return {"ok": True, "data": result_data, "skipped": skipped, "applied": applied_keys, "skipped_detail": skipped_detail}
+
+    def _extract_cascor_partition(self, result_data: Any) -> Tuple[list, list]:
+        """Pull cascor's C2a applied / skipped(reason) partition out of an apply result.
+
+        C2a (I-4 / T3, cascor#398): ``PATCH /v1/training/params`` and the
+        ``/ws/control`` ``set_params`` ack both report, additively, which
+        submitted keys the live network actually took (``applied: [key, ...]``)
+        and which it could not (``skipped: [{"key", "reason"}, ...]`` — reasons
+        ``not-updatable`` / ``no-such-attribute`` / ``null-value``; ``epochs_max``
+        is the standing ``not-updatable`` case post-C2b). The REST success
+        envelope nests the partition under ``data``; the WS ack carries it flat,
+        so this scans both. cascor keys are mapped back to the canopy
+        ``nn_*``/``cn_*`` namespace so the toast speaks the user's form-field
+        names. Returns ``([], [])`` when the partition is absent (pre-C2a
+        backend, or a no-op apply); never raises.
+        """
+        applied_keys: list = []
+        skipped_detail: list = []
+        if not isinstance(result_data, dict):
+            return applied_keys, skipped_detail
+        containers = [result_data]
+        inner = result_data.get("data")
+        if isinstance(inner, dict):
+            containers.append(inner)
+        for container in containers:
+            raw_applied = container.get("applied")
+            if isinstance(raw_applied, list):
+                for cascor_key in raw_applied:
+                    canopy_key = self._CASCOR_TO_CANOPY_PARAM_MAP.get(cascor_key, cascor_key)
+                    if canopy_key not in applied_keys:
+                        applied_keys.append(canopy_key)
+            raw_skipped = container.get("skipped")
+            if isinstance(raw_skipped, list):
+                for entry in raw_skipped:
+                    # C2a entries are {"key", "reason"} dicts; ignore anything else
+                    # (e.g. a stray list[str] the adapter's own ``skipped`` uses).
+                    if isinstance(entry, dict) and "key" in entry:
+                        canopy_key = self._CASCOR_TO_CANOPY_PARAM_MAP.get(entry.get("key"), entry.get("key"))
+                        detail = {"key": canopy_key, "reason": entry.get("reason", "skipped")}
+                        if detail not in skipped_detail:
+                            skipped_detail.append(detail)
+        return applied_keys, skipped_detail
+
+    def _verify_apply_roundtrip(
+        self,
+        mapped: Dict[str, Any],
+        skipped_detail: Optional[list] = None,
+    ) -> Optional[Dict[str, Dict[str, Any]]]:
+        """Confirm the cascor running config matches the values just PATCHed.
+
+        Returns ``None`` on full match (or when the verify call itself fails —
+        we don't want a flaky GET to invalidate a successful PATCH). Returns
+        a ``{cascor_key: {requested, applied}}`` dict on real divergence.
+
+        Float-tolerant comparison (``math.isclose(rel_tol=1e-6)``) for the
+        params in ``_FLOAT_TOLERANT_PARAMS``; everything else uses ``!=``.
+
+        F-CANOPY-023: a key the live network *declined* is expected to differ
+        from what was sent, and is not a verification failure. Two exclusions,
+        because a divergence here fails the ENTIRE apply — including the keys
+        that did land:
+
+        * ``skipped_detail`` — cascor's own C2a ``skipped(reason)`` partition
+          (canopy-namespaced by ``_extract_cascor_partition``). Data-driven, so
+          any future not-updatable key is handled without a code change.
+        * ``_DERIVED_READONLY_CASCOR_PARAMS`` — the static backstop for a
+          backend that returns no partition (pre-C2a, or an ack that omits it),
+          where the data-driven rule alone would still fail every apply.
+        """
+        try:
+            # juniper-cascor-client returns ``{"data": {...}}``; the inner
+            # dict is the same shape ``get_canopy_params`` consumes above.
+            response = self._client.get_training_params() or {}
+        except JuniperCascorClientError as exc:
+            logger.warning("apply_params verify call failed (continuing): %s", exc)
+            return None
+        applied_raw = response.get("data") if isinstance(response, dict) else None
+        if not isinstance(applied_raw, dict):
+            return None
+
+        import math
+
+        # F-CANOPY-023: keys the live network declined. ``skipped_detail`` is
+        # canopy-namespaced, so map back to cascor names to compare with
+        # ``mapped``.
+        declined: set = set(self._DERIVED_READONLY_CASCOR_PARAMS)
+        for entry in skipped_detail or []:
+            if isinstance(entry, dict) and "key" in entry:
+                canopy_key = entry.get("key")
+                declined.add(self._CANOPY_TO_CASCOR_PARAM_MAP.get(canopy_key, canopy_key))
+
+        mismatches: Dict[str, Dict[str, Any]] = {}
+        for key, requested in mapped.items():
+            if key in declined:
+                # cascor reported this key as not-updatable (or it is a known
+                # derived read-only value). Its post-PATCH value is EXPECTED to
+                # differ from what was sent — comparing it would fail an apply
+                # in which every operator edit actually landed.
+                continue
+            if key not in applied_raw:
+                # Not all PATCH targets are echoed by GET; absence means the
+                # server didn't surface it, not that it was rejected. Skip.
+                continue
+            applied = applied_raw[key]
+            if key in self._FLOAT_TOLERANT_PARAMS:
+                try:
+                    if math.isclose(float(requested), float(applied), rel_tol=1e-6, abs_tol=1e-9):
+                        continue
+                except (TypeError, ValueError):
+                    pass  # fall through to strict compare on coercion failure
+            if applied != requested:
+                mismatches[key] = {"requested": requested, "applied": applied}
+        return mismatches or None
+
+    # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 + §3.5.2 P1 — Issue #3 Phase 1
+    # dataset staging. Three pass-through methods that hit the cascor PR-6
+    # endpoints. juniper-cascor-client doesn't yet expose dedicated methods
+    # for these (see cascor #242), so we use the public-but-private ``_request``
+    # escape hatch — a follow-up will lift these into the client when it ships
+    # 0.4.0+ with first-class methods.
+
+    # Maps canopy nn_* dataset-form keys → cascor StageDatasetRequest keys.
+    # Keys not in this map are silently dropped from the staging payload.
+    _DATASET_PARAM_MAP = {
+        "nn_dataset_type": "dataset_type",
+        "nn_dataset_elements": "n_samples",
+        "nn_dataset_noise": "noise",
+        "nn_spiral_rotations": "rotations",
+        "nn_spiral_number": "n_spirals",
+        # N7 (I-7): generic schema-driven params for non-spiral generators -> cascor's
+        # StageDatasetRequest.params channel (forwarded verbatim to juniper-data create_dataset).
+        "nn_dataset_params": "params",
+    }
+
+    def stage_dataset(self, **canopy_params: Any) -> Dict[str, Any]:
+        """POST /v1/training/dataset — stage a dataset change for next start_training."""
+        cascor_cfg = {self._DATASET_PARAM_MAP[k]: v for k, v in canopy_params.items() if k in self._DATASET_PARAM_MAP and v is not None}
+        try:
+            result = self._client._request("POST", "/training/dataset", json=cascor_cfg)
+            return {"ok": True, "data": (result or {}).get("data", {}), "config": cascor_cfg}
+        except JuniperCascorClientError as e:
+            logger.error("stage_dataset failed: %s", e)
+            return {"ok": False, "error": outbound_error_text(e)}
+
+    def cancel_pending_dataset(self) -> Dict[str, Any]:
+        """DELETE /v1/training/dataset — Phase 1 Cancel button target."""
+        try:
+            result = self._client._request("DELETE", "/training/dataset")
+            return {"ok": True, "data": (result or {}).get("data", {})}
+        except JuniperCascorClientError as e:
+            logger.error("cancel_pending_dataset failed: %s", e)
+            return {"ok": False, "error": outbound_error_text(e)}
+
+    def get_pending_dataset(self) -> Dict[str, Any]:
+        """GET /v1/training/dataset/pending — peek for the canopy banner."""
+        try:
+            result = self._client._request("GET", "/training/dataset/pending")
+            return {"ok": True, "pending": ((result or {}).get("data", {}) or {}).get("pending")}
+        except JuniperCascorClientError as e:
+            logger.error("get_pending_dataset failed: %s", e)
+            return {"ok": False, "error": outbound_error_text(e), "pending": None}
+
+    # ------------------------------------------------------------------
+    # Phase 2 P2-4 (Issue #3): Experimental Functions gate.
+    #
+    # Cascor exposes ``GET / POST /v1/admin/experimental_functions`` to
+    # read/write the server-side gate that authorises ``swap_dataset_live``
+    # (cascor shipped P2-1a — see ISSUE_3_PHASE_2_LIVE_DATASET_SWAP_2026-05-09
+    # §3.1 / §3.3). Canopy P2-4 proxies these through its own backend so
+    # the Dash callback layer keeps its single HTTP target convention
+    # (Dash → canopy backend → cascor) and inherits the existing
+    # X-API-Key auth boundary.
+    #
+    # F2.10: the server is authoritative. ``set_experimental_functions``
+    # returns the gate state *after* the cascor write completed — callers
+    # must trust this value rather than the requested value. On any
+    # failure both methods return ``{"ok": False, "error": ...}`` and the
+    # callback layer surfaces a toast + reverts the toggle.
+    # ------------------------------------------------------------------
+
+    def get_experimental_functions(self) -> Dict[str, Any]:
+        """GET /v1/admin/experimental_functions — read the server gate state.
+
+        Returns ``{"ok": True, "enabled": bool}`` on success, or
+        ``{"ok": False, "error": <str>}`` on failure. A failure is treated
+        as "gate is closed" by the callback layer (F2.10 safe default —
+        no Live Switch button if we can't confirm cascor's state).
+        """
+        try:
+            result = self._client._request("GET", "/admin/experimental_functions")
+            data = (result or {}).get("data", {}) or {}
+            return {"ok": True, "enabled": bool(data.get("enabled", False))}
+        except JuniperCascorClientError as e:
+            logger.error("get_experimental_functions failed: %s", e)
+            return {"ok": False, "error": outbound_error_text(e), "enabled": False}
+
+    def set_experimental_functions(self, enabled: bool) -> Dict[str, Any]:
+        """POST /v1/admin/experimental_functions — write the server gate state.
+
+        Returns ``{"ok": True, "enabled": <authoritative bool>}`` on
+        success. The authoritative ``enabled`` may differ from the
+        request if cascor's policy overrides the write (e.g., env-var
+        lockdown); F2.10 makes that ambiguity a feature, not a bug.
+
+        Returns ``{"ok": False, "error": <str>}`` on cascor failure. The
+        callback layer treats this as "revert the toggle to last-known-good".
+        """
+        try:
+            result = self._client._request("POST", "/admin/experimental_functions", json={"enabled": bool(enabled)})
+            data = (result or {}).get("data", {}) or {}
+            return {"ok": True, "enabled": bool(data.get("experimental_functions_enabled", data.get("enabled", enabled)))}
+        except JuniperCascorClientError as e:
+            logger.error("set_experimental_functions failed: %s", e)
+            return {"ok": False, "error": outbound_error_text(e), "enabled": False}
+
+    # ------------------------------------------------------------------
+    # Phase 2 P2-5 (Issue #3): Live Dataset Switch.
+    #
+    # ``swap_dataset_live`` POSTs the new dataset config to cascor's
+    # ``/v1/training/dataset/live`` (shipped P2-1a + P2-1d + P2-2 + P2-3).
+    # Cascor performs the in-flight swap (stop → reload → resize → restart)
+    # and returns the §3.3 response: ``arch_changes``, ``pre/post_swap_snapshot_id``,
+    # ``mode``, etc. The HTTP request can block for 5–30s for real
+    # juniper-data fetches; the canopy callback layer runs the request on
+    # Dash's worker pool so the Cancel button (a separate callback) can
+    # fire ``cancel_swap_dataset_live`` concurrently.
+    #
+    # ``cancel_swap_dataset_live`` DELETEs the live-swap endpoint (cascor
+    # P2-1b). Cascor sets its internal cancel flag; the in-flight swap
+    # aborts at the next checkpoint and returns ``{"status": "cancelled"}``
+    # to the originating POST. A DELETE with no swap in flight gets 404
+    # from cascor — surfaced here as ``{"ok": False}``.
+    # ------------------------------------------------------------------
+
+    def swap_dataset_live(self, **canopy_params: Any) -> Dict[str, Any]:
+        """POST /v1/training/dataset/live — initiate an in-flight dataset swap.
+
+        Maps canopy keys to cascor keys via ``_DATASET_PARAM_MAP`` so the
+        same sidebar inputs that drive ``stage_dataset`` (cold swap) can
+        drive the live swap with no UI duplication.
+
+        Returns:
+            ``{"ok": True, "data": <§3.3 response dict>}`` on success. The
+            ``data`` carries ``status`` (``"swapped"`` or ``"cancelled"``),
+            ``arch_changes``, ``pre_swap_snapshot_id``,
+            ``post_swap_snapshot_id``, ``mode``, and the before/after configs
+            — everything the canopy UI needs to render the outcome and the
+            P2-7 timeline marker.
+
+            ``{"ok": False, "error": <str>}`` on cascor failure. Distinct
+            cascor status codes (403/409/422/504/502) all collapse to
+            ``ok=False`` here; the callback layer can inspect the
+            ``error`` string for the user-facing message.
+        """
+        cascor_cfg = {self._DATASET_PARAM_MAP[k]: v for k, v in canopy_params.items() if k in self._DATASET_PARAM_MAP and v is not None}
+        try:
+            result = self._client._request("POST", "/training/dataset/live", json=cascor_cfg)
+            return {"ok": True, "data": (result or {}).get("data", {}), "config": cascor_cfg}
+        except JuniperCascorClientError as e:
+            logger.error("swap_dataset_live failed: %s", e)
+            return {"ok": False, "error": outbound_error_text(e)}
+
+    def cancel_swap_dataset_live(self) -> Dict[str, Any]:
+        """DELETE /v1/training/dataset/live — cancel an in-flight live swap.
+
+        Returns ``{"ok": True, "data": {...}}`` on cascor accepting the
+        cancel signal (HTTP 200). Returns ``{"ok": False, "error": ...}``
+        when cascor returns 404 (no swap in flight) or any other error —
+        the callback layer treats both as "Cancel had no effect" without
+        distinguishing.
+        """
+        try:
+            result = self._client._request("DELETE", "/training/dataset/live")
+            return {"ok": True, "data": (result or {}).get("data", {})}
+        except JuniperCascorClientError as e:
+            logger.error("cancel_swap_dataset_live failed: %s", e)
+            return {"ok": False, "error": outbound_error_text(e)}
+
+    # ------------------------------------------------------------------
+    # Phase 2 P2-7 (Issue #3): live ``dataset_swap`` event feed.
+    #
+    # Cascor's follow-up B (#255) ships ``GET /v1/history/dataset_swaps``
+    # which returns the LIVE network's recorded swap events
+    # (``network.history["dataset_swaps"]`` — P2-2 #253 storage). Canopy
+    # P2-7's three UI deliverables (replay timeline marker, History
+    # paired-diff, Snapshots tab badges) all consume this list. Polled
+    # every ``slow-update-interval`` tick into a single
+    # ``dataset-swap-events-store`` so the three panels share state.
+    #
+    # The ``since`` filter lets the canopy poller pass its last-seen
+    # timestamp and pull only new events on subsequent ticks — useful
+    # when the list grows large.
+    # ------------------------------------------------------------------
+
+    def get_dataset_swap_events(self, since: Optional[str] = None) -> Dict[str, Any]:
+        """GET /v1/history/dataset_swaps — read the dataset_swap event list.
+
+        Returns ``{"ok": True, "events": [<event_dict>, ...]}`` on success.
+        Each event has the §3.9 schema:
+        ``{timestamp, before_cfg, after_cfg, arch_changes,
+           pre_swap_snapshot_id, post_swap_snapshot_id}``.
+
+        Returns ``{"ok": False, "error": <str>}`` on cascor failure. The
+        callback layer treats a failure as "no events known" (empty list)
+        rather than as a UI error — the three panels degrade gracefully.
+        """
+        params = {"since": since} if since else None
+        try:
+            result = self._client._request("GET", "/history/dataset_swaps", params=params)
+            data = (result or {}).get("data", {}) or {}
+            events = data.get("events", []) or []
+            return {"ok": True, "events": list(events)}
+        except JuniperCascorClientError as e:
+            logger.error("get_dataset_swap_events failed: %s", e)
+            return {"ok": False, "error": outbound_error_text(e), "events": []}
+
+    def list_snapshots(self) -> Dict[str, Any]:
+        """GET /v1/snapshots -- the inventory of the backend that CREATES the snapshots.
+
+        F-CANOPY-007: canopy proxied snapshot *creation* to cascor but *listed*
+        snapshots off its own local directory, so on any deployment where the two
+        processes do not share a filesystem (two host processes with different
+        CWDs; a split-host deployment) the list was silently empty while the
+        create reported success. The list must come from where the files went.
+
+        Returns ``{"ok": True, "snapshots": [...]}`` (cascor entries carry
+        ``id`` / ``path`` / ``size_bytes`` / ``modified``) or
+        ``{"ok": False, "error": <str>, "snapshots": []}`` on any client failure
+        so the caller can fall back to the local directory listing.
+        """
+        try:
+            result = self._client._request("GET", "/snapshots")
+            data = (result or {}).get("data", []) or []
+            return {"ok": True, "snapshots": [dict(s) for s in data if isinstance(s, dict)]}
+        except JuniperCascorClientError as e:
+            logger.error("list_snapshots failed: %s", e)
+            return {"ok": False, "error": outbound_error_text(e), "snapshots": []}
+
+    def get_snapshot(self, snapshot_id: str) -> Dict[str, Any]:
+        """GET /v1/snapshots/{id} -- one snapshot's metadata from the backend that
+        holds it (F-CANOPY-007 companion to :meth:`list_snapshots`).
+
+        Returns ``{"ok": True, "snapshot": {...}}`` when cascor has it,
+        ``{"ok": True, "snapshot": None}`` when cascor answered 404, and
+        ``{"ok": False, "error": <str>, "snapshot": None}`` on any other client
+        failure (the caller falls back to its local lookup).
+        """
+        try:
+            result = self._client._request("GET", f"/snapshots/{snapshot_id}")
+            data = (result or {}).get("data")
+            return {"ok": True, "snapshot": dict(data) if isinstance(data, dict) else None}
+        except JuniperCascorNotFoundError:
+            return {"ok": True, "snapshot": None}
+        except JuniperCascorClientError as e:
+            logger.error("get_snapshot(%s) failed: %s", snapshot_id, e)
+            return {"ok": False, "error": outbound_error_text(e), "snapshot": None}
+
+    def get_snapshot_dataset_swaps(self, snapshot_id: str) -> Dict[str, Any]:
+        """GET /v1/snapshots/{id}/history/dataset_swaps — read a stored
+        snapshot's own dataset_swap event list (cascor P2-7 follow-up).
+
+        Used by the Replay timeline to render markers tied to the *loaded
+        snapshot's* history (spec §4.4 full flavor), separate from the
+        live event feed surfaced by :meth:`get_dataset_swap_events`.
+
+        Returns ``{"ok": True, "events": [...]}`` on success. Events have
+        the same §3.9 schema as the live feed; an empty list is a
+        legitimate response (pre-P2-2 snapshot or training run with no
+        live swaps).
+
+        Returns ``{"ok": False, "error": <str>, "events": []}`` on cascor
+        failure — including 404 (snapshot not present). Callers treat
+        this as "no markers for this snapshot" rather than a UI error
+        so the timeline degrades to the live-event-only behaviour.
+        """
+        try:
+            result = self._client._request("GET", f"/snapshots/{snapshot_id}/history/dataset_swaps")
+            data = (result or {}).get("data", {}) or {}
+            events = data.get("events", []) or []
+            return {"ok": True, "events": list(events)}
+        except JuniperCascorClientError as e:
+            logger.error("get_snapshot_dataset_swaps(%s) failed: %s", snapshot_id, e)
+            return {"ok": False, "error": outbound_error_text(e), "events": []}
 
     def _apply_params_hot(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Send hot params via /ws/control set_params with command_id.
@@ -760,9 +1807,16 @@ class CascorServiceAdapter:
         Uses ``asyncio.run_coroutine_threadsafe`` since apply_params is called
         from a thread (via asyncio.to_thread in the route handler).
         """
+        # N5 (I-4 / T2): liveness gate — skip the WS leg entirely when the
+        # control stream is dead so no apply burns the ``set_params`` ack window
+        # before falling back to REST. Post-N2/CL2 ``is_connected`` reads the
+        # real socket state (a half-open/peer-closed socket reads False), so this
+        # honestly short-circuits the 12-hour-silent-death class of the
+        # 2026-07-10 incident. For /ws/control (command/response, no stale bound)
+        # ``is_connected`` is exactly the ``health == healthy`` predicate.
         supervisor = getattr(self, "_control_supervisor", None)
         if supervisor is None or not supervisor.is_connected:
-            logger.debug("Control stream not connected, hot params will use REST fallback")
+            logger.debug("Control stream not connected (or absent); hot params skip the WS leg and use REST fallback")
             return None
 
         from settings import get_settings
@@ -855,6 +1909,22 @@ class CascorServiceAdapter:
         hidden_units = entry.get("hidden_units", 0)
         epoch = entry.get("epoch", 0)
 
+        # C7 (U-4) scalar classification metrics (additive, nullable). The flat
+        # f1/precision/recall/roc_auc fields sit at the top level of cascor's
+        # metric entry; carry them into the nested ``metrics`` dict where the
+        # metrics panel reads them (``m["metrics"][key]``) and keep flat
+        # top-level copies for ``_to_dashboard_metric``. ``eval_metrics`` (the
+        # self-describing average/split/n_samples/n_classes/undefined block) is
+        # present on the ``GET /v1/metrics`` snapshot and ``None`` on plain
+        # history rows — carried through when present, never synthesized.
+        # ``.get`` yields ``None`` for pre-C7 cascor, preserving the additive
+        # contract (and the golden-shape test's superset semantics).
+        f1 = entry.get("f1")
+        precision = entry.get("precision")
+        recall = entry.get("recall")
+        roc_auc = entry.get("roc_auc")
+        eval_metrics = entry.get("eval_metrics")
+
         return {
             # Legacy dashboard shape used by metrics panel rendering.
             "epoch": epoch,
@@ -863,6 +1933,11 @@ class CascorServiceAdapter:
                 "accuracy": train_accuracy,
                 "val_loss": val_loss,
                 "val_accuracy": val_accuracy,
+                # C7 (U-4): scalar classification metrics, where the panel reads them.
+                "f1": f1,
+                "precision": precision,
+                "recall": recall,
+                "roc_auc": roc_auc,
             },
             "network_topology": {"hidden_units": hidden_units},
             # Canonical normalized names retained for API/client compatibility.
@@ -873,6 +1948,12 @@ class CascorServiceAdapter:
             "hidden_units": hidden_units,
             "phase": entry.get("phase"),
             "timestamp": entry.get("timestamp"),
+            # C7 (U-4): flat scalars (for _to_dashboard_metric) + metadata block.
+            "f1": f1,
+            "precision": precision,
+            "recall": recall,
+            "roc_auc": roc_auc,
+            "eval_metrics": eval_metrics,
         }
 
     @staticmethod
@@ -891,12 +1972,22 @@ class CascorServiceAdapter:
                 "accuracy": flat.get("train_accuracy"),
                 "val_loss": flat.get("val_loss"),
                 "val_accuracy": flat.get("val_accuracy"),
+                # C7 (U-4): scalar classification metrics (nullable), where the
+                # metrics panel reads them. Carried from _normalize_metric's flat
+                # top-level copies.
+                "f1": flat.get("f1"),
+                "precision": flat.get("precision"),
+                "recall": flat.get("recall"),
+                "roc_auc": flat.get("roc_auc"),
             },
             "network_topology": {
                 "hidden_units": flat.get("hidden_units", 0),
             },
             "phase": flat.get("phase"),
             "timestamp": flat.get("timestamp"),
+            # C7 (U-4): self-describing average/split/undefined metadata block
+            # (present on /v1/metrics snapshot rows; None on plain history rows).
+            "eval_metrics": flat.get("eval_metrics"),
         }
 
     # ------------------------------------------------------------------
@@ -911,7 +2002,51 @@ class CascorServiceAdapter:
             )
         except JuniperCascorClientError as e:
             logger.error(f"Failed to get training status: {e}")
-            return {"is_training": False, "error": str(e)}
+            return {"is_training": False, "error": outbound_error_text(e)}
+
+    # Declaration only, deliberately without a value: it gives mypy the type while leaving
+    # the attribute genuinely absent until first use, which is what makes the lazy
+    # ``AttributeError`` path below work for ``__new__``-created instances. Assigning
+    # ``None`` here would create it and turn the lazy branch into dead code.
+    _status_circuit: CircuitBreaker
+
+    @property
+    def _status_cb(self) -> CircuitBreaker:
+        """Dedicated breaker for the X7 slice-1c status refresher.
+
+        Lazy for the same reason as ``_cb``: instances built via ``__new__`` (tests, and
+        the model-swap path) never run ``__init__``.
+        """
+        try:
+            return self._status_circuit
+        except AttributeError:
+            self._status_circuit = CircuitBreaker(
+                name=BackendConstants.STATUS_CIRCUIT_BREAKER_NAME,
+                failure_threshold=BackendConstants.CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+                recovery_timeout=BackendConstants.CIRCUIT_BREAKER_RECOVERY_TIMEOUT,
+            )
+            return self._status_circuit
+
+    def get_training_status_for_refresh(self) -> Dict[str, Any]:
+        """``get_training_status`` on a **dedicated** breaker, for the 1c refresher.
+
+        Identical call and identical return shape — the only difference is which breaker
+        counts the failures, and that difference is the point. Sharing ``_cb`` would let
+        unrelated traffic (five failing ``get_network_data()`` calls) short-circuit the
+        status poll for 60 s while cascor is perfectly healthy, and the cache would
+        publish INDETERMINATE for a minute on no evidence at all.
+
+        Deliberately a separate method rather than a flag on ``get_training_status``: the
+        existing method has five other callers whose breaker semantics must not change.
+        """
+        try:
+            return self._status_cb.call(
+                lambda: self._unwrap_response(self._client.get_training_status()),
+                fallback=lambda: {"is_training": False, "error": "circuit open"},
+            )
+        except JuniperCascorClientError as e:
+            logger.error(f"Failed to get training status (refresher): {e}")
+            return {"is_training": False, "error": outbound_error_text(e)}
 
     def get_network_data(self) -> Dict[str, Any]:
         try:
@@ -922,6 +2057,32 @@ class CascorServiceAdapter:
         except JuniperCascorClientError as e:
             logger.error(f"Failed to get network data: {e}")
             return {}
+
+    @staticmethod
+    def _is_complete_topology(raw: Any) -> bool:
+        """Return True iff ``raw`` is a structurally-complete topology snapshot.
+
+        A complete payload is one of:
+        - Graph-format: a dict with ``input_units`` AND ``nodes`` already
+          populated (the post-transform shape).
+        - Cascor-format: a dict with ``input_size``/``output_size`` AND a
+          list-shaped ``hidden_units`` (the get_topology() shape; the list may
+          legitimately be empty for an untrained network).
+
+        Returns False for count-only stubs (e.g., a pre-fix cascade_add WS
+        broadcast where ``hidden_units`` was an integer count). Such payloads
+        must not be passed to :meth:`_transform_topology` — the transform
+        coerces ``isinstance(int, list) is False`` into ``num_hidden = 0``,
+        producing a topology that drops every hidden node and every cascade
+        connection.
+        """
+        if not isinstance(raw, dict):
+            return False
+        # Graph-format passthrough: must have nodes too, not just input_units.
+        if "input_units" in raw and isinstance(raw.get("nodes"), list):
+            return True
+        # Cascor-format: hidden_units must be a list (possibly empty).
+        return isinstance(raw.get("hidden_units"), list)
 
     @staticmethod
     def _transform_topology(raw: dict) -> dict:
@@ -1148,16 +2309,27 @@ class CascorServiceAdapter:
     # Snapshot REST delegation
     # ------------------------------------------------------------------
 
-    def save_snapshot(self, path: str, description: str = "") -> None:
+    def save_snapshot(self, path: str, description: str = "") -> Dict[str, Any]:
         """Save current network state via CasCor /v1/snapshots endpoint.
 
         Args:
             path: Local path hint (ignored — CasCor manages storage server-side).
             description: Optional description for the snapshot.
+
+        Returns:
+            CasCor's snapshot-create response (success envelope or bare data
+            dict; ``{}`` if the client returned something non-dict) so the
+            caller can report the SERVER-side snapshot metadata. The local
+            ``path`` never exists in service mode — canopy shares no
+            filesystem with cascor (the deploy stack mounts no snapshot
+            volume into canopy) — so callers must not stat it (wave-1 E2E
+            finding 2026-07-18: doing so turned every successful save into
+            a 500).
         """
         try:
-            self._client.save_snapshot(description=description)
+            resp = self._client.save_snapshot(description=description)
             logger.info("Snapshot saved via CasCor service (description=%r)", description)
+            return resp if isinstance(resp, dict) else {}
         except JuniperCascorClientError as e:
             logger.error("Failed to save snapshot: %s", e)
             raise
@@ -1204,7 +2376,7 @@ class CascorServiceAdapter:
         Raises ``JuniperCascorClientError`` on HTTP failure.
         """
         try:
-            data = self._client._post(f"/v1/snapshots/{snapshot_id}/replay")
+            data = self._client._post(f"/snapshots/{snapshot_id}/replay")
             logger.info("Snapshot replay started via CasCor service (id=%s)", snapshot_id)
             return cast(Dict[str, Any], data)
         except JuniperCascorClientError as e:
@@ -1222,7 +2394,7 @@ class CascorServiceAdapter:
         body: Dict[str, Any] = {"action": action}
         body.update({k: v for k, v in params.items() if v is not None})
         try:
-            data = self._client._post(f"/v1/snapshots/{snapshot_id}/replay/control", json=body)
+            data = self._client._post(f"/snapshots/{snapshot_id}/replay/control", json=body)
             logger.info("Snapshot replay control via CasCor service (id=%s, action=%s)", snapshot_id, action)
             return cast(Dict[str, Any], data)
         except JuniperCascorClientError as e:
@@ -1237,7 +2409,7 @@ class CascorServiceAdapter:
         in the metrics-curve component.
         """
         try:
-            data = self._client._post(f"/v1/snapshots/{snapshot_id}/resume")
+            data = self._client._post(f"/snapshots/{snapshot_id}/resume")
             logger.info("Snapshot resume started via CasCor service (id=%s)", snapshot_id)
             return cast(Dict[str, Any], data)
         except JuniperCascorClientError as e:
@@ -1247,7 +2419,7 @@ class CascorServiceAdapter:
     def retrain_snapshot(self, snapshot_id: str) -> Dict[str, Any]:
         """Reset training history and prepare a fresh run via /v1/snapshots/{id}/retrain."""
         try:
-            data = self._client._post(f"/v1/snapshots/{snapshot_id}/retrain")
+            data = self._client._post(f"/snapshots/{snapshot_id}/retrain")
             logger.info("Snapshot retrain started via CasCor service (id=%s)", snapshot_id)
             return cast(Dict[str, Any], data)
         except JuniperCascorClientError as e:
@@ -1290,7 +2462,7 @@ class CascorServiceAdapter:
         if hidden_unit_index is not None:
             body["hidden_unit_index"] = hidden_unit_index
         try:
-            data = self._client._patch("/v1/network/weights", json=body)
+            data = self._client._patch("/network/weights", json=body)
             logger.info("Weights patched via CasCor service (target=%s, field=%s)", target, field)
             return cast(Dict[str, Any], data)
         except JuniperCascorClientError as e:
@@ -1317,7 +2489,7 @@ class CascorServiceAdapter:
             "position": "tail",
         }
         try:
-            data = self._client._post("/v1/network/hidden-units", json=body)
+            data = self._client._post("/network/hidden-units", json=body)
             logger.info("Hidden unit appended via CasCor service (activation=%s)", activation)
             return cast(Dict[str, Any], data)
         except JuniperCascorClientError as e:
@@ -1333,7 +2505,7 @@ class CascorServiceAdapter:
         purely transport.
         """
         try:
-            data = self._client._delete(f"/v1/network/hidden-units/{idx}")
+            data = self._client._delete(f"/network/hidden-units/{idx}")
             logger.info("Hidden unit removed via CasCor service (idx=%d)", idx)
             return cast(Dict[str, Any], data)
         except JuniperCascorClientError as e:

@@ -46,6 +46,7 @@ import dash_bootstrap_components as dbc
 import requests
 from dash import dcc, html
 
+from frontend.internal_api import internal_api_headers
 from settings import get_settings
 
 from ..base_component import BaseComponent
@@ -390,7 +391,7 @@ class CassandraPanel(BaseComponent):
             try:
                 # Fetch status from API
                 status_url = self._api_url("/api/v1/cassandra/status")
-                status_response = requests.get(status_url, timeout=self.api_timeout)
+                status_response = requests.get(status_url, timeout=self.api_timeout, headers=internal_api_headers())
 
                 if status_response.status_code == 200:
                     status_data = status_response.json()
@@ -449,7 +450,7 @@ class CassandraPanel(BaseComponent):
             # Fetch metrics/schema info
             try:
                 metrics_url = self._api_url("/api/v1/cassandra/metrics")
-                metrics_response = requests.get(metrics_url, timeout=self.api_timeout)
+                metrics_response = requests.get(metrics_url, timeout=self.api_timeout, headers=internal_api_headers())
 
                 if metrics_response.status_code == 200:
                     metrics_data = metrics_response.json()

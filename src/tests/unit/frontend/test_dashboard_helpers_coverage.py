@@ -216,9 +216,10 @@ class TestThemeHandlers:
         manager = DashboardManager({})
 
         # current_dark_mode=False -> toggled to True (dark mode)
-        is_dark, icon = manager._toggle_dark_mode_handler(current_dark_mode=False)
+        is_dark = manager._toggle_dark_mode_handler(current_dark_mode=False)
         assert is_dark is True
-        assert icon == "☀️"  # Sun icon shows when in dark mode (to switch to light)
+        # F-CANOPY-001: the glyph is derived from the flag, not returned by the toggle.
+        assert manager._dark_mode_icon(is_dark) == "☀️"  # Sun shows while dark (click -> light)
 
     def test_toggle_dark_mode_from_dark_to_light(self, reset_singletons):
         """Test toggling from dark mode (True) to light mode (False)."""
@@ -227,9 +228,9 @@ class TestThemeHandlers:
         manager = DashboardManager({})
 
         # current_dark_mode=True -> toggled to False (light mode)
-        is_dark, icon = manager._toggle_dark_mode_handler(current_dark_mode=True)
+        is_dark = manager._toggle_dark_mode_handler(current_dark_mode=True)
         assert is_dark is False
-        assert icon == "🌙"  # Moon icon shows when in light mode (to switch to dark)
+        assert manager._dark_mode_icon(is_dark) == "🌙"  # Moon shows while light (click -> dark)
 
     def test_toggle_dark_mode_repeated_toggles(self, reset_singletons):
         """Test repeated toggles alternate between dark and light."""
@@ -240,7 +241,7 @@ class TestThemeHandlers:
         # Simulate toggling back and forth
         current = False
         for i in range(1, 5):
-            is_dark, icon = manager._toggle_dark_mode_handler(current_dark_mode=current)
+            is_dark = manager._toggle_dark_mode_handler(current_dark_mode=current)
             expected_dark = not current
             assert is_dark == expected_dark, f"Toggle {i}: expected dark={expected_dark}, got {is_dark}"
             current = is_dark
@@ -252,9 +253,9 @@ class TestThemeHandlers:
         manager = DashboardManager({})
 
         # current_dark_mode=None -> not None = True (dark mode)
-        is_dark, icon = manager._toggle_dark_mode_handler(current_dark_mode=None)
+        is_dark = manager._toggle_dark_mode_handler(current_dark_mode=None)
         assert is_dark is True
-        assert icon == "☀️"
+        assert manager._dark_mode_icon(is_dark) == "☀️"
 
     def test_update_theme_state_dark(self, reset_singletons):
         """Test theme state returns 'dark' when is_dark is True."""
@@ -317,8 +318,8 @@ class TestUnifiedStatusBarHandler:
         with manager.app.server.request_context(env):
             result = manager._update_unified_status_bar_handler(n_intervals=1)
 
-        # Returns tuple of 9 elements for unified status bar
-        assert len(result) == 9
+        # Returns tuple of 10 elements for unified status bar
+        assert len(result) == 11  # Stage 2 + F-CANOPY-025: +training-status-store and +live-switch-gate elements
         (
             indicator_style,
             connection_status,
@@ -329,6 +330,8 @@ class TestUnifiedStatusBarHandler:
             phase_style,
             epoch,
             hidden_units,
+            training_status_store,
+            live_switch_disabled,
         ) = result
         assert "color" in indicator_style
         assert status == "Running"
@@ -336,6 +339,10 @@ class TestUnifiedStatusBarHandler:
         assert "ms" in latency_text
         assert epoch == "10"
         assert hidden_units == "3"
+        # Stage 2 (design §13 row 1): the merged store element carries {is_running, phase}.
+        assert set(training_status_store) == {"is_running", "phase"}
+        # F-CANOPY-025: running but no experimental flag -> gate stays disabled.
+        assert live_switch_disabled is True
 
     @patch("requests.get")
     def test_error_response(self, mock_get, reset_singletons):
@@ -359,7 +366,7 @@ class TestUnifiedStatusBarHandler:
             result = manager._update_unified_status_bar_handler(n_intervals=1)
 
         # Returns 9 elements with error indicators
-        assert len(result) == 9
+        assert len(result) == 11  # Stage 2 + F-CANOPY-025: +training-status-store and +live-switch-gate elements
         indicator_style = result[0]
         status = result[3]
         status_style = result[4]
@@ -397,7 +404,9 @@ class TestUnifiedStatusBarHandler:
         from frontend.dashboard_manager import DashboardManager
 
         mock_response = Mock()
-        mock_response.status_code = 503
+        # #340 maps 5xx -> "Backend Error"; use a generic non-200 (404) so this
+        # test still exercises the "Backend Unavailable" label its name implies.
+        mock_response.status_code = 404
 
         mock_get.return_value = mock_response
 
@@ -414,7 +423,7 @@ class TestUnifiedStatusBarHandler:
             result = manager._update_unified_status_bar_handler(n_intervals=1)
 
         connection_status = result[1]
-        assert "Unavailable" in connection_status
+        assert "Backend unavailable" in connection_status
 
 
 class TestTrainingButtonHandlers:
@@ -801,10 +810,10 @@ class TestButtonAppearanceHandler:
             "reset": {"disabled": False, "loading": False, "timestamp": 0},
         }
 
-        result = manager._update_button_appearance_handler(button_states=button_states)
+        result = manager._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
 
         # Returns 10 values: (start_disabled, start_text, pause_disabled, pause_text, ...)
-        assert len(result) == 10
+        assert len(result) == 11  # 5 buttons x 2 (disabled, text) + apply-dataset disabled
         start_disabled, start_text = result[0], result[1]
         assert start_disabled is False
         assert "▶" in start_text
@@ -823,7 +832,7 @@ class TestButtonAppearanceHandler:
             "reset": {"disabled": False, "loading": False, "timestamp": 0},
         }
 
-        result = manager._update_button_appearance_handler(button_states=button_states)
+        result = manager._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
 
         start_disabled, start_text = result[0], result[1]
         assert start_disabled is True

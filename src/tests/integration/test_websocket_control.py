@@ -182,6 +182,31 @@ class TestWebSocketControlIntegration:
                 assert not response["ok"]
                 assert "error" in response
 
+    def test_control_pong_is_noop_not_unknown_command(self, demo_app):
+        """An inbound heartbeat pong must be silently accepted on /ws/control.
+
+        Latent bug: ``/ws/control`` handled inbound ``{"type": "ping"}`` but
+        not ``{"type": "pong"}`` — a pong carries no ``command`` key, so it fell
+        through to the command dispatch and returned ``Unknown command: ``.
+        Dormant today (the server heartbeat only pings ``/ws/training``), but it
+        would misfire if the heartbeat is ever extended to this channel.
+
+        We prove the pong produced no command response by sending it, then a
+        valid ``start``: the next ``ok``-bearing message must be the ``start``
+        success. If the pong had leaked an error, that ``ok: False`` response
+        would arrive first.
+        """
+        from fastapi.testclient import TestClient
+
+        with TestClient(demo_app) as client:
+            with client.websocket_connect("/ws/control") as websocket:
+                self._skip_connection_message(websocket)
+                websocket.send_json({"type": "pong"})  # must be a silent no-op
+                websocket.send_json({"command": "start", "reset": True})
+                response = self._receive_command_response(websocket)
+                assert response["ok"] is True
+                assert response["command"] == "start"
+
 
 class TestWebSocketTrainingIntegration:
     """Integration tests for /ws/training endpoint."""

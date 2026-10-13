@@ -44,12 +44,20 @@ import requests
 from dash import callback_context, dcc, html
 from dash.dependencies import ALL, Input, Output, State
 
+from frontend.internal_api import internal_api_headers
 from settings import get_settings
 
 from ..base_component import BaseComponent
 
 # Default refresh interval in milliseconds
 DEFAULT_REFRESH_INTERVAL_MS = 10000  # 10 seconds
+
+# F-CANOPY-031: the shared corpus holds 27,903+ snapshots under a no-deletion
+# retention ruling. The table renders the newest page only — an unbounded fetch
+# was a 10.4 MB payload the panel died rendering (one html.Tr with two buttons
+# and a four-item dropdown per snapshot), and the status line reports
+# "newest N of TOTAL" so truncation is never silent.
+SNAPSHOT_TABLE_PAGE_SIZE = 200
 
 
 class HDF5SnapshotsPanel(BaseComponent):
@@ -330,6 +338,23 @@ class HDF5SnapshotsPanel(BaseComponent):
                                         id=f"{self.component_id}-history-content",
                                         children="Loading history...",
                                     ),
+                                    # Phase 2 P2-7 (Issue #3): Dataset Swap
+                                    # paired-diff section. Each event from
+                                    # the live dataset_swap event feed
+                                    # (P2-2 storage / follow-up B route /
+                                    # P2-7 store) renders as a card with
+                                    # before-cfg + after-cfg side-by-side,
+                                    # arch_changes badge ribbon, and
+                                    # "Restore from pre-swap snapshot" /
+                                    # "Restore from post-swap snapshot"
+                                    # buttons that reuse the existing
+                                    # snapshot-restore plumbing.
+                                    html.Hr(),
+                                    html.H6("Dataset Swap Events", className="mb-2"),
+                                    html.Div(
+                                        id=f"{self.component_id}-dataset-swaps-content",
+                                        children=html.Div("No dataset swaps recorded yet.", className="text-muted small"),
+                                    ),
                                 ]
                             ),
                             id=f"{self.component_id}-history-collapse",
@@ -389,6 +414,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 f"{self._api_base_url}/api/v1/snapshots",
                 params=params,
                 timeout=self.api_timeout + 3,  # Allow extra time for creation
+                headers=internal_api_headers(),
             )
 
             if resp.status_code == 201:
@@ -418,39 +444,50 @@ class HDF5SnapshotsPanel(BaseComponent):
             n_intervals: Interval count (unused, for callback compatibility)
 
         Returns:
-            Dict with 'snapshots' list and optional 'message'
+            Dict with 'snapshots' list (the newest page), 'total' (pre-slice
+            corpus size) and optional 'message'
         """
         try:
             return dict(self._parse_snapshots_response())
         except requests.exceptions.Timeout:
             self.logger.warning("Snapshots API request timed out")
-            return {"snapshots": [], "message": "Request timed out"}
+            return {"snapshots": [], "total": 0, "message": "Request timed out"}
         except requests.exceptions.ConnectionError:
             self.logger.warning("Cannot connect to snapshots API")
-            return {"snapshots": [], "message": "Service unavailable"}
+            return {"snapshots": [], "total": 0, "message": "Service unavailable"}
         except Exception as e:
             self.logger.warning(f"Failed to fetch snapshots: {e}")
-            return {"snapshots": [], "message": "Snapshot service unavailable"}
+            return {"snapshots": [], "total": 0, "message": "Snapshot service unavailable"}
 
     def _parse_snapshots_response(self):
         """
         Parse snapshots list from backend API.
 
+        F-CANOPY-031: fetch only the newest ``SNAPSHOT_TABLE_PAGE_SIZE``
+        entries (server-side slice) and carry ``total`` through so the table's
+        status line can report the truncation. The timeout gets the same
+        ``+ 3`` headroom the snapshot-create path already uses — the corpus
+        directory scan alone is seconds-scale at 27,903 files, and the old
+        bare ``api_timeout`` (2 s) lost the race to the unbounded listing.
+
         Returns:
-            Dict with 'snapshots' list and optional 'message'
+            Dict with 'snapshots' list, 'total' and optional 'message'
         """
         self.logger.info("Fetching snapshots from API")
         resp = requests.get(
             f"{self._api_base_url}/api/v1/snapshots",
-            timeout=self.api_timeout,
+            params={"limit": SNAPSHOT_TABLE_PAGE_SIZE},
+            timeout=self.api_timeout + 3,
+            headers=internal_api_headers(),
         )
         if resp.status_code != 200:
             self.logger.warning(f"Snapshots API returned status {resp.status_code}")
-            return {"snapshots": [], "message": f"API error {resp.status_code}"}
+            return {"snapshots": [], "total": 0, "message": f"API error {resp.status_code}"}
         data = resp.json()
         snapshots = data.get("snapshots", [])
         message = data.get("message")
-        return {"snapshots": snapshots, "message": message}
+        total = data.get("total", len(snapshots))
+        return {"snapshots": snapshots, "total": total, "message": message}
 
     def _fetch_snapshot_detail_handler(self, snapshot_id: str) -> Dict[str, Any]:
         """
@@ -469,6 +506,7 @@ class HDF5SnapshotsPanel(BaseComponent):
             resp = requests.get(
                 f"{self._api_base_url}/api/v1/snapshots/{snapshot_id}",
                 timeout=self.api_timeout,
+                headers=internal_api_headers(),
             )
             if resp.status_code != 200:
                 self.logger.warning(f"Snapshot detail API returned status {resp.status_code}")
@@ -512,7 +550,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 html.P(self._OP_DESCRIPTIONS.get(operation, ""), style={"fontSize": "0.9rem"}),
                 html.P(
                     "⚠️ Training must be paused or stopped before any snapshot operation.",
-                    style={"color": "#856404", "fontSize": "0.85rem"},
+                    style={"color": "var(--bs-warning-text-emphasis, #856404)", "fontSize": "0.85rem"},
                 ),
             ]
         )
@@ -534,6 +572,7 @@ class HDF5SnapshotsPanel(BaseComponent):
             resp = requests.post(
                 f"{self._api_base_url}/api/v1/snapshots/{snapshot_id}/{operation}",
                 timeout=self.api_timeout + 5,
+                headers=internal_api_headers(),
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -584,6 +623,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 f"{self._api_base_url}/api/v1/snapshots/history",
                 params={"limit": limit},
                 timeout=self.api_timeout,
+                headers=internal_api_headers(),
             )
 
             if resp.status_code != 200:
@@ -602,6 +642,135 @@ class HDF5SnapshotsPanel(BaseComponent):
         except Exception as e:
             self.logger.warning(f"Failed to fetch history: {e}")
             return {"history": [], "message": "History service unavailable"}
+
+    def _compute_swap_snapshot_roles(self, events):
+        """Map snapshot_id → ordered tuple of role labels.
+
+        Used by ``update_snapshots_table`` to inject "Pre-swap" /
+        "Post-swap" badges next to the snapshot name in the table.
+
+        A single snapshot may appear as both pre-swap (one event) and
+        post-swap (a different event) — the badges render in stable
+        order ("Pre-swap" before "Post-swap") so the table looks
+        deterministic across renders.
+
+        Returns a dict ``{snapshot_id: ("Pre-swap",), ...}`` etc. Empty
+        dict when the event list is empty.
+        """
+        roles: Dict[str, set] = {}
+        for ev in events or []:
+            if not isinstance(ev, dict):
+                continue
+            pre_id = ev.get("pre_swap_snapshot_id")
+            post_id = ev.get("post_swap_snapshot_id")
+            if pre_id:
+                roles.setdefault(str(pre_id), set()).add("Pre-swap")
+            if post_id:
+                roles.setdefault(str(post_id), set()).add("Post-swap")
+        # Deterministic role ordering: Pre-swap before Post-swap.
+        return {sid: tuple(r for r in ("Pre-swap", "Post-swap") if r in role_set) for sid, role_set in roles.items()}
+
+    def _render_dataset_swap_diffs_handler(self, store_data=None):
+        """Render the dataset_swap event list as paired-diff cards.
+
+        Each card shows:
+          * Header: timestamp + abbreviated before→after dataset_type.
+          * Body: two columns (before_cfg / after_cfg) side-by-side +
+            arch_changes badge ribbon (input_delta, output_delta,
+            hidden_preserved, abandoned_candidates, snapshot IDs).
+          * Footer: "Restore from pre-swap snapshot" / "Restore from
+            post-swap snapshot" buttons that reuse the existing
+            snapshot-restore plumbing via pattern-matched IDs.
+
+        Returns a list of ``dbc.Card`` components in chronological order.
+        Empty list → "No dataset swaps recorded yet." muted placeholder.
+        """
+        events = []
+        if isinstance(store_data, dict):
+            events = list(store_data.get("events") or [])
+        if not events:
+            return html.Div("No dataset swaps recorded yet.", className="text-muted small")
+
+        def _cfg_block(title, cfg):
+            """Render a single before/after column as a bullet list."""
+            if not cfg:
+                return html.Div([html.Strong(title), html.Div(html.Em("(none)"), className="text-muted small")], className="me-3")
+            rows = [html.Li([html.Strong(f"{k}: "), html.Span(str(v))]) for k, v in cfg.items()]
+            return html.Div([html.Strong(title), html.Ul(rows, className="mb-0 small")], className="me-3")
+
+        cards = []
+        for i, ev in enumerate(events):
+            timestamp = ev.get("timestamp") or "unknown"
+            before_cfg = ev.get("before_cfg") or {}
+            after_cfg = ev.get("after_cfg") or {}
+            arch = ev.get("arch_changes") or {}
+            pre_id = ev.get("pre_swap_snapshot_id")
+            post_id = ev.get("post_swap_snapshot_id")
+            before_type = before_cfg.get("dataset_type") or "?"
+            after_type = after_cfg.get("dataset_type") or "?"
+
+            arch_badges = [
+                dbc.Badge(f"input Δ {arch.get('input_delta', 0):+d}", color="info", className="me-1"),
+                dbc.Badge(f"output Δ {arch.get('output_delta', 0):+d}", color="info", className="me-1"),
+                dbc.Badge(f"{arch.get('hidden_preserved', 0)} hidden preserved", color="secondary", className="me-1"),
+            ]
+            abandoned = arch.get("abandoned_candidate_pool_size", 0)
+            if abandoned:
+                arch_badges.append(dbc.Badge(f"{abandoned} candidates abandoned", color="warning", className="me-1"))
+
+            footer_buttons = []
+            if pre_id:
+                footer_buttons.append(
+                    dbc.Button(
+                        ["Restore from pre-swap snapshot ", html.Code(pre_id, className="small")],
+                        id={"type": f"{self.component_id}-swap-restore-pre-btn", "index": i},
+                        color="secondary",
+                        outline=True,
+                        size="sm",
+                        className="me-2",
+                    )
+                )
+            if post_id:
+                footer_buttons.append(
+                    dbc.Button(
+                        ["Restore from post-swap snapshot ", html.Code(post_id, className="small")],
+                        id={"type": f"{self.component_id}-swap-restore-post-btn", "index": i},
+                        color="secondary",
+                        outline=True,
+                        size="sm",
+                    )
+                )
+
+            card = dbc.Card(
+                [
+                    dbc.CardHeader(
+                        html.Div(
+                            [
+                                html.Code(timestamp, className="small me-2"),
+                                html.Strong(f"{before_type} → {after_type}"),
+                            ]
+                        )
+                    ),
+                    dbc.CardBody(
+                        [
+                            dbc.Row(
+                                [
+                                    dbc.Col(_cfg_block("Before", before_cfg), md=6),
+                                    dbc.Col(_cfg_block("After", after_cfg), md=6),
+                                ],
+                                className="mb-2",
+                            ),
+                            html.Div(arch_badges, className="mb-2"),
+                            html.Div(footer_buttons) if footer_buttons else html.Div(),
+                        ]
+                    ),
+                ],
+                className="mb-3",
+                outline=True,
+                color="light",
+            )
+            cards.append(card)
+        return cards
 
     def _format_size(self, size_bytes: int) -> str:
         """
@@ -699,6 +868,9 @@ class HDF5SnapshotsPanel(BaseComponent):
                 return status_content, current_trigger or 0, name, description
 
         # Callback: Refresh / auto-refresh → update snapshots table
+        # P2-7 (Issue #3): also re-renders on dataset_swap-events-store
+        # changes so newly-recorded swap events get their pre/post-swap
+        # badges painted in.
         @app.callback(
             Output(f"{self.component_id}-table-body", "children"),
             Output(f"{self.component_id}-status", "children"),
@@ -707,13 +879,25 @@ class HDF5SnapshotsPanel(BaseComponent):
             Input(f"{self.component_id}-refresh-interval", "n_intervals"),
             Input(f"{self.component_id}-refresh-button", "n_clicks"),
             Input(f"{self.component_id}-refresh-trigger", "data"),
+            Input("dataset-swap-events-store", "data"),
             prevent_initial_call=False,
         )
-        def update_snapshots_table(n_intervals, n_clicks, refresh_trigger):
+        def update_snapshots_table(n_intervals, n_clicks, refresh_trigger, swap_events_store):
             """Update the snapshots table with current data."""
             result = self._fetch_snapshots_handler(n_intervals)
             snapshots = result.get("snapshots", [])
             message = result.get("message")
+            total = result.get("total", len(snapshots))
+
+            # P2-7: build the snapshot-id → role map from the dataset_swap
+            # events. A snapshot may be tagged "Pre-swap" (matched a
+            # ``pre_swap_snapshot_id``), "Post-swap", or both. The badge
+            # in the row header surfaces this so the user can spot
+            # swap-related snapshots at a glance.
+            swap_event_list = []
+            if isinstance(swap_events_store, dict):
+                swap_event_list = list(swap_events_store.get("events") or [])
+            swap_roles = self._compute_swap_snapshot_roles(swap_event_list)
 
             # Build table rows
             rows: List[html.Tr] = []
@@ -722,6 +906,12 @@ class HDF5SnapshotsPanel(BaseComponent):
                 name = snapshot.get("name") or snapshot_id
                 timestamp = self._format_timestamp(snapshot.get("timestamp", ""))
                 size = self._format_size(snapshot.get("size_bytes", 0))
+                # P2-7 swap-role badges (zero, one, or two per snapshot).
+                role_badges = []
+                for role in swap_roles.get(snapshot_id, ()):
+                    color = "info" if role == "Pre-swap" else "success"
+                    role_badges.append(dbc.Badge(role, color=color, className="ms-1"))
+                name_cell = html.Div([html.Span(name), *role_badges]) if role_badges else name
 
                 # CAN-015e (Phase 6E Sprint B B-5): the per-row "Restore"
                 # button is replaced with a dropdown exposing all four
@@ -739,7 +929,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 rows.append(
                     html.Tr(
                         [
-                            html.Td(name, style={"padding": "10px", "borderBottom": "1px solid var(--border-color, #dee2e6)"}),
+                            html.Td(name_cell, style={"padding": "10px", "borderBottom": "1px solid var(--border-color, #dee2e6)"}),
                             html.Td(timestamp, style={"padding": "10px", "borderBottom": "1px solid var(--border-color, #dee2e6)"}),
                             html.Td(size, style={"padding": "10px", "borderBottom": "1px solid var(--border-color, #dee2e6)"}),
                             html.Td(
@@ -748,6 +938,11 @@ class HDF5SnapshotsPanel(BaseComponent):
                                         dbc.Button(
                                             "View Details",
                                             id={"type": f"{self.component_id}-view-btn", "index": snapshot_id},
+                                            # F-CANOPY-009: match the four op items below -- without an
+                                            # explicit n_clicks=0 the rebuilt button reports None and
+                                            # every 10 s rebuild re-fires select_snapshot with a
+                                            # falsy list.
+                                            n_clicks=0,
                                             size="sm",
                                             color="info",
                                             outline=True,
@@ -797,7 +992,12 @@ class HDF5SnapshotsPanel(BaseComponent):
 
             # Status text
             if snapshots:
-                status_text = f"{len(snapshots)} snapshot(s) found"
+                # F-CANOPY-031: never let truncation be silent — against the
+                # no-deletion corpus the table shows the newest page only.
+                if total > len(snapshots):
+                    status_text = f"Showing newest {len(snapshots)} of {total} snapshot(s)"
+                else:
+                    status_text = f"{len(snapshots)} snapshot(s) found"
                 if message:
                     status_text += f" • {message}"
                 empty_style = {"display": "none"}
@@ -821,23 +1021,29 @@ class HDF5SnapshotsPanel(BaseComponent):
             prevent_initial_call=True,
         )
         def select_snapshot(n_clicks_list, ids):
+            # F-CANOPY-009: the 10 s table rebuild re-fires this callback with a
+            # falsy n_clicks list (before the View Details button carried
+            # n_clicks=0 it arrived as [None]). Every early-out below means
+            # "nothing meaningful triggered me" and must leave the selection
+            # ALONE: returning None here wiped the selected-id store -- and the
+            # detail panel with it -- within one tick of every click.
             """Handle snapshot selection from table."""
             if not n_clicks_list or not any(n_clicks_list):
-                return None
+                return dash.no_update
 
             ctx = callback_context
             if not ctx.triggered:
-                return None
+                return dash.no_update
 
             # Find which button was clicked
             triggered = ctx.triggered[0]
             if not triggered.get("value"):
-                return None
+                return dash.no_update
 
             # Extract the snapshot ID from the triggered button
             prop_id = triggered.get("prop_id", "")
             if not prop_id:
-                return None
+                return dash.no_update
 
             # Parse the pattern-matching ID
             # Format: '{"index":"snapshot_id","type":"component-id-view-btn"}.n_clicks'
@@ -990,17 +1196,23 @@ class HDF5SnapshotsPanel(BaseComponent):
             grows to include the operation so the confirm callback
             knows which endpoint to call.
             """
+            # F-CANOPY-010: the same 10 s rebuild reconstructs the dropdown items
+            # and re-fires this callback with n_clicks == 0. Returning
+            # (False, "", None) from an early-out slammed the OPEN confirmation
+            # modal shut, blanked its body and discarded the pending operation
+            # ~3.6 s after the operator opened it. An early-out must not touch
+            # the modal at all.
             ctx = callback_context
             if not ctx.triggered:
-                return False, "", None
+                return dash.no_update, dash.no_update, dash.no_update
 
             triggered = ctx.triggered[0]
             if not triggered.get("value"):
-                return False, "", None
+                return dash.no_update, dash.no_update, dash.no_update
 
             prop_id = triggered.get("prop_id", "")
             if not prop_id:
-                return False, "", None
+                return dash.no_update, dash.no_update, dash.no_update
 
             import json
 
@@ -1023,7 +1235,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                     operation = id_dict.get("op")
 
             if not snapshot_id or operation not in ("restore", "replay", "resume", "retrain"):
-                return False, "", None
+                return dash.no_update, dash.no_update, dash.no_update
 
             modal_body = self._build_op_confirm_body(snapshot_id, operation)
             return True, modal_body, {"id": snapshot_id, "operation": operation}
@@ -1093,7 +1305,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                         html.Span("✅ ", style={"color": "#28a745"}),
                         html.Span(f"{message}"),
                     ],
-                    style={"color": "#28a745", "padding": "10px", "backgroundColor": "#d4edda", "borderRadius": "5px"},
+                    style={"color": "var(--success-color, #28a745)", "padding": "10px", "backgroundColor": "var(--bs-success-bg-subtle, #d4edda)", "borderRadius": "5px"},
                 )
                 # CAN-015f: hand off to the replay player on a successful
                 # ``replay`` op. The cascor /replay response contains the
@@ -1119,7 +1331,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                     html.Span("❌ ", style={"color": "#dc3545"}),
                     html.Span(f"Failed ({operation}): {error}"),
                 ],
-                style={"color": "#dc3545", "padding": "10px", "backgroundColor": "#f8d7da", "borderRadius": "5px"},
+                style={"color": "var(--danger-color, #dc3545)", "padding": "10px", "backgroundColor": "var(--bs-danger-bg-subtle, #f8d7da)", "borderRadius": "5px"},
             )
             return False, status_content, current_trigger or 0, dash.no_update, dash.no_update
 
@@ -1213,6 +1425,19 @@ class HDF5SnapshotsPanel(BaseComponent):
         self._cb_create_snapshot = create_snapshot
         self._cb_update_snapshots_table = update_snapshots_table
         self._cb_select_snapshot = select_snapshot
+
+        # Phase 2 P2-7 (Issue #3): render dataset_swap events as paired-diff
+        # cards in the History collapse. Listens to the shared
+        # dataset-swap-events-store (populated by DashboardManager's
+        # slow-update-interval polling callback) so the rendering
+        # refreshes whenever new events arrive.
+        @app.callback(
+            Output(f"{self.component_id}-dataset-swaps-content", "children"),
+            Input("dataset-swap-events-store", "data"),
+        )
+        def render_dataset_swap_diffs(store_data):
+            return self._render_dataset_swap_diffs_handler(store_data=store_data)
+
         self._cb_update_detail_panel = update_detail_panel
         self._cb_open_restore_modal = open_snapshot_op_modal
         self._cb_open_snapshot_op_modal = open_snapshot_op_modal
@@ -1220,5 +1445,6 @@ class HDF5SnapshotsPanel(BaseComponent):
         self._cb_confirm_restore = confirm_snapshot_op
         self._cb_confirm_snapshot_op = confirm_snapshot_op
         self._cb_toggle_history = toggle_history
+        self._cb_render_dataset_swap_diffs = render_dataset_swap_diffs
 
         self.logger.debug(f"Callbacks registered for {self.component_id}")

@@ -1,7 +1,7 @@
 # Juniper Canopy API Reference
 
-**Version:** 1.4.0
-**Last Updated:** May 4, 2026
+**Version:** 1.4.3
+**Last Updated:** September 5, 2026
 **Base URL:** `http://127.0.0.1:8050`
 
 ---
@@ -32,7 +32,7 @@ Juniper Canopy provides a RESTful HTTP API and WebSocket channels for real-time 
 - **Data Format:** JSON
 - **Encoding:** UTF-8
 - **CORS:** Enabled for localhost origins
-- **Rate Limiting:** None (currently)
+- **Rate Limiting:** REST limiting is configurable; WebSocket connection caps are enforced
 
 ### External CasCor Normalization (Service Mode)
 
@@ -46,6 +46,56 @@ This preserves dashboard contracts across demo and service backends for:
 
 Primary codepaths: `src/backend/cascor_service_adapter.py`, `src/backend/service_backend.py`, `src/backend/state_sync.py`.
 
+### Recurrence Service Contract (Recurrence Mode)
+
+When `backend_type` is `recurrence`, Canopy talks to the juniper-recurrence service over plain HTTP through its own
+adapter. It does not install `juniper-recurrence-client`, so no package pin can hold a version floor. The adapter is
+written against **juniper-recurrence 0.5.0**, its documented contract floor (`RECURRENCE_SERVICE_CONTRACT_FLOOR`).
+
+- The `POST /v1/train` request carries only parameters the dataset's generator declares, and only what the operator
+  chose. The registry seed is the base. A form value goes into the request only when it differs from what the form
+  showed for that field, and an edited field wins over the seed. The generic `nn_dataset_elements` / `nn_dataset_noise`
+  fields are not sent to a generator that declares no `n_samples` / `noise`; no sequence generator does. This is
+  owner ruling R7's recommended default, applied pending the ruling. The declared parameters are a dated snapshot of
+  juniper-data's own schemas (`dataset_schema.DECLARED_PARAM_DEFAULTS`). The body Start would send can be read first
+  from [`POST /api/recurrence/effective_request`](#post-apirecurrenceeffective_request), and both that preview and
+  the Start log it at INFO.
+- `GET /v1/training/status` reports `idle`, `trained` or `restored`. `restored` is a model loaded from the snapshot
+  that `restored_from` names, and it counts as a model being present exactly as `trained` does. It is newer than the
+  0.5.0 release, which never sends it.
+- Since juniper-recurrence#192 (on recurrence `main`; no release carries it yet) the status also reports `training`,
+  `restoring` and `failed`, and says which operation it describes: `operation_id`, `operation`, `busy_since`,
+  `dataset_id`, `requested_by`, `model_operation_id` and `failure`. The 0.5.0 release sends none of these.
+- Every `POST /v1/train` carries an `X-Request-ID` naming the request (`juniper-canopy-<uuid4 hex>`). The service
+  records it as the operation's `requested_by`, which is how canopy finds its own fit after a timeout (W1.5).
+- A fit whose reply outlives the adapter's 300 s read timeout is **followed, not failed**: the service cannot cancel
+  it. Canopy keeps the fit running (phase `fitting (upstream)`) and reads the status every 5 s, for up to 30 minutes.
+  A read that fails outright is tried again; three failed reads in a row settle the fit as `unknown`.
+  The fit is `trained` only when the status names canopy's request as the operation that produced the model the
+  service holds. `trained` alone, or a model present, may be another caller's, and `restored` is never a fit. It is
+  `failed` when the status reports canopy's operation failed, and otherwise `unknown`:
+  `/api/status` then carries `outcome_unknown: true`, and `completion_reason` says why. A 0.5.0 service, which names
+  no operations, always gives `unknown` after a timeout.
+- A busy 409 names the operation holding the service: its kind, `operation_id`, `busy_since`, `requested_by` and
+  `dataset_id` (see [Upstream Failures](#upstream-failures)). The 0.5.0 string detail reads as it always has.
+- A service is **exclusively owned by one caller at a time**: one lock, one in-memory model, one snapshot
+  directory. Give canopy a recurrence service no experiment suite or other client shares. The service-side runbook is
+  [juniper-recurrence README § One caller per service](https://github.com/pcalnon/juniper-recurrence/blob/main/juniper-recurrence/README.md#one-caller-per-service).
+- Canopy calls neither `/v1/predict` nor `POST /v1/model/snapshots`, so it sends no `expect_operation_id`. The id a
+  fit returned is kept for when it does: `operation_id` on `/api/status`.
+- A refused key (401 or 403) names the two variables that set it, `JUNIPER_CANOPY_RECURRENCE_API_KEY` and
+  `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`. A rate-limited request (429) carries the reply's `Retry-After` wait (see
+  [Upstream Failures](#upstream-failures)).
+- The model version is read from the service, never assumed: the `version` in the `GET /v1/health` body when it has
+  one, else `info.version` from `GET /openapi.json`. The 0.5.0 health body is `{"status": "ok"}`, so the fallback is
+  the path that answers. A failed lookup reads `unknown (version lookup failed)`.
+- Canopy asks for the version at startup when `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL` is set, and again whenever the
+  recurrence model is selected while its backend is live. Both lookups run in the background, so no page, selection
+  or read waits on them. The answer is `version` on [`GET /api/selection`](#get-apiselection) and
+  `POST /api/model/select`, and the sidebar's Active line shows it (`Active: Recurrence (LMU) · version 0.5.0`).
+
+Primary codepaths: `src/backend/recurrence_service_adapter.py`, `src/backend/recurrence_backend.py`, `src/backend/recurrence_request.py`, `src/model_registry.py`.
+
 ### Base URL
 
 **Local Development:**
@@ -57,13 +107,16 @@ http://127.0.0.1:8050
 **Custom Port:**
 
 ```bash
-export CASCOR_SERVER_PORT=8051
+export JUNIPER_CANOPY_SERVER__PORT=8051
 # Base URL: http://127.0.0.1:8051
 ```
 
 ### API Documentation (Interactive)
 
-When server is running, visit:
+When server is running with API-key authentication off -- no API key configured, where an empty or
+whitespace-only key counts as none (see [Authentication](#authentication)) -- visit the URL below. The docs
+switch is the authentication switch itself, so a real key in `CANOPY_API_KEY` or in the file named by
+`CANOPY_API_KEY_FILE` turns the four docs routes off (404):
 
 ```bash
 http://127.0.0.1:8050/docs
@@ -79,18 +132,50 @@ This provides:
 
 ## Authentication
 
-**Current Status:** No authentication required (MVP)
+Authentication is configuration-dependent. The key is read from the file named by `CANOPY_API_KEY_FILE`
+(its contents, whitespace-stripped) whenever that variable names an existing file, and otherwise from
+`CANOPY_API_KEY`:
 
-**Future Plans:** JWT-based authentication (optional)
+- If no key is configured, API-key authentication is disabled for development/demo use.
+- A key that is empty or whitespace-only counts as no key: authentication is disabled exactly as if it were
+  unset, the interactive docs are served, and the dashboard's own requests send no key. Startup logs a WARNING
+  naming which source was blank. This includes a blank file named by `CANOPY_API_KEY_FILE` while
+  `CANOPY_API_KEY` holds a real key, because the file takes precedence. With
+  `JUNIPER_CANOPY_REQUIRE_AUTH=true` a blank key fails the boot exactly as no key does, and the WARNING follows
+  the posture check's CRITICAL, worded for the refused boot.
+- Otherwise keyed callers must send `X-API-Key: <value>`.
+- A key with leading or trailing whitespace, or a line break, is used exactly as set: it is not stripped, and
+  authentication is enabled on it. No HTTP header carries such a key reliably, so startup logs a WARNING. The
+  dashboard's own requests leave off a key their HTTP client refuses to send (one that starts with whitespace
+  or holds a line break), so they are refused, and the refusal never carries the key. A key file is stripped
+  at both ends, so from `CANOPY_API_KEY_FILE` only a line break inside the key can do this, and the WARNING
+  then names `CANOPY_API_KEY_FILE`.
+- A `CANOPY_API_KEY_FILE` that names no existing file is ignored, exactly as if unset, and startup logs a
+  WARNING naming the variable (never the path it holds).
+- A presented `X-API-Key` (or WebSocket key or bearer token) holding a non-ASCII character is an ordinary
+  mismatch, refused as any wrong key is: a 401 over HTTP, and on a WebSocket that path's own close code
+  (4001, or 1008 for a bearer token). It used to raise inside the comparison, a 500 whose error report
+  recorded the configured key.
+- Same-origin browser training controls (`/api/train/*`, `/api/csrf`, `/ws/control`) use the browser path:
+  allowed `Origin` + `canopy_session` cookie + CSRF token when `JUNIPER_CANOPY_BROWSER_CONTROL_AUTH_ENABLED=true`
+  (the default). Keyed callers continue to work.
 
-```yaml
-# conf/app_config.yaml (future)
-security:
-  authentication:
-    enabled: true
-    method: jwt
-    token_expiry_hours: 24
-```
+The browser-control path is not a network perimeter by itself. Canopy now enforces that perimeter at startup:
+`JUNIPER_CANOPY_SERVER__HOST` must be loopback (`127.0.0.0/8`, `::1`, or `localhost`) unless a perimeter
+attestation explicitly declares one is present — `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true` (reachable
+only via a loopback-only host publish) or `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true` (a fronting
+authenticating proxy terminates access before traffic reaches the app).
+
+### Outbound Keys
+
+Canopy sends a key as `X-API-Key` to three upstreams: juniper-cascor (`JUNIPER_CASCOR_API_KEY`, falling back to
+`JUNIPER_DATA_API_KEY`), juniper-data (`JUNIPER_CANOPY_JUNIPER_DATA_API_KEY`, then `JUNIPER_DATA_API_KEY`) and
+the recurrence service (`JUNIPER_CANOPY_RECURRENCE_API_KEY`, then `JUNIPER_RECURRENCE_API_KEY`). Each honours
+its `<NAME>_FILE` form first. A key canopy sends must consist of printable ASCII other than space
+(`0x21`-`0x7E`): a value with leading or trailing whitespace, a line break, a space or a non-ASCII character is
+refused where it is read, because the HTTP clients refuse such a header value and quote it in the error they
+raise. A refused value is treated exactly like an empty one -- the next variable in the order applies, or no
+key is sent -- and startup logs one WARNING naming the variable, never its value or a path.
 
 ---
 
@@ -149,6 +234,14 @@ Location: /dashboard/
 - `training_active` (boolean) - Whether training is in progress
 - `demo_mode` (boolean) - Whether running in demo mode
 - `juniper_data_available` (boolean) - JuniperData dependency status
+- `backend_status` (string, service mode, X7 slice 1c) - Cache class: `ok` / `unreachable` / `indeterminate`. Omitted in demo / recurrence.
+- `backend_status_stale` (boolean, service mode) - `true` when the last OK payload is older than 5 s or the class is not `ok`
+- `backend_status_age_seconds` (number or `null`, service mode) - Seconds since the last OK payload; `null` if none
+
+These three extras are **additive** and appear on `/v1/health` and inside
+`/v1/health/ready` `details` as well. Status codes are unchanged: an upstream outage
+stays `200`. `training_active` remains a `bool`; staleness is reported beside it, not
+smuggled into it. Landed with `#578`.
 
 **Status Codes:**
 
@@ -166,9 +259,50 @@ curl http://127.0.0.1:8050/api/health
 - Load balancer probes
 - Deployment diagnostics
 
-### GET /api/status
+**Deprecation:** Prefer `/v1/health`, `/v1/health/live`, and `/v1/health/ready`.
+`/api/health` and `/health` remain as aliases and log a warning.
 
-**Description:** Get normalized training status and network information
+### GET /v1/health/live
+
+**Description:** Liveness probe. Confirms the process is running. Touches **no**
+backend — this is the X7 canary: if this stalls, the event loop itself is blocked.
+
+**Parameters:** None
+
+**Response Schema:**
+
+```json
+{
+  "status": "alive"
+}
+```
+
+**Status Codes:**
+
+- `200 OK` - Process is running
+
+**Example Request:**
+
+```bash
+curl -s -o /dev/null -w "%{http_code} %{time_total}\n" http://127.0.0.1:8050/v1/health/live
+```
+
+When cascor is unreachable this must still return in milliseconds. See
+[Event-loop I/O discipline (X7)](../AGENTS_REFERENCE.md#event-loop-io-discipline-x7).
+
+Related: `GET /v1/health` (combined status; reaches `backend.is_training_active`) and
+`GET /v1/health/ready` (async dependency probes via `probe_dependency`).
+
+### GET /api/status
+**Description:** Get normalized training status and network information. In **service
+mode**, after `#578`, this is served from the X7 slice-1c status cache — one background
+poll; every tab costs zero upstream calls. Demo and recurrence still return a live
+`backend.get_status()`.
+
+**Description:** Get normalized training status and network information. Reaches
+`backend.get_status()` — a synchronous cascor HTTP call. Slice 1a (`#567`) offloads it
+with `asyncio.to_thread` so a slow upstream cannot stall `/v1/health/live`. This is the
+T-A2 driver route.
 
 **Parameters:** None
 
@@ -213,9 +347,27 @@ curl http://127.0.0.1:8050/api/health
   "output_size": 3,
   "learning_rate": 0.01,
   "max_hidden_units": 10,
-  "max_epochs": 500
+  "max_epochs": 500,
+  "status_class": "ok",
+  "stale": false,
+  "age_seconds": 0.2
 }
 ```
+
+**Cache envelope (service mode, X7 slice 1c, landed with `#578`):**
+
+| Field | Meaning |
+| --- | --- |
+| `status_class` | `ok` / `unreachable` / `indeterminate` — what the cache *concluded*, not the raw payload |
+| `stale` | `true` when the class is not `ok` or the last OK payload is older than 5 s |
+| `age_seconds` | Seconds since the last OK payload, or `null` if none has been seen |
+
+A never-OK body omits `is_training` (C6) and still carries a truthy `error` so a UI that
+has not been taught about `status_class` keeps the PR `#340` "Unreachable" branch. A
+half-dead 200 (dict, no `error`, not cascor-shaped) is classified `unreachable`; handing
+the raw payload to the status bar re-creates that defect as **"Stopped"**.
+
+See [AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
 
 **Field Descriptions:**
 
@@ -235,6 +387,14 @@ curl http://127.0.0.1:8050/api/health
 - `learning_rate` (number, service mode) - Active learning rate
 - `max_hidden_units` (integer, service mode) - Max hidden units setting
 - `max_epochs` (integer, service mode) - Max epochs setting
+- `status_class` (string, service mode) - Cache verdict (`ok` / `unreachable` / `indeterminate`)
+- `stale` (boolean, service mode) - Whether the last OK payload is fresh
+- `age_seconds` (number or `null`, service mode) - Age of the last OK payload
+- `outcome_unknown` (boolean, recurrence mode) - Present and `true` only when a fit's reply timed out and the
+  service's status did not establish its outcome; `failed` and `completed` are then both `false`, and
+  `completion_reason` says why (see [Recurrence Service Contract](#recurrence-service-contract-recurrence-mode))
+- `operation_id` (string, recurrence mode) - The service's id for the fit whose result is shown; absent before a fit
+  and from a service predating operation identity
 
 **Status Codes:**
 
@@ -244,6 +404,8 @@ curl http://127.0.0.1:8050/api/health
 
 - Use `phase` (not `current_phase`) as the canonical phase key.
 - In service mode, this endpoint returns normalized fields from nested CasCor status payloads.
+- After `#578`, service-mode responses are the cache envelope above. Render
+  `status_class`, not the raw payload. Demo / recurrence are unchanged.
 
 ### GET /api/state
 
@@ -872,6 +1034,96 @@ curl http://127.0.0.1:8050/api/statistics
 - `backend` is `"demo"` or `"service"`.
 - Remaining fields mirror `GET /api/status` for the active backend.
 
+### GET /api/selection
+
+**Description:** The read side of the model/dataset selection: the model canopy has recorded, and
+the dataset the live backend holds. `POST /api/model/select` writes the model; this reads it back.
+The dashboard hydrates both selectors from it once, on page load.
+
+**Parameters:** None
+
+**Response Schema:**
+
+```json
+{
+  "nn_model": "recurrence",
+  "backend": "demo",
+  "execution": "continuous",
+  "status": "live",
+  "swapped": false,
+  "selected": true,
+  "dataset": {"value": "multi_sine", "source": "pending", "generator": "multi_sine"}
+}
+```
+
+**Status Codes:**
+
+- `200 OK` - Selection retrieved. A backend whose status cannot be read still answers `200`, with `dataset.source` `"unknown"`.
+
+**Notes:**
+
+- The model fields have exactly the `POST /api/model/select` response's shape. `swapped` is always
+  `false` (a read swaps nothing). `selected` is `false` until the first `POST /api/model/select`,
+  and `nn_model` is then the model the boot backend serves.
+- `version` (optional, both routes) is the version the model's service last reported, for example `"0.5.0"`, or
+  `"unknown (version lookup failed)"` when it was asked and did not say. It is absent for a model served in-process
+  and before any service has answered. Reading it never calls the service; see
+  [Recurrence Service Contract](#recurrence-service-contract-recurrence-mode).
+- `dataset.source` is the field to branch on:
+  - `"pending"` — a dataset staged for the next start (it wins, because Start consumes it);
+  - `"loaded"` — the dataset the backend holds;
+  - `"none"` — the backend holds nothing;
+  - `"unknown"` — the backend does not report it (a juniper-cascor that predates its `current_dataset` status field).
+- `dataset.value` is canopy's dataset-type value (`"spirals"`, not juniper-data's `"spiral"`). It is
+  `null` when the backend holds something canopy cannot name: an unseeded generator (`generator`
+  then names it), or raw inline data.
+
+### POST /api/recurrence/effective_request
+
+**Description:** The exact `POST /v1/train` body the next recurrence Start would send. Read-only:
+nothing is staged, consumed or started. The dashboard's "Effective request (next Start)" panel above
+the Start button shows it for a one-shot model.
+
+**Body (optional):** The one-shot Start body, as `POST /api/train/start` takes it
+(`{"dataset": {"generator": ..., "params": {...}}, "d": ..., "theta": ..., "ridge": ...}`). It is
+resolved exactly as Start resolves it, so a dataset staged with Apply wins over it.
+
+**Response Schema:**
+
+```json
+{
+  "ok": true,
+  "source": "staged",
+  "request": {
+    "dataset": {
+      "split": "train",
+      "generator": "equities_seq",
+      "params": {"symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"], "regression_target": "next_close", "fundamentals_fill": "drop"}
+    }
+  },
+  "not_forwarded": ["nn_dataset_elements"],
+  "edited": ["regression_target"],
+  "declared_params_source": "juniper-data 462da218 (main, 2026-10-08); identical at v0.16.0",
+  "fit_in_progress": false
+}
+```
+
+**Status Codes:**
+
+- `200 OK` - Preview computed. `ok` is `false`, `request` is `null` and `error` says why when there is no dataset reference to send.
+- `409 Conflict` - Start would be refused for the selection, or the active backend is not the recurrence backend.
+
+**Notes:**
+
+- `source` is `"staged"` (a dataset applied with Apply) or `"start_body"` (the dropdown value and its registry defaults).
+- `request` is the JSON body. Request headers are not part of it: the API key, and the per-fit `X-Request-ID` where
+  the adapter sends one, are added when Start runs.
+- `edited` names the form fields sent because they differ from what the form showed. `not_forwarded` names staged
+  keys the request does not carry: a parameter the generator does not declare, or a generic field held to the
+  registry default.
+- The preview and the Start each log the body at INFO (`juniper_canopy.backend.recurrence_request`), with sorted
+  keys, so the two lines compare equal as text.
+
 ## Remote Worker Endpoints
 
 These endpoints manage distributed training via the RemoteWorkerClient.
@@ -1081,9 +1333,24 @@ Most WebSocket messages use this shape:
 
 **Notes:**
 
-- `/ws/training` sends an initial `initial_status` message before steady-state messages.
+- `/ws/training` unicasts `connection_established`, then `initial_status`, then a `state` snapshot, in that order, on connect. Broadcast frames are not ordered against that sequence: the socket joins the broadcast set before `initial_status` is fetched, so a `metrics` or `state` broadcast can arrive ahead of it. Treat `state` as latest-wins, as the dashboard does, rather than assuming `initial_status` is the first data frame.
 - Some control-channel messages may omit `timestamp`.
 - Runtime dashboard updates consume `metrics`, `state`, `topology`, and `event` message types.
+
+### Connection Admission and Limits
+
+All WebSocket endpoints (`/ws/training`, `/ws/control`, and the legacy `/ws`) share the same admission policy:
+
+| Gate | Setting | Default | Failure |
+| ---- | ------- | ------- | ------- |
+| API key / browser auth | `CANOPY_API_KEY`, `JUNIPER_CANOPY_BROWSER_CONTROL_AUTH_ENABLED` | API key unset, browser auth on | Close `4001` for missing/invalid keyed auth where required. |
+| Origin allowlist | `JUNIPER_CANOPY_WEBSOCKET__ALLOWED_ORIGINS` | localhost origins | Close `4003`; `/ws/control` uses opaque reason `Policy violation`. |
+| Global connection cap | `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS` | `50` | Close `1013` when the stack-wide N+1th socket connects. |
+| Per-IP cap | `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS_PER_IP` | `5` | Close `1013`; DoS dampening only, and inert behind NAT where clients share one gateway IP. |
+| Per-session cap | `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS_PER_SESSION` | `5` | Close `1013`; keyed on the anonymous `canopy_session` cookie for best-effort fairness behind NAT. |
+
+Cookieless first connections are exempt from the per-session cap and are backstopped by the global cap.
+These limits are availability controls, not authentication.
 
 ### WS /ws/training
 
@@ -1262,7 +1529,7 @@ ws://127.0.0.1:8050/ws/control
 }
 ```
 
-**Supported Commands:** `start`, `stop`, `pause`, `resume`, `reset`
+**Supported Commands:** `start`, `stop`, `pause`, `resume`, `reset`, `set_params`
 
 ## Data Models
 
@@ -1399,12 +1666,59 @@ interface TrainingState {
 }
 ```
 
+### Upstream Failures
+
+When a call canopy makes to juniper-cascor or the recurrence service fails, what a caller reads -- an `error`
+or `detail` field, a control acknowledgement on the WebSocket, the `/api/status` envelope's `error`,
+`/api/stream_health`'s `last_disconnect_reason`, a failed recurrence fit's `completion_reason` -- is:
+
+- the upstream's own answer, when it replied with an HTTP error status (for example cascor's 409
+  `Training data not provided`), or
+- the exception's type name alone (for example `JuniperCascorConnectionError`) for anything else: a refused
+  header value, an unreachable or timed-out upstream, a malformed reply.
+
+When the recurrence service refuses a request (a 4xx), its answer ends with the reply's own `detail`, flattened to
+one line and bounded to 300 characters, for example
+`recurrence service error 422 on POST /v1/train: invalid dataset: X_train has non-finite values (NaN/Inf)`.
+A validation-error list is rendered as `loc -> msg` pairs, separated by a semicolon and a space, without the
+`input` each item echoes. A 5xx answer carries no `detail`: there the service relays its own upstream's exception
+text (`data fetch failed: …`), which can quote that service's juniper-data key.
+
+Two refusals say what to do next. A refused key (401 or 403) names the variables that set it:
+
+`recurrence service rejected the request (401 on POST /v1/train) — set JUNIPER_CANOPY_RECURRENCE_API_KEY or JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE to a key the service accepts: Invalid API key.`
+
+A rate-limited request (429) carries the reply's `Retry-After` wait before its `detail`:
+
+`recurrence service error 429 on POST /v1/train — retry after 30 s: Rate limit exceeded. Try again in 30 seconds.`
+
+A `Retry-After` given as an HTTP-date is shown as sent, and a 429 without the header keeps the plain wording.
+
+A busy 409 names the operation holding the service, after what to do about it. The holder's part is bounded like a
+`detail`, and each field it relays to 64 characters (`requested_by` is whatever header another caller sent):
+
+`recurrence training already in progress (POST /v1/train) — retry when it ends (a fit cannot be cancelled), or give canopy a service of its own: a training run is already in progress (train operation 0f1e2d3c4b5a69788796a5b4c3d2e1f0 since 2026-10-08T17:44:00.123Z, requested by cli-suite-e-h-cell-7, dataset equities_seq-5d0c1f)`
+
+A fit whose reply timed out and that then failed on the service reads as its own error would have, and says how it
+was learned. Only a 4xx `detail` is appended, by the same rule as above:
+
+`recurrence service error 422 on POST /v1/train, reported by GET /v1/training/status after the request timed out: invalid dataset: X_train has non-finite values (NaN/Inf)`
+
+When canopy cannot establish the outcome, `completion_reason` starts with `unknown (…)`. The cases are
+`upstream unreachable`, `upstream status unreadable`, `another operation since`, `no operation on record`,
+`outcome not attributable`, `no operation identity`, `still running upstream` and `no longer followed`.
+
+The transport text of such a failure -- URLs, socket errors, and a header value a client refused to send --
+goes to canopy's logs only.
+
 ### WebSocket Error Handling
 
 **Connection Errors:**
 
 - Network disconnection → Client receives `onclose` event
 - Server shutdown → `server_shutdown` message sent before close
+- WebSocket admission cap exceeded → close code `1013`
+- Origin/auth policy rejection → close code `4001`, `4003`, or `1008` depending on the failed gate
 
 **Command Errors:**
 
@@ -1426,19 +1740,14 @@ interface TrainingState {
 
 ## Rate Limiting
 
-**Current Status:** No rate limiting (MVP)
+REST rate limiting is available but disabled by default (`JUNIPER_CANOPY_RATE_LIMIT_ENABLED=false`).
+When enabled, requests are counted by API key or source IP. Canopy's own server-side dashboard self-calls
+carry an internal per-process header and are exempt so polling does not drain the user's bucket.
 
-**Future Plans:**
+WebSocket availability limits are always enforced by `WebSocketManager` as described in
+[Connection Admission and Limits](#connection-admission-and-limits).
 
-```yaml
-security:
-  rate_limiting:
-    enabled: true
-    requests_per_minute: 100
-    burst_size: 10
-```
-
-**Response Headers (Future):**
+**Response Headers:**
 
 ```bash
 X-RateLimit-Limit: 100

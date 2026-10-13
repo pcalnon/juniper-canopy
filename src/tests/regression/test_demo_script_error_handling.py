@@ -175,3 +175,65 @@ class TestDemoScriptErrorHandling:
         has_else_for_missing = bool(re.search(r"else", section))
         has_missing_file_error = bool(re.search(r"(not found|missing|does not exist).*requirements", section, re.IGNORECASE) or re.search(r"requirements.*(not found|missing|does not exist)", section, re.IGNORECASE))
         assert has_else_for_missing and has_missing_file_error, "The dependency section must handle a missing requirements.txt " "with an error message, not silently skip it."
+
+
+# Pattern matching a hard-coded conda-activate of any literal JuniperCanopy* env
+# name (the bare unversioned "JuniperCanopy", which does not exist, or a pinned
+# "JuniperCanopy1" that re-drifts on the next versioned rebuild). The fix replaces
+# these with activation of a dynamically-resolved variable.
+_HARDCODED_ACTIVATE = re.compile(r"""conda\s+activate\s+["']?JuniperCanopy""")
+
+# Pattern matching activation of a shell variable (the dynamic-resolution fix),
+# e.g. ``conda activate "${CANOPY_ENV_NAME}"``.
+_DYNAMIC_ACTIVATE = re.compile(r"""conda\s+activate\s+["']?\$\{?[A-Za-z_]""")
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestDemoScriptEnvResolution:
+    """Regression tests for the demo script's conda-environment resolution.
+
+    The canopy conda env name is versioned (AGENTS.md): rebuilds increment the
+    suffix (JuniperCanopy1, JuniperCanopy2, ...) and rename the old env
+    ``*-DEPRECATED``.  The launcher previously hard-coded ``conda activate
+    JuniperCanopy`` -- an env that does not exist -- so on-host ``./demo`` died
+    at activation.  These guards assert the launcher resolves the live env
+    dynamically and never reintroduces a hard-coded name.
+    """
+
+    def test_no_hardcoded_canopy_env_activation(self):
+        """EV-1: The launcher must not ``conda activate`` a hard-coded JuniperCanopy* literal.
+
+        This is the core regression: it fails on the original
+        ``conda activate JuniperCanopy`` (and on any pinned ``JuniperCanopy1``)
+        and passes only once activation targets a resolved variable.
+        """
+        script = _read_demo_script()
+        match = _HARDCODED_ACTIVATE.search(script)
+        assert match is None, "The demo launcher must not 'conda activate' a hard-coded JuniperCanopy* " f"env name (found: {match.group(0)!r}). The env name is versioned and " "must be resolved dynamically; activate a variable such as " "'conda activate \"${CANOPY_ENV_NAME}\"'."
+
+    def test_activation_uses_resolved_variable(self):
+        """EV-2: Activation must target a dynamically-resolved shell variable."""
+        script = _read_demo_script()
+        assert _DYNAMIC_ACTIVATE.search(script) is not None, "The demo launcher must activate a resolved variable " "(e.g. 'conda activate \"${CANOPY_ENV_NAME}\"'), not a literal env name."
+
+    def test_resolver_discovers_via_conda_env_list(self):
+        """EV-3: The launcher must discover the env from ``conda env list``."""
+        script = _read_demo_script()
+        assert "conda env list" in script, "The launcher must enumerate environments via 'conda env list' to " "discover the live versioned env, rather than assuming a fixed name."
+
+    def test_resolver_excludes_deprecated_envs(self):
+        """EV-4: Resolution must exclude ``*-DEPRECATED`` environments."""
+        script = _read_demo_script()
+        assert "-DEPRECATED" in script, "The env resolver must exclude '*-DEPRECATED' environments so a stale " "deprecated env is never activated."
+
+    def test_unresolved_env_is_fatal(self):
+        """EV-5: A failed resolution must abort the launcher (non-zero), not continue.
+
+        The resolver returns non-zero on zero/ambiguous matches and the call
+        site guards it with ``|| exit`` so the script never proceeds to launch
+        against a missing or ambiguous environment.
+        """
+        script = _read_demo_script()
+        guards_with_exit = bool(re.search(r"resolve_canopy_env\s*\|\|\s*exit", script) or re.search(r"resolve_canopy_env[\s\S]{0,400}?\breturn\s+1\b", script))
+        assert guards_with_exit, "A failed env resolution must abort the launcher (e.g. " "'resolve_canopy_env || exit 1'), not silently continue."

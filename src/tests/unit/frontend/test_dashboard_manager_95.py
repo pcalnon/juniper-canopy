@@ -66,11 +66,11 @@ class TestInitParamsFromBackendNon200:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(1, None)
-            # 28-tuple after canopy#204/205/206 added output_epochs,
+            # 29-tuple after canopy#204/205/206 added output_epochs (+ the D-2 dropdown),
             # optimizer_type, and activation_function to the
             # init-from-backend handler. Mirror NUM_OUTPUTS in
             # dashboard_manager._init_params_from_backend_handler.
-            assert result == (dash.no_update,) * 28
+            assert result == (dash.no_update,) * 29
 
     def test_init_params_from_backend_404_status(self, dashboard_manager, mocker):
         """Test init_params_from_backend returns no_update on 404 status."""
@@ -80,7 +80,7 @@ class TestInitParamsFromBackendNon200:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(1, None)
-            assert result == (dash.no_update,) * 28
+            assert result == (dash.no_update,) * 29
 
 
 class TestTrainingButtonsDebounce:
@@ -291,14 +291,12 @@ class TestCallbackWrappersDirectExecution:
 class TestCallbackHandlerReturns:
     """Test callback handler direct returns for complete coverage."""
 
-    def test_toggle_dark_mode_handler_returns_tuple(self, dashboard_manager):
-        """Test toggle dark mode handler returns expected tuple."""
+    def test_toggle_dark_mode_handler_returns_flag_only(self, dashboard_manager):
+        """The toggle owns only the flag; the glyph is derived (F-CANOPY-001)."""
         result = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=False)
-        assert isinstance(result, tuple)
-        assert len(result) == 2
-        is_dark, icon = result
-        assert is_dark is True
-        assert icon == "☀️"
+        assert result is True
+        assert not isinstance(result, tuple), "the glyph must not ride the toggle's return — it is written from the store"
+        assert dashboard_manager._dark_mode_icon(result) == "☀️"
 
     def test_update_theme_state_handler_returns_string(self, dashboard_manager):
         """Test update theme state handler returns string."""
@@ -333,7 +331,7 @@ class TestCallbackHandlerReturns:
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_unified_status_bar_handler(n_intervals=1)
             assert isinstance(result, tuple)
-            assert len(result) == 9
+            assert len(result) == 11  # Stage 2 + F-CANOPY-025: +training-status-store and +live-switch-gate elements
 
     def test_update_network_info_handler_returns_div(self, dashboard_manager, mocker):
         """Test network info handler returns html.Div."""
@@ -428,8 +426,8 @@ class TestButtonAppearanceHandler:
             "resume": {"disabled": True, "loading": True, "timestamp": 100},
             "reset": {"disabled": True, "loading": True, "timestamp": 100},
         }
-        result = dashboard_manager._update_button_appearance_handler(button_states=button_states)
-        assert len(result) == 10
+        result = dashboard_manager._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
+        assert len(result) == 11  # 5 buttons x 2 (disabled, text) + apply-dataset disabled
         assert "⏳" in result[1]
         assert "⏳" in result[3]
         assert "⏳" in result[5]
@@ -445,7 +443,7 @@ class TestButtonAppearanceHandler:
             "resume": {"disabled": True, "loading": True, "timestamp": 100},
             "reset": {"disabled": False, "loading": False, "timestamp": 0},
         }
-        result = dashboard_manager._update_button_appearance_handler(button_states=button_states)
+        result = dashboard_manager._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
         assert result[0] is True
         assert "⏳" in result[1]
         assert result[2] is False
@@ -510,7 +508,7 @@ class TestInitParamsFromBackendHandler:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=None)
-            # Returns 28-tuple: (nn_max_iter, nn_max_epochs, nn_lr, nn_max_hu, ...)
+            # Returns 29-tuple (D-2 dropdown at 27, applied dict at 28): (nn_max_iter, nn_max_epochs, nn_lr, nn_max_hu, ...)
             # — output_epochs, optimizer_type, activation_function added by
             # canopy#204/205/206. The applied-params dict is the LAST
             # element (index 27 since canopy#206).
@@ -519,17 +517,25 @@ class TestInitParamsFromBackendHandler:
             assert result[1] == 1000000  # default nn_max_total_epochs (TrainingConstants.DEFAULT_TRAINING_EPOCHS)
             assert result[7] == 0.001  # default nn_growth_convergence_threshold
             assert result[9] == 1.5  # nn_spiral_rotations default
-            assert result[27]["nn_learning_rate"] == 0.01
+            assert result[28]["nn_learning_rate"] == 0.01
 
 
 class TestApplyParametersHandler:
     """Test apply parameters handler variations."""
 
     def test_apply_parameters_with_none_values(self, dashboard_manager, mocker):
-        """Test apply parameters with None values uses defaults."""
+        """None numeric States refuse the apply — they do NOT become defaults.
+
+        This test previously asserted ``result["nn_learning_rate"] == 0.01``
+        for an all-None call, codifying what turned out to be F-CANOPY-017: a
+        numeric input that fails HTML5 validity hands Dash ``None``, and
+        substituting ``DEFAULT_LEARNING_RATE`` for it silently overwrote the
+        operator's live backend value (observed live: 0.0789 → typed 0.0733 →
+        applied 0.01). The handler now refuses and names the fields instead.
+        """
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mocker.patch("requests.post", return_value=mock_response)
+        mock_post = mocker.patch("requests.post", return_value=mock_response)
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result, msg = dashboard_manager._apply_parameters_handler(
@@ -559,11 +565,10 @@ class TestApplyParametersHandler:
                 None,
                 None,
             )
-            assert result["nn_learning_rate"] == 0.01
-            assert result["nn_max_hidden_units"] == 1000
-            assert result["nn_max_total_epochs"] == 1000000
-            assert result["nn_multi_node_layers"] is False
-            assert result["nn_growth_convergence_threshold"] == 0.001
+            assert result is dash.no_update, "an all-None apply must not write the applied-params store"
+            assert mock_post.call_count == 0, "an all-None apply must not POST /api/set_params"
+            assert "Nothing applied" in msg, msg
+            assert "Learning Rate" in msg, msg
 
 
 class TestInitParamsAlreadyInitialized:
@@ -573,7 +578,7 @@ class TestInitParamsAlreadyInitialized:
         """Test init params returns no_update when applied-params-store already has data."""
         current_applied = {"nn_learning_rate": 0.05}
         result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=current_applied)
-        assert result == (dash.no_update,) * 28
+        assert result == (dash.no_update,) * 29
 
 
 class TestTrackParamChangesEdgeCases:
@@ -760,7 +765,7 @@ class TestAdditionalHandlerCases:
 
             with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
                 result = dashboard_manager._update_unified_status_bar_handler(n_intervals=1)
-                assert len(result) == 9
+                assert len(result) == 11  # Stage 2 + F-CANOPY-025: +training-status-store and +live-switch-gate elements
 
     def test_network_info_with_all_connection_states(self, dashboard_manager, mocker):
         """Test network info handler with various connection states."""

@@ -12,10 +12,13 @@
 #####################################################################
 """Decode and apply replay V2 weight payloads for canopy rendering.
 
-The cascor backend's g-3 emitter produces sample-boundary
-``epoch_end`` events with a base64-encoded weight payload (see
-``juniper-cascor/notes/development/SNAPSHOT_SCHEMA_V2.md``). This
-module:
+In the CAN-015g design, the cascor backend's g-3 replay emitter
+attaches a base64-encoded weight payload to sample-boundary
+``epoch_end`` events (see
+``juniper-cascor/notes/development/SNAPSHOT_SCHEMA_V2.md``). None
+does today: cascor's ``_ReplaySession._emit_frame`` sets no weights,
+and canopy's metrics relay would drop the key if it did
+(F-CANOPY-057). So this module has no live input yet. It:
 
 - Decodes the base64 envelopes into numpy arrays.
 - Implements a pure-numpy cascade-correlation forward pass so

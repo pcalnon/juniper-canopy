@@ -39,10 +39,14 @@ from typing import Any, Dict
 import dash_bootstrap_components as dbc
 from dash import html
 
+# OBS-1 (canopy E2E arc): the version is resolved ONCE from the installed
+# package metadata in canopy_constants -- the same source /v1/health reports.
+# This module used to carry its own "2.2.0" literal and rendered it while
+# /v1/health served the real installed version.
+from canopy_constants import APP_VERSION
+
 from ..base_component import BaseComponent
 
-# Version information - should match pyproject.toml
-APP_VERSION = "2.2.0"
 APP_NAME = "Juniper Canopy"
 COPYRIGHT_YEAR = "2024-2026"
 
@@ -89,7 +93,7 @@ class AboutPanel(BaseComponent):
                     [
                         html.H3(
                             f"About {self.app_name}",
-                            style={"color": "#2c3e50", "marginBottom": "20px"},
+                            style={"color": "var(--header-color)", "marginBottom": "20px"},
                         ),
                         dbc.Badge(
                             f"Version {self.version}",
@@ -130,11 +134,11 @@ class AboutPanel(BaseComponent):
                                 ),
                                 html.P(
                                     f"Copyright © {COPYRIGHT_YEAR} Paul Calnon",
-                                    style={"color": "#6c757d"},
+                                    style={"color": "var(--text-muted)"},
                                 ),
                                 html.P(
                                     "Permission is hereby granted, free of charge, to any person obtaining a copy " "of this software and associated documentation files, to deal in the Software " "without restriction, including without limitation the rights to use, copy, " "modify, merge, publish, distribute, sublicense, and/or sell copies of the " "Software.",
-                                    style={"fontSize": "12px", "color": "#6c757d", "fontStyle": "italic"},
+                                    style={"fontSize": "12px", "color": "var(--text-muted)", "fontStyle": "italic"},
                                 ),
                             ]
                         ),

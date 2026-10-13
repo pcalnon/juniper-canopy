@@ -21,8 +21,8 @@
 
 The demo script automatically:
 
-- Activates the JuniperPython conda environment
-- Sets `CASCOR_DEMO_MODE=1`
+- Activates the live `JuniperCanopy*` conda environment (resolved automatically — the name is versioned, `JuniperCanopy1` today)
+- Sets `JUNIPER_CANOPY_DEMO_MODE=1`
 - Launches the application with simulated training
 
 ## Access the Dashboard
@@ -55,14 +55,14 @@ Demo mode simulates a realistic CasCor training run:
 - Spiral dataset (200 samples, 2 features, 2 classes)
 - Exponential decay loss curve
 - Auto-cascade: New hidden unit every 30 epochs (max 8 units)
-- Training and validation metrics updated every 100ms
+- Training and validation metrics updated once per simulated epoch (1 s)
 - WebSocket-based real-time updates (<100ms latency)
 
 ## Demo vs Production
 
 | Aspect       | Demo Mode                  | Production Mode              |
 | ------------ | -------------------------- | ---------------------------- |
-| **Backend**  | Simulated in Python        | Real CasCor C++ prototype    |
+| **Backend**  | Simulated in Python        | juniper-cascor service (Python) |
 | **Dataset**  | Fixed spiral (200 samples) | Configurable datasets        |
 | **Training** | Deterministic curves       | Real network training        |
 | **Launch**   | `./demo`                   | `cd src && python main.py`   |
@@ -93,7 +93,7 @@ Press `Ctrl+C` in the terminal to stop cleanly. The demo mode uses thread-safe E
 **Solution:** Set custom port:
 
 ```bash
-export CASCOR_SERVER_PORT=8051
+export JUNIPER_CANOPY_SERVER__PORT=8051
 ./demo
 ```
 

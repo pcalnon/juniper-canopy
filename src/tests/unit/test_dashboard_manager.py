@@ -15,12 +15,14 @@
 
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 # Add src to path
 src_dir = Path(__file__).parents[2]
 sys.path.insert(0, str(src_dir))
 
 import pytest  # noqa: E402
+import requests  # noqa: E402
 
 from frontend.dashboard_manager import DashboardManager  # noqa: E402
 
@@ -105,37 +107,82 @@ class TestDashboardManagerComponents:
         # for the panel to be useful at runtime.
         assert "metrics-store" in body, "MetricsPanel inner state element missing from rendered layout"
 
-    @pytest.mark.skip(reason="Method _create_network_visualizer not exposed as public API")
-    def test_create_network_visualizer(self, dashboard):
-        """Should create network visualizer component."""
-        assert hasattr(dashboard, "_create_network_visualizer"), "DashboardManager should have _create_network_visualizer method"
-        viz = dashboard._create_network_visualizer()
-        assert viz is not None
+    def test_network_visualizer_component_instantiated(self, dashboard):
+        """``DashboardManager.network_visualizer`` must be a ``NetworkVisualizer``.
 
-    @pytest.mark.skip(reason="Method _create_decision_boundary not exposed as public API")
-    def test_create_decision_boundary(self, dashboard):
-        """Should create decision boundary component."""
-        assert hasattr(dashboard, "_create_decision_boundary"), "DashboardManager should have _create_decision_boundary method"
-        boundary = dashboard._create_decision_boundary()
-        assert boundary is not None
+        Black-box replacement for the historically-skipped
+        ``test_create_network_visualizer`` (asserted a
+        ``_create_network_visualizer`` method that does not exist).
+        ``_initialize_components()`` instantiates ``NetworkVisualizer``
+        directly and assigns to ``self.network_visualizer`` — that
+        attribute is the actual observable seam (callbacks register
+        against it; layout embeds its ``get_layout()``).
+        """
+        from frontend.components.network_visualizer import NetworkVisualizer
 
-    @pytest.mark.skip(reason="Method _create_dataset_plotter not exposed as public API")
-    def test_create_dataset_plotter(self, dashboard):
-        """Should create dataset plotter component."""
-        assert hasattr(dashboard, "_create_dataset_plotter"), "DashboardManager should have _create_dataset_plotter method"
-        plotter = dashboard._create_dataset_plotter()
-        assert plotter is not None
+        assert hasattr(dashboard, "network_visualizer"), "DashboardManager must expose network_visualizer attribute"
+        assert isinstance(dashboard.network_visualizer, NetworkVisualizer)
+        # The component's id is the layout attachment point — any callback
+        # writing into it (topology updates, graph re-renders) addresses
+        # it by this id, so the rendered layout JSON must list it.
+        client = dashboard.app.server.test_client()
+        body = client.get("/_dash-layout").get_data(as_text=True)
+        assert "network-visualizer" in body, "NetworkVisualizer root id missing from rendered layout"
+
+    def test_decision_boundary_component_instantiated(self, dashboard):
+        """``DashboardManager.decision_boundary`` must be a ``DecisionBoundary``.
+
+        Black-box replacement for the historically-skipped
+        ``test_create_decision_boundary``. ``_initialize_components()``
+        wires ``DecisionBoundary`` at ``component_id="decision-boundary"``.
+        """
+        from frontend.components.decision_boundary import DecisionBoundary
+
+        assert hasattr(dashboard, "decision_boundary"), "DashboardManager must expose decision_boundary attribute"
+        assert isinstance(dashboard.decision_boundary, DecisionBoundary)
+        client = dashboard.app.server.test_client()
+        body = client.get("/_dash-layout").get_data(as_text=True)
+        assert "decision-boundary" in body, "DecisionBoundary root id missing from rendered layout"
+
+    def test_dataset_plotter_component_instantiated(self, dashboard):
+        """``DashboardManager.dataset_plotter`` must be a ``DatasetPlotter``.
+
+        Black-box replacement for the historically-skipped
+        ``test_create_dataset_plotter``. ``_initialize_components()``
+        wires ``DatasetPlotter`` at ``component_id="dataset-plotter"``.
+        """
+        from frontend.components.dataset_plotter import DatasetPlotter
+
+        assert hasattr(dashboard, "dataset_plotter"), "DashboardManager must expose dataset_plotter attribute"
+        assert isinstance(dashboard.dataset_plotter, DatasetPlotter)
+        client = dashboard.app.server.test_client()
+        body = client.get("/_dash-layout").get_data(as_text=True)
+        assert "dataset-plotter" in body, "DatasetPlotter root id missing from rendered layout"
 
 
 class TestDashboardManagerLayout:
     """Test layout creation."""
 
-    @pytest.mark.skip(reason="Method _create_layout not exposed as public API; layout is set up via _setup_layout")
-    def test_create_layout(self, dashboard):
-        """Should create layout."""
-        assert hasattr(dashboard, "_create_layout"), "DashboardManager should have _create_layout method"
-        layout = dashboard._create_layout()
-        assert layout is not None
+    def test_setup_layout_assigns_app_layout(self, dashboard):
+        """``_setup_layout`` must have populated ``app.layout``.
+
+        Black-box replacement for the historically-skipped
+        ``test_create_layout`` (asserted a ``_create_layout`` method
+        that does not exist — ``DashboardManager`` uses
+        ``_setup_layout`` which mutates ``self.app.layout`` rather than
+        returning a layout). The observable post-condition is that the
+        Dash app has a non-None layout that renders correctly via the
+        ``/_dash-layout`` endpoint.
+        """
+        # The method itself is invoked at __init__ time so we assert on
+        # the post-condition, not by re-running it.
+        assert hasattr(dashboard, "_setup_layout"), "DashboardManager must expose _setup_layout method"
+        assert dashboard.app.layout is not None
+        # Render via Dash's own layout endpoint to confirm it serializes
+        # (catches structural breakages that ``is not None`` alone misses).
+        client = dashboard.app.server.test_client()
+        response = client.get("/_dash-layout")
+        assert response.status_code == 200
 
     def test_layout_assigned_to_app(self, dashboard):
         """Layout should be assigned to app."""
@@ -243,17 +290,35 @@ class TestDashboardManagerTabNavigation:
 class TestDashboardManagerAssets:
     """Test asset handling."""
 
-    @pytest.mark.skip(reason="Dash app does not expose assets_folder as a public attribute")
     def test_assets_folder_set(self, dashboard):
-        """Should have assets folder configured."""
-        assert hasattr(dashboard.app, "assets_folder"), "Dash app should have assets_folder attribute"
-        assert dashboard.app.assets_folder is not None
+        """Dash app should expose its configured assets folder.
 
-    @pytest.mark.skip(reason="Dash app does not expose assets_url_path as a public attribute")
+        Dash stores ``assets_folder`` under ``app.config`` rather than as
+        a direct app attribute, so the historically-skipped test asserted
+        on the wrong path. The observable contract — "the Dash app knows
+        where its assets live" — is what we actually want to pin.
+        """
+        # ``app.config`` is the documented Dash API for reading the
+        # assets directory.
+        assert hasattr(dashboard.app, "config"), "Dash app should expose config namespace"
+        assert hasattr(dashboard.app.config, "assets_folder"), "Dash app config should have assets_folder"
+        assert dashboard.app.config.assets_folder is not None
+        assert dashboard.app.config.assets_folder != ""
+
     def test_assets_url_path(self, dashboard):
-        """Should have assets URL path."""
-        assert hasattr(dashboard.app, "assets_url_path"), "Dash app should have assets_url_path attribute"
-        assert dashboard.app.assets_url_path is not None
+        """Dash app should expose its configured assets URL path.
+
+        Same situation as ``assets_folder``: lives under
+        ``app.config.assets_url_path``, not ``app.assets_url_path``.
+        Also verify ``get_asset_url`` — the documented public API
+        for resolving a file inside ``assets/`` — works end-to-end.
+        """
+        assert hasattr(dashboard.app.config, "assets_url_path"), "Dash app config should have assets_url_path"
+        assert dashboard.app.config.assets_url_path is not None
+        # ``get_asset_url`` is the documented Dash API; if the URL path
+        # is wired correctly, an asset reference must contain it.
+        url = dashboard.app.get_asset_url("style.css")
+        assert dashboard.app.config.assets_url_path in url
 
 
 class TestDashboardManagerEdgeCases:
@@ -334,21 +399,139 @@ class TestApplyInFlightIntervalPause:
         assert 'Output("apply-in-flight", "data", allow_duplicate=True)' in dashboard_manager_source
         assert 'Input("applied-params-store", "data")' in dashboard_manager_source
 
-    def test_in_flight_drives_interval_disabled(self, dashboard_manager_source):
-        """The `apply-in-flight` store toggles the `disabled` prop on both
-        update intervals."""
-        assert 'Output("fast-update-interval", "disabled")' in dashboard_manager_source
-        assert 'Output("slow-update-interval", "disabled")' in dashboard_manager_source
-        # Direct Input on apply-in-flight from the third callback in the
-        # CAN-000 cluster.
-        idx = dashboard_manager_source.find('Output("fast-update-interval", "disabled")')
+    def test_in_flight_drives_interval_disabled(self, dashboard):
+        """The `apply-in-flight` store toggles the `disabled` prop on both update intervals.
+
+        Pinned BEHAVIOURALLY against the built app rather than by grepping the source.
+        F-CANOPY-027 moved these Outputs into ``_setup_poll_gating``, where the CAN-000
+        clamp and the per-tab poll gate are fused into one clientside callback — Dash
+        permits only one un-duplicated writer per prop, so two competing writers would
+        race. The source-text form of this assertion pinned the old literal
+        ``Output("fast-update-interval", "disabled")`` spelling, which a comprehension
+        legitimately no longer produces; the contract it was protecting is unchanged and
+        is asserted directly here.
+        """
+        for interval_id in ("fast-update-interval", "slow-update-interval"):
+            target = f"{interval_id}.disabled"
+            writers = [entry for entry in dashboard.app._callback_list if target in str(entry["output"])]
+            assert len(writers) == 1, f"{target} must have exactly one writer, found {len(writers)}"
+            inputs = {f"{dep['id']}.{dep['property']}" for dep in writers[0]["inputs"] if isinstance(dep.get("id"), str)}
+            # The CAN-000 cluster must be wired together, not three callbacks that
+            # happen to share names: the clamp store feeds the writer directly.
+            assert "apply-in-flight.data" in inputs, f"{target} writer does not read apply-in-flight"
+
+
+class TestApplyInFlightWatchdogE3:
+    """E-3 (training-runtime defects plan §9): the apply-in-flight clamp must never stick.
+
+    E-3 verdict — the stuck path EXISTED: every failure path of
+    ``_apply_parameters_handler`` (non-200, 429-exhausted, retries-exhausted)
+    returns ``dash.no_update`` for ``applied-params-store``, and the store
+    update was the clamp's ONLY release signal — so one failed Apply (the
+    observed evening-502 pattern) disabled BOTH update intervals until a page
+    refresh: the pre-refresh total freeze of I-1 root cause 4. The fix is a
+    triple-redundant release: (a) the apply callback writes ``apply-in-flight
+    = False`` directly on every return path, (b) the store-driven clientside
+    release still fires on success, (c) a clientside watchdog force-clears an
+    over-age clamp (covers the callback POST itself failing at the network
+    level — the one class no server response can fix).
+    """
+
+    @pytest.fixture
+    def dashboard_manager_source(self):
+        path = Path(__file__).resolve().parents[2] / "frontend" / "dashboard_manager.py"
+        return path.read_text(encoding="utf-8")
+
+    # ── Behavior: the stuck mechanism + the server-side release ──
+
+    def test_failure_path_does_not_write_applied_store(self, dashboard):
+        """The stuck-path mechanism: a 5xx apply returns ``no_update`` for
+        ``applied-params-store`` — correct for the store's applied-params
+        semantics, fatal as the sole clamp release (the pre-fix design)."""
+        import dash
+
+        # Valid inputs, not all-None: since F-CANOPY-017 a None numeric State
+        # refuses the apply before any POST, so an all-None call would never
+        # reach the 5xx branch this test is about.
+        valid = (
+            1000,
+            600,
+            0.015,
+            25,
+            [],
+            "convergence",
+            50,
+            0.001,
+            50,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            30,
+            [],
+            None,
+            1,
+            1,
+        )
+        mock_response = MagicMock(status_code=502, text="Bad Gateway")
+        with patch("requests.post", return_value=mock_response):
+            store_value, status_msg = dashboard._apply_parameters_handler(1, *valid)
+        assert store_value is dash.no_update
+        assert "502" in status_msg
+
+    def test_release_is_false_after_a_real_click(self, dashboard):
+        """The apply callback's third Output must release the clamp on every
+        completed run — success and failure alike."""
+        assert dashboard._apply_in_flight_release(1) is False
+        assert dashboard._apply_in_flight_release(3) is False
+
+    def test_release_is_no_update_without_a_click(self, dashboard):
+        import dash
+
+        assert dashboard._apply_in_flight_release(None) is dash.no_update
+        assert dashboard._apply_in_flight_release(0) is dash.no_update
+
+    # ── Wiring: server-side release on the apply callback ──
+
+    def test_apply_callback_carries_in_flight_release_output(self, dashboard_manager_source):
+        """The apply callback's Output list must include the apply-in-flight
+        release alongside applied-params-store (E-3 fix a)."""
+        idx = dashboard_manager_source.find('Output("applied-params-store", "data"),')
         assert idx != -1
-        # The Input("apply-in-flight", "data") line must appear in close
-        # proximity to the disabled Outputs (within ~500 chars), proving the
-        # CAN-000 cluster is wired together rather than being three unrelated
-        # callbacks that happen to share names.
-        window = dashboard_manager_source[idx : idx + 500]
-        assert 'Input("apply-in-flight", "data")' in window
+        window = dashboard_manager_source[idx : idx + 800]
+        assert 'Output("apply-in-flight", "data", allow_duplicate=True),' in window
+
+    def test_apply_wrapper_returns_release_value(self, dashboard_manager_source):
+        assert "_apply_in_flight_release(n_clicks)" in dashboard_manager_source
+
+    # ── Wiring: clientside watchdog (E-3 fix c) ──
+
+    def test_watchdog_interval_in_layout(self, dashboard_manager_source):
+        """The watchdog tick must be its own interval — the clamp disables the
+        fast/slow intervals, so neither can host its own rescue."""
+        assert 'dcc.Interval(id="apply-watchdog-interval"' in dashboard_manager_source
+
+    def test_watchdog_callback_wired_to_clear_stuck_clamp(self, dashboard_manager_source):
+        idx = dashboard_manager_source.find('Input("apply-watchdog-interval", "n_intervals")')
+        assert idx != -1
+        # The watchdog's Output (force-release) must sit in the same callback
+        # registration (search backwards within the registration window).
+        window = dashboard_manager_source[max(0, idx - 800) : idx + 300]
+        assert 'Output("apply-in-flight", "data", allow_duplicate=True)' in window
+        assert 'State("apply-in-flight", "data")' in window
+
+    def test_click_writer_stamps_age_for_watchdog(self, dashboard_manager_source):
+        """Writer 1 must stamp the click time so the watchdog can age the clamp."""
+        assert "{in_flight: true, since: Date.now()}" in dashboard_manager_source
+
+    def test_watchdog_uses_max_age_constant(self, dashboard_manager_source):
+        assert "APPLY_IN_FLIGHT_MAX_MS" in dashboard_manager_source
 
 
 class TestPinnedParameters:
@@ -499,6 +682,49 @@ class TestContextMenuWiring:
         assert return_idx < prevent_idx
 
 
+class TestDatasetApplyNumericCommit:
+    """#4 modified-dataset-never-trains: Apply-Dataset force-blur + the
+    stage_dataset payload must keep the numeric inputs and always send
+    dataset_type."""
+
+    @pytest.fixture
+    def dashboard_manager_source(self):
+        path = Path(__file__).resolve().parents[2] / "frontend" / "dashboard_manager.py"
+        return path.read_text(encoding="utf-8")
+
+    def test_force_blur_wired_to_apply_dataset_button(self, dashboard_manager_source):
+        """The force-blur clientside callback (Output apply-blur-sink.data) must
+        fire on BOTH apply-params-button and apply-dataset-button so a typed-
+        but-unblurred numeric value commits before the server State() read."""
+        idx = dashboard_manager_source.find('Output("apply-blur-sink", "data")')
+        assert idx != -1
+        window = dashboard_manager_source[idx : idx + 400]
+        assert 'Input("apply-params-button", "n_clicks")' in window
+        assert 'Input("apply-dataset-button", "n_clicks")' in window
+        assert "document.activeElement.blur()" in dashboard_manager_source
+
+    def test_apply_dataset_always_sends_dataset_type(self, dashboard_manager_source):
+        """apply_dataset must seed the stage_dataset payload with
+        nn_dataset_type unconditionally (cascor _reload_dataset requires it) and
+        add optional fields only when present — no blanket None-drop that could
+        strip dataset_type or the (now force-blurred) numerics."""
+        # N7: apply_dataset delegates to the _apply_dataset_handler method (so the schema-driven
+        # gen-params can be read + routed via the generic ``params`` channel), and the handler now
+        # delegates the body to ``_dataset_stage_payload``, which the live swap shares -- the swap
+        # used to build its own body, with exactly the blanket None-drop asserted absent below.
+        # So the contract lives in the builder: pin the delegation, then search the builder. Each
+        # window runs to the next method, not a fixed width that a growing docstring outruns.
+        handler = dashboard_manager_source.find("def _apply_dataset_handler(")
+        assert handler != -1
+        assert "self._dataset_stage_payload(dataset_type," in dashboard_manager_source[handler : dashboard_manager_source.find("\n    def ", handler + 1)]
+        idx = dashboard_manager_source.find("def _dataset_stage_payload(")
+        assert idx != -1
+        window = dashboard_manager_source[idx : dashboard_manager_source.find("\n    def ", idx + 1)]
+        assert 'payload: dict = {"nn_dataset_type": dataset_type}' in window
+        assert "if _value is not None:" in window
+        assert "{k: v for k, v in payload.items() if v is not None}" not in window
+
+
 class TestLayoutStatePersistence:
     """CAN-016a: persist dashboard layout state (active tab) to localStorage.
 
@@ -548,6 +774,279 @@ class TestLayoutStatePersistence:
         """Writer must short-circuit when the new active_tab equals the
         already-persisted one, preventing redundant Store writes."""
         assert "prev.active_tab === activeTab" in dashboard_manager_source
+
+    def test_legacy_localstorage_persistence_removed(self, dashboard_manager_source):
+        """#1 tab-feedback-loop fix: the legacy hand-rolled localStorage
+        persistence is gone — `layout-state-store` is the single source of
+        truth. That second persistence system raced the Store at mount and its
+        Input→Output self-edge on `active_tab` fed the tab-toggle loop. We
+        assert the actual get/setItem call sites are removed (a historical
+        mention in a code comment is fine)."""
+        assert "localStorage.setItem('juniper_canopy_active_tab'" not in dashboard_manager_source
+        assert "localStorage.getItem('juniper_canopy_active_tab'" not in dashboard_manager_source
+
+    def test_read_callback_is_equality_guarded(self, dashboard_manager_source):
+        """#1 fix (read side): the restore callback must short-circuit when the
+        persisted tab already equals the shown tab, so a Store echo doesn't
+        re-assert `active_tab` and re-trigger every Input(active_tab) callback.
+        It takes the current tab as State and compares. Mirrors
+        test_no_self_loop_on_same_tab for the read side."""
+        idx = dashboard_manager_source.find('Input("layout-state-store", "data")')
+        assert idx != -1
+        window = dashboard_manager_source[max(0, idx - 900) : idx + 300]
+        assert 'State("visualization-tabs", "active_tab")' in window
+        assert "state.active_tab === currentTab" in window
+
+    def test_single_mount_time_active_tab_restore(self, dashboard_manager_source):
+        """#1 fix: only two callbacks may write `visualization-tabs.active_tab`
+        — the Store restore (Reader B) and the tutorial-link trigger. The two
+        legacy localStorage outputs were removed, so a single callback restores
+        at mount and nothing races it (the params-init-interval restore is
+        gone)."""
+        assert dashboard_manager_source.count('Output("visualization-tabs", "active_tab"') == 2
+
+    @staticmethod
+    def _restore_body(dashboard_manager_source):
+        """The restore callback's JS body: from its signature up to its first Input."""
+        end = dashboard_manager_source.find('Input("layout-state-store", "data")')
+        start = dashboard_manager_source.rfind("function(state, tabs, currentTab)", 0, end)
+        assert start != -1 and end != -1, "the restore callback no longer takes (state, tabs, currentTab)"
+        assert end - start < 3000, "the signature found belongs to a different callback"
+        return dashboard_manager_source[start:end]
+
+    def test_read_callback_reads_the_rendered_tabs(self, dashboard_manager_source):
+        """Y4: a one-shot model rebuilds the tab bar without the cascade-only tabs, so the
+        restore has to know which tabs are RENDERED. They arrive as an Input, not State: the
+        rebuild lands after the mount-time restore (hydration runs on params-init-interval), so
+        a State would be read once, before it, and a runtime swap would never re-fire the check."""
+        idx = dashboard_manager_source.find('Input("layout-state-store", "data")')
+        assert idx != -1
+        window = dashboard_manager_source[idx : idx + 300]
+        assert 'Input("visualization-tabs", "children")' in window
+        assert 'State("visualization-tabs", "children")' not in window
+
+    def test_read_callback_never_restores_an_unrendered_tab(self, dashboard_manager_source):
+        """Y4: the persisted tab is restored only when it is among the rendered tabs; otherwise
+        the shown tab is kept when it is rendered, and the first rendered tab is used when it is
+        not. The behaviour itself is executed under node in
+        ``tests/unit/frontend/test_y4_active_tab_restore.py``; this pins the source shape."""
+        body = self._restore_body(dashboard_manager_source)
+        assert "rendered.indexOf(saved) === -1" in body
+        assert "rendered.indexOf(currentTab) !== -1" in body
+        assert "rendered[0]" in body
+
+
+class TestStatusBarErrorDiagnosability:
+    """#3 fix: a FAILED /api/status poll must surface a SPECIFIC status label
+    (rate-limited / unauthorized / 5xx / timeout / unreachable) instead of a
+    bare "Error", so a transient 429 isn't confused with a backend outage."""
+
+    @pytest.fixture(scope="class")
+    def dm(self):
+        return DashboardManager({})
+
+    @staticmethod
+    def _resp(status_code):
+        resp = MagicMock()
+        resp.status_code = status_code
+        return resp
+
+    @pytest.mark.parametrize(
+        "code,expected",
+        [
+            (429, "Rate Limited"),
+            (401, "Unauthorized"),
+            (403, "Unauthorized"),
+            (500, "Backend Error"),
+            (503, "Backend Error"),
+            (404, "Backend Unavailable"),
+        ],
+    )
+    def test_non_200_maps_to_specific_status_label(self, dm, code, expected):
+        with patch("frontend.dashboard_manager.requests.get", return_value=self._resp(code)):
+            result = dm._update_unified_status_bar_handler(n_intervals=1)
+        # index 3 == top_status_display children (the visible status label)
+        assert result[3] == expected
+
+    @pytest.mark.parametrize(
+        "exc,expected",
+        [
+            (requests.Timeout(), "Backend Timeout"),
+            (requests.ConnectionError(), "Unreachable"),
+            (ValueError("boom"), "Error"),
+        ],
+    )
+    def test_exception_maps_to_specific_status_label(self, dm, exc, expected):
+        with patch("frontend.dashboard_manager.requests.get", side_effect=exc):
+            result = dm._update_unified_status_bar_handler(n_intervals=1)
+        assert result[3] == expected
+
+    def test_200_ok_still_renders_running(self, dm):
+        """Happy path unchanged: a 200 with is_running renders 'Running'."""
+        resp = self._resp(200)
+        resp.json.return_value = {"is_running": True, "is_paused": False, "phase": "output", "current_epoch": 3, "hidden_units": 1}
+        with patch("frontend.dashboard_manager.requests.get", return_value=resp):
+            result = dm._update_unified_status_bar_handler(n_intervals=1)
+        assert result[3] == "Running"
+
+    def test_200_with_circuit_open_error_renders_unreachable(self, dm):
+        """PR #340 deferred follow-up: when the canopy → cascor circuit
+        breaker is OPEN, ``CascorServiceAdapter.get_training_status``
+        returns ``{"is_training": False, "error": "circuit open"}``;
+        ``service_backend.get_status`` passes that dict through unchanged
+        because it isn't ``is_cascor_nested``, so ``/api/status`` returns
+        HTTP 200 with the ``error`` marker. Without the
+        ``_build_unified_status_bar_content`` guard added in this fix,
+        the dashboard ``elif`` chain would render "Stopped" (all status
+        fields fall back to their ``False`` / ``0`` defaults) —
+        indistinguishable from a legit idle backend.
+        """
+        resp = self._resp(200)
+        resp.json.return_value = {"is_training": False, "error": "circuit open"}
+        with patch("frontend.dashboard_manager.requests.get", return_value=resp):
+            result = dm._update_unified_status_bar_handler(n_intervals=1)
+        assert result[3] == "Unreachable"
+
+    @pytest.mark.parametrize(
+        "error_value",
+        [
+            "circuit open",
+            "Failed to get training status: timeout",
+            "underlying cascor request raised",
+        ],
+    )
+    def test_200_with_any_truthy_error_renders_unreachable(self, dm, error_value):
+        """Generalizes the circuit-open guard to *any* truthy ``error``
+        field on a 200 response. The adapter has two error paths
+        (``CircuitBreakerOpen`` fallback at
+        ``cascor_service_adapter.py:1268`` + ``JuniperCascorClientError``
+        catch at ``:1272``); both indicate "backend data is not
+        authoritative right now" and should render as "Unreachable",
+        not the "Stopped" idle-mapping.
+        """
+        resp = self._resp(200)
+        resp.json.return_value = {"is_training": False, "error": error_value}
+        with patch("frontend.dashboard_manager.requests.get", return_value=resp):
+            result = dm._update_unified_status_bar_handler(n_intervals=1)
+        assert result[3] == "Unreachable"
+
+    def test_200_with_empty_error_field_still_renders_normally(self, dm):
+        """The guard uses truthiness, so an empty-string ``error`` field
+        (defensive belt-and-suspenders if any future adapter path
+        ever ships one) does NOT trigger "Unreachable" — the normal
+        status-mapping runs."""
+        resp = self._resp(200)
+        resp.json.return_value = {"is_running": True, "is_paused": False, "phase": "output", "current_epoch": 7, "hidden_units": 2, "error": ""}
+        with patch("frontend.dashboard_manager.requests.get", return_value=resp):
+            result = dm._update_unified_status_bar_handler(n_intervals=1)
+        assert result[3] == "Running"
+
+
+class TestNetworkInfoPanelDiagnosability:
+    """Network Info / Network Stats panels mirror the status-bar
+    diagnosability contract from PR #340 (and the circuit-open follow-up
+    in PR #341). When ``/api/status`` or ``/api/network/stats`` returns
+    non-200 or raises, the panel must surface a SPECIFIC, actionable
+    label (rate limit / unauthorized / 5xx / timeout / unreachable)
+    instead of the previous opaque "Unable to fetch network info" /
+    "Unable to fetch detailed network info" messages.
+    """
+
+    @pytest.fixture(scope="class")
+    def dm(self):
+        return DashboardManager({})
+
+    @staticmethod
+    def _resp(status_code):
+        resp = MagicMock()
+        resp.ok = 200 <= status_code < 400
+        resp.status_code = status_code
+        return resp
+
+    # ---------- Network Info (/api/status backed) ----------
+
+    @pytest.mark.parametrize(
+        "code,expected_label",
+        [
+            (429, "Network Info: Rate Limited"),
+            (401, "Network Info: Unauthorized"),
+            (403, "Network Info: Unauthorized"),
+            (500, "Network Info: Backend Error"),
+            (503, "Network Info: Backend Error"),
+            (404, "Network Info: Backend Unavailable"),
+        ],
+    )
+    def test_network_info_non_200_maps_to_specific_label(self, dm, code, expected_label):
+        with patch("frontend.dashboard_manager.requests.get", return_value=self._resp(code)):
+            result = dm._update_network_info_handler(n=1)
+        rendered = str(result)
+        assert expected_label in rendered, f"expected {expected_label!r} in {rendered!r}"
+
+    @pytest.mark.parametrize(
+        "exc,expected_label",
+        [
+            (requests.Timeout(), "Network Info: Backend Timeout"),
+            (requests.ConnectionError(), "Network Info: Unreachable"),
+        ],
+    )
+    def test_network_info_exception_maps_to_specific_label(self, dm, exc, expected_label):
+        with patch("frontend.dashboard_manager.requests.get", side_effect=exc):
+            result = dm._update_network_info_handler(n=1)
+        rendered = str(result)
+        assert expected_label in rendered, f"expected {expected_label!r} in {rendered!r}"
+
+    def test_network_info_unknown_exception_uses_generic_error_label(self, dm):
+        """Non-requests exceptions fall through to the generic "Error"
+        label, with the exception type embedded in the detail line so a
+        sweep through the logs surfaces what actually happened."""
+        with patch("frontend.dashboard_manager.requests.get", side_effect=ValueError("boom")):
+            result = dm._update_network_info_handler(n=1)
+        rendered = str(result)
+        assert "Network Info: Error" in rendered
+        assert "ValueError" in rendered  # exception type in the detail line
+        assert "boom" in rendered  # exception message in the detail line
+
+    def test_network_info_200_ok_still_renders_table(self, dm):
+        """Happy path unchanged: a 200 with normal status data renders
+        the table-of-fields ``html.Div`` (not the error placeholder)."""
+        resp = self._resp(200)
+        resp.json.return_value = {"input_size": 2, "output_size": 2, "hidden_units": 3, "current_epoch": 100, "network_connected": True, "monitoring_active": True, "current_phase": "Output Training"}
+        with patch("frontend.dashboard_manager.requests.get", return_value=resp):
+            result = dm._update_network_info_handler(n=1)
+        rendered = str(result)
+        # Sanity-check a label that ONLY appears in the happy-path render.
+        assert "Network Connected" in rendered
+        # And the error-placeholder label is NOT present.
+        assert "Network Info:" not in rendered
+
+    # ---------- Network Stats (/api/network/stats backed) ----------
+
+    @pytest.mark.parametrize(
+        "code,expected_label",
+        [
+            (429, "Network Stats: Rate Limited"),
+            (500, "Network Stats: Backend Error"),
+            (404, "Network Stats: Backend Unavailable"),
+        ],
+    )
+    def test_network_stats_non_200_maps_to_specific_label(self, dm, code, expected_label):
+        with patch("frontend.dashboard_manager.requests.get", return_value=self._resp(code)):
+            result = dm._update_network_info_details_handler(n=1)
+        rendered = str(result)
+        assert expected_label in rendered, f"expected {expected_label!r} in {rendered!r}"
+
+    @pytest.mark.parametrize(
+        "exc,expected_label",
+        [
+            (requests.Timeout(), "Network Stats: Backend Timeout"),
+            (requests.ConnectionError(), "Network Stats: Unreachable"),
+        ],
+    )
+    def test_network_stats_exception_maps_to_specific_label(self, dm, exc, expected_label):
+        with patch("frontend.dashboard_manager.requests.get", side_effect=exc):
+            result = dm._update_network_info_details_handler(n=1)
+        rendered = str(result)
+        assert expected_label in rendered, f"expected {expected_label!r} in {rendered!r}"
 
 
 if __name__ == "__main__":

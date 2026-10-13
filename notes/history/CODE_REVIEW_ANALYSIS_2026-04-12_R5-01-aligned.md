@@ -2,7 +2,7 @@
 
 **Date**: 2026-04-12
 **Version Reviewed**: 0.4.0
-**Source of Truth**: [R5-01 Canonical Development Plan](../../juniper-ml/notes/interface_proposals/R5-01_canonical_development_plan.md)
+**Source of Truth**: [R5-01 Canonical Development Plan](../../juniper-ml/notes/interface_proposals/JUNIPER_2026-04-20_JUNIPER-ECOSYSTEM_R5-01-CANONICAL-DEVELOPMENT-PLAN.md)
 **Supersedes**: [CODE_REVIEW_ANALYSIS_2026-04-04.md](CODE_REVIEW_ANALYSIS_2026-04-04.md)
 
 ---

@@ -17,7 +17,9 @@ class TestServiceModeControls:
         backend = ServiceBackend(adapter)
         result = backend.pause_training()
         assert result["ok"] is True
-        assert fake._state == "paused"
+        # FakeCascorClient (cascor-client 0.5.0, Phase 4D) reports canonical
+        # uppercase training_state values: STARTED / PAUSED / STOPPED.
+        assert fake._state == "PAUSED"
 
     def test_resume_training_delegates_to_cascor(self):
         from backend.cascor_service_adapter import CascorServiceAdapter
@@ -29,7 +31,7 @@ class TestServiceModeControls:
         backend = ServiceBackend(adapter)
         result = backend.resume_training()
         assert result["ok"] is True
-        assert fake._state == "training"
+        assert fake._state == "STARTED"
 
     def test_reset_training_delegates_to_cascor(self):
         from backend.cascor_service_adapter import CascorServiceAdapter
@@ -40,7 +42,7 @@ class TestServiceModeControls:
         backend = ServiceBackend(adapter)
         result = backend.reset_training()
         assert result["ok"] is True
-        assert fake._state == "idle"
+        assert fake._state == "STOPPED"
 
     def test_pause_returns_error_when_not_training(self):
         from backend.cascor_service_adapter import CascorServiceAdapter
@@ -57,7 +59,15 @@ class TestServiceModeControls:
         from backend.cascor_service_adapter import CascorServiceAdapter
         from backend.service_backend import ServiceBackend
 
-        fake = FakeCascorClient(scenario="two_spiral_training")
+        # Use idle + create_network so FakeCascorClient leaves _training_params
+        # as None. In the "training" scenarios the fake snapshots _network_config
+        # into _training_params["params"] at init and then get_training_params
+        # overlays that snapshot on top of subsequent update_params writes,
+        # which makes the canopy adapter's apply-then-verify roundtrip see a
+        # stale value. (juniper-cascor-client testing/fake_client.py:534-545
+        # — upstream fake bug; canopy verify-roundtrip is correct.)
+        fake = FakeCascorClient(scenario="idle")
+        fake.create_network(input_size=2, output_size=2, learning_rate=0.01)
         adapter = CascorServiceAdapter(client=fake)
         backend = ServiceBackend(adapter)
         result = backend.apply_params(nn_learning_rate=0.005)

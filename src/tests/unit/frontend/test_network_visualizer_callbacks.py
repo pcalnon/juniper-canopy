@@ -525,37 +525,22 @@ class TestHandleNodeSelectionCallback:
         assert nodes == []
         assert style["display"] == "none"
 
-    @pytest.mark.unit
-    def test_layer_detection_input(self, visualizer):
-        """Should detect input layer from curveNumber."""
-        layer_names = ["", "", "Input", "Hidden", "Output"]
-        curve_number = 2
-        layer = layer_names[min(curve_number, 4)] if curve_number >= 2 else "Unknown"
-        assert layer == "Input"
-
-    @pytest.mark.unit
-    def test_layer_detection_hidden(self, visualizer):
-        """Should detect hidden layer from curveNumber."""
-        layer_names = ["", "", "Input", "Hidden", "Output"]
-        curve_number = 3
-        layer = layer_names[min(curve_number, 4)] if curve_number >= 2 else "Unknown"
-        assert layer == "Hidden"
-
-    @pytest.mark.unit
-    def test_layer_detection_output(self, visualizer):
-        """Should detect output layer from curveNumber."""
-        layer_names = ["", "", "Input", "Hidden", "Output"]
-        curve_number = 4
-        layer = layer_names[min(curve_number, 4)] if curve_number >= 2 else "Unknown"
-        assert layer == "Output"
-
-    @pytest.mark.unit
-    def test_layer_detection_unknown(self, visualizer):
-        """Should return Unknown for low curveNumber."""
-        layer_names = ["", "", "Input", "Hidden", "Output"]
-        curve_number = 1
-        layer = layer_names[min(curve_number, 4)] if curve_number >= 2 else "Unknown"
-        assert layer == "Unknown"
+    # REMOVED: test_layer_detection_input / _hidden / _output / _unknown.
+    #
+    # All four re-typed the production expression inline and asserted against their
+    # own copy — they imported nothing from ``network_visualizer`` and called nothing
+    # in it, so they could not fail for ANY implementation. The same class as
+    # canopy#558's ``assert min(a, b) <= b``, which is how F-CANOPY-041b shipped.
+    #
+    # They "covered" the layer logic while the product labelled EVERY node
+    # ``Output`` (F-CANOPY-045): ``layer_names[min(curve_number, 4)]`` is correct
+    # only if the node traces are curves 2-4, and with one trace per connection they
+    # sit at ~1888-1890. The scheme those tests described no longer exists — the
+    # layer is now derived from the node LABEL — so keeping them would document a
+    # design the code does not have.
+    #
+    # Replaced by ``test_f044_node_click_selection.py``, every test in which reaches
+    # the REAL registered callback.
 
     @pytest.mark.unit
     def test_node_id_conversion(self, visualizer):
@@ -584,7 +569,18 @@ class TestHandleNodeSelectionCallback:
         current_selection: List[str],
         trigger: str,
     ):
-        """Simulate handle_node_selection callback logic."""
+        """Simulate handle_node_selection callback logic.
+
+        WARNING — this is a RE-IMPLEMENTATION, not the product. It cannot see a
+        defect in the real handler, and it did not: F-CANOPY-044 (an edge-resolved
+        click selecting nothing) and F-CANOPY-045 (every node reporting
+        ``Layer: Output``) both shipped while this class was green.
+
+        The click path in particular has since diverged — the real handler falls
+        back to the edge's ``customdata`` and derives the layer from the node label.
+        Do not add click-path coverage here. ``test_f044_node_click_selection.py``
+        drives the REAL registered callback; put it there.
+        """
         base_style = {
             "marginBottom": "10px",
             "padding": "10px",
@@ -905,6 +901,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -948,6 +945,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -965,11 +963,11 @@ class TestCallbackInvocation:
                     "node_graph",  # display_mode (OF-1)
                     None,  # raw_topology (OF-1)
                     None,  # depth_filter (CAN-020)
-                    [],  # metrics_data
                     "light",  # theme
                     [],  # selected_nodes
                     0,  # n_intervals
                     None,  # ws_cascade_add (D-06)
+                    [],  # metrics_data (F-CANOPY-037: State, after every Input)
                     {"xaxis_range": None, "yaxis_range": None, "dragmode": "pan"},  # view_state
                     None,  # prev_hash
                     None,  # current_highlight
@@ -1006,6 +1004,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1022,11 +1021,11 @@ class TestCallbackInvocation:
                     "node_graph",  # display_mode (OF-1)
                     None,  # raw_topology (OF-1)
                     None,  # depth_filter (CAN-020)
-                    [],
                     "light",
                     [],
                     0,  # n_intervals
                     None,  # ws_cascade_add (D-06)
+                    [],  # metrics_data (F-CANOPY-037: State, after every Input)
                     None,  # view_state
                     None,  # prev_hash
                     None,  # current_highlight
@@ -1062,6 +1061,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1075,7 +1075,7 @@ class TestCallbackInvocation:
         for key, callback_info in app.callback_map.items():
             if callback_key in key:
                 func = callback_info["callback"]
-                result = func.__wrapped__(simple_topology, "hierarchical", ["show"], "2d", "node_graph", None, None, metrics_data, "light", [], 0, None, None, None, None)
+                result = func.__wrapped__(simple_topology, "hierarchical", ["show"], "2d", "node_graph", None, None, "light", [], None, 0, metrics_data, None, None, None)
                 fig, _config, _, _, _, _, _, new_highlight = result
                 assert isinstance(fig, go.Figure)
                 # Should have detected new unit and created highlight
@@ -1109,6 +1109,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1119,7 +1120,7 @@ class TestCallbackInvocation:
         for key, callback_info in app.callback_map.items():
             if callback_key in key:
                 func = callback_info["callback"]
-                result = func.__wrapped__(simple_topology, "hierarchical", [], "2d", "node_graph", None, None, [], "light", [], 0, None, view_state, None, None)
+                result = func.__wrapped__(simple_topology, "hierarchical", [], "2d", "node_graph", None, None, "light", [], None, 0, [], view_state, None, None)
                 fig, _config, _, _, _, _, _, _ = result
                 assert isinstance(fig, go.Figure)
                 break
@@ -1150,6 +1151,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1194,6 +1196,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1206,8 +1209,10 @@ class TestCallbackInvocation:
                 with patch("dash.callback_context") as mock_ctx:
                     mock_ctx.triggered = [{"prop_id": f"{visualizer.component_id}-graph.clickData"}]
                     click_data = {"points": [{"text": "Input 0", "curveNumber": 2}]}
-                    result = func.__wrapped__(click_data, None, [], "light")
-                    nodes, info, style = result
+                    # F-CANOPY-046 added the clear-button Input (3rd positional)
+                    # and its style Output (4th returned value).
+                    result = func.__wrapped__(click_data, None, 0, [], "light")
+                    nodes, info, style, clear_style = result
                     assert nodes == ["input_0"]
                 break
 
@@ -1237,6 +1242,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1248,8 +1254,10 @@ class TestCallbackInvocation:
                 with patch("dash.callback_context") as mock_ctx:
                     mock_ctx.triggered = [{"prop_id": f"{visualizer.component_id}-graph.selectedData"}]
                     selected_data = {"points": [{"text": "Input 0"}, {"text": "Hidden 0"}]}
-                    result = func.__wrapped__(None, selected_data, [], "light")
-                    nodes, info, style = result
+                    # F-CANOPY-046 added the clear-button Input (3rd positional)
+                    # and its style Output (4th returned value).
+                    result = func.__wrapped__(None, selected_data, 0, [], "light")
+                    nodes, info, style, clear_style = result
                     assert "input_0" in nodes
                     assert "hidden_0" in nodes
                 break
@@ -1280,6 +1288,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1291,9 +1300,11 @@ class TestCallbackInvocation:
                 with patch("dash.callback_context") as mock_ctx:
                     mock_ctx.triggered = [{"prop_id": f"{visualizer.component_id}-graph.clickData"}]
                     click_data = {"points": [{"text": "Input 0", "curveNumber": 2}]}
-                    # Node is already selected
-                    result = func.__wrapped__(click_data, None, ["input_0"], "light")
-                    nodes, info, style = result
+                    # Node is already selected.
+                    # F-CANOPY-046 added the clear-button Input (3rd positional)
+                    # and its style Output (4th returned value).
+                    result = func.__wrapped__(click_data, None, 0, ["input_0"], "light")
+                    nodes, info, style, clear_style = result
                     assert nodes == []
                 break
 
@@ -1323,6 +1334,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1365,6 +1377,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1473,6 +1486,7 @@ class TestWeightHeatmapRendering:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)

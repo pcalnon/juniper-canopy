@@ -66,7 +66,7 @@ This document provides a comprehensive plan to containerize and deploy the Junip
 
 ### 2.2 Current Docker Configuration
 
-**Location:** `conf/Dockerfile`
+**Location:** `Dockerfile` (repo root — the legacy `conf/Dockerfile` was removed)
 
 **Issues Identified:**
 
@@ -912,7 +912,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./conf/Dockerfile
+          file: ./Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

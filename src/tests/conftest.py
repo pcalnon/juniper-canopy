@@ -31,6 +31,15 @@ os.environ.setdefault("JUNIPER_CANOPY_LOG_LEVEL", os.environ.get("CASCOR_LOG_LEV
 os.environ.setdefault("JUNIPER_CANOPY_BACKEND_PATH", os.environ.get("CASCOR_BACKEND_PATH", "../juniper-cascor"))
 os.environ.setdefault("JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL", os.environ.get("CASCOR_DEMO_UPDATE_INTERVAL", "1.0"))
 
+# Capture ``CANOPY_API_KEY`` from the inherited environment for the
+# ``auth_headers`` fixture, then remove it from ``os.environ`` BEFORE any
+# import of ``main`` so the in-process FastAPI test app loads with API key
+# authentication disabled. Otherwise the in-process WebSocket tests that use
+# ``TestClient.websocket_connect`` get closed with code 4001 "Authentication
+# required" whenever the developer happens to have ``CANOPY_API_KEY`` set in
+# their shell (e.g., to talk to a real running canopy server).
+_CAPTURED_CANOPY_API_KEY: str = os.environ.pop("CANOPY_API_KEY", "").strip()
+
 # Add src directory to Python path IMMEDIATELY (before pytest rewrites imports)
 # This MUST happen at module load time, not in fixtures
 # Go up 3 levels: conftest.py → tests/ → src/ → project_root/
@@ -531,6 +540,23 @@ def client():
         yield test_client
 
 
+@pytest.fixture(scope="session")
+def auth_headers() -> dict:
+    """Return an ``X-API-Key`` header dict when ``CANOPY_API_KEY`` was set, else ``{}``.
+
+    Used by ``@pytest.mark.requires_server`` tests so they pass against both
+    demo-mode servers (auth disabled, no key needed) and production-config
+    servers (auth enabled via ``CANOPY_API_KEY``) without changing the test
+    assertions.
+
+    The value is captured at conftest load time (see ``_CAPTURED_CANOPY_API_KEY``)
+    because the in-process FastAPI ``TestClient`` requires ``CANOPY_API_KEY`` to
+    be absent from ``os.environ`` (otherwise auth turns on and WebSocket tests
+    are rejected with code 4001).
+    """
+    return {"X-API-Key": _CAPTURED_CANOPY_API_KEY} if _CAPTURED_CANOPY_API_KEY else {}
+
+
 @pytest.fixture
 def test_config() -> Dict[str, Any]:
     """
@@ -699,6 +725,52 @@ logging:
     return config_file
 
 
+# ===================================================================
+# SETTINGS .env FILE ISOLATION
+# ===================================================================
+# pydantic-settings' ``Settings`` class is declared with
+# ``env_file=".env"``, which makes every ``Settings()`` constructor
+# call read the developer's local ``.env`` (gitignored, present only
+# on dev machines that have run ``cp .env.example .env``). Regression
+# tests that assume "no env var set → field default" — e.g.
+# ``test_cfg_09_audit_log_default.py`` uses
+# ``monkeypatch.delenv("JUNIPER_CANOPY_AUDIT_LOG_PATH")`` then
+# constructs ``Settings()`` and asserts ``audit_log_path`` is the
+# baked-in default — silently fail when a developer's local ``.env``
+# defines the same variable: pydantic-settings layers .env *under*
+# ``os.environ``, so ``delenv`` removes the OS-level value but leaves
+# the .env value in effect.
+#
+# CI never sees this because runner checkouts have no ``.env``. The
+# failure mode is local-only. Sibling cascor fix landed in cascor PR
+# #309 (2026-05-26); this is the canopy port.
+#
+# Counterpart regression test:
+# ``src/tests/unit/test_env_file_isolation.py``.
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _disable_settings_env_file_for_tests():
+    """Stop pydantic-settings from reading a developer's local .env in tests."""
+    # Import lazily so this doesn't influence pytest's plugin autoload.
+    from settings import Settings, get_settings
+
+    original_env_file = Settings.model_config.get("env_file")
+    Settings.model_config["env_file"] = None
+    # Drop any cached Settings instance that may have been built from .env
+    # before this fixture fired (e.g. via an early import side-effect).
+    try:
+        get_settings.cache_clear()
+    except AttributeError:  # nosec B110 - cache attribute is the documented lru_cache API; absence is unexpected but recoverable
+        pass
+    yield
+    Settings.model_config["env_file"] = original_env_file
+    try:
+        get_settings.cache_clear()
+    except AttributeError:  # nosec B110
+        pass
+
+
 # Preserve metrics_layouts.json across test runs (tests create/delete layouts via the real file)
 @pytest.fixture(scope="session", autouse=True)
 def preserve_metrics_layouts():
@@ -776,6 +848,27 @@ def _reset_all_singletons():
         from security import reset_security_state
 
         reset_security_state()
+
+    # The outbound keys refused by name (#683 validation): a refusal one test records must
+    # not surface as a boot WARNING in the next.
+    with contextlib.suppress(ImportError):
+        from secrets_util import reset_outbound_key_findings
+
+        reset_outbound_key_findings()
+
+    # Reset the recorded model selection (N5). ``POST /api/model/select`` writes
+    # ``main.current_nn_model`` and several tests select Recurrence over the demo backend
+    # without restoring it; since the start paths refuse a selection the live backend does not
+    # serve, a leaked "recurrence" would 409 every later ``/api/train/start`` in the session.
+    # Only when ``main`` is already imported -- this must not import the app into unit tests
+    # that never touch it.
+    main_module = sys.modules.get("main")
+    if main_module is not None:
+        main_module.current_nn_model = None
+        # W1.7: the versions the model services last reported. A refresh one test lands must not hand the next a
+        # ``version`` in its ``/api/selection`` payload; a refresh still in flight is simply forgotten here.
+        main_module._reported_models = None
+        main_module._model_version_refresh = None
 
     # Reset callback context adapter
     with contextlib.suppress(ImportError):

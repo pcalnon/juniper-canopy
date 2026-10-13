@@ -4,7 +4,7 @@
 # Application:   juniper_canopy
 # File Name:     pyproject.toml
 # Author:        Paul Calnon
-# Version:       0.4.0
+# Version:       0.5.0
 #
 # Date Created:  2025-11-03
 # Last Modified: 2026-02-27
@@ -26,7 +26,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "juniper-canopy"
-version = "0.4.0"
+version = "0.8.1"
 description = "Real-time monitoring dashboard for Cascade Correlation Neural Network"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -64,7 +64,23 @@ dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "websockets>=12.0",
-    "python-dotenv>=1.0.0",
+    # CFG-13: ``python-dotenv`` was previously declared explicitly here.
+    # Removed because:
+    #   1. No canopy code in ``src/`` imports ``dotenv`` directly
+    #      (``grep -rn 'from dotenv\|import dotenv' src/`` returns zero
+    #      hits outside test reports).
+    #   2. ``src/settings.py:124`` uses ``env_file=".env"`` on the
+    #      pydantic-settings ``Settings`` class. pydantic-settings
+    #      declares ``python-dotenv>=0.21.0`` as a **required (non-optional)**
+    #      runtime dep (verified via ``importlib.metadata.metadata
+    #      ('pydantic-settings').get_all('Requires-Dist')``), so it
+    #      transitively installs whenever canopy is installed.
+    #   3. The lockfile correctly resolves ``python-dotenv==1.2.2`` via
+    #      the pydantic-settings edge; this PR does not require a lock
+    #      regen.
+    # Sibling repos juniper-data and juniper-cascor DO have direct
+    # ``from dotenv import load_dotenv`` calls and correctly keep the
+    # explicit dep; canopy is the only repo where it was dead.
     "nest-asyncio>=1.5.0",
     "requests>=2.28.0",
     # METRICS-MON R4.2 / seed-10: native async HTTP for health-probe
@@ -83,14 +99,47 @@ dependencies = [
     # (DependencyStatus, ReadinessResponse, probe_dependency,
     # JuniperJsonFormatter, RequestIdMiddleware, PrometheusMiddleware,
     # configure_logging, configure_sentry, get_prometheus_app,
-    # set_build_info). Pinned at the first stable release; consumers
-    # should never resolve back to the alpha line.
-    "juniper-observability>=0.2.0",
+    # set_build_info). 0.3.0 adds MetricsAuthMiddleware
+    # (POC §6 promotion from data #157 + cascor #313); pinned at the
+    # first version that exports the middleware so the SEC-16 surface
+    # is consistent across services. 0.4.0 adds optional ``git_sha`` /
+    # ``build_date`` passthrough on ``set_build_info`` + the shared
+    # ``ReadinessResponse`` model for build provenance (juniper-ml
+    # notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md).
+    "juniper-observability>=0.4.0,<0.5.0",
+    # E-8 boot-time dependency-floor self-check. canopy calls
+    # ``enforce_dependency_floors(distribution="juniper-canopy")`` in its FastAPI
+    # lifespan (``src/main.py``) to fail loud before binding if any installed
+    # ``juniper-*`` wheel is below canopy's declared floor -- the automatic
+    # *prevention* companion to the E-2 env-floor-drift *detector* (``make
+    # check-env`` / ``juniper-env-drift-check``), catching the "green tests /
+    # dead app" class at first boot. Unconditional (the check must always run).
+    # 0.5.0 floor: adds ``enforce_auth_posture`` (SEC-F01 / HO-2), the boot-time
+    # auth-posture self-check the lifespan calls right after the floor check.
+    "juniper-service-core>=0.5.0,<0.8.0",
     # METRICS-MON R2.2.5 / seed-05: WS frame schema validation. Pinned
     # at the first stable release; pulled in transitively by
     # juniper-cascor-client too, but pinned explicitly here so the
     # dependency edge is visible to anyone reading canopy's pyproject.
-    "juniper-cascor-protocol>=0.1.0",
+    "juniper-cascor-protocol>=0.1.0,<0.3.0",
+    # 2026-05-10: promoted from the [observability] extra into required
+    # deps. ``src/observability.py:152`` unconditionally imports
+    # ``prometheus_client`` whenever ``CANOPY_METRICS_ENABLED=true``, and
+    # the deploy stack always sets that env (via .env.observability) under
+    # the observability profile. Keeping it as an extra meant
+    # ``pip install juniper-canopy`` (no extra) silently produced an
+    # image that crashed at import. The runtime cost is identical
+    # because the production lockfile already pins it via the extra.
+    "prometheus-client>=0.20.0",
+    # Imported directly by production source and previously undeclared -- they resolved only as
+    # transitives of fastapi (starlette) and Flask (itsdangerous), and Flask is in no lane's
+    # declared dependency set at all. src/middleware.py imports BaseHTTPMiddleware / JSONResponse /
+    # ASGIApp from starlette, and src/main.py imports starlette's SessionMiddleware, whose module
+    # raises ImportError at import time unless itsdangerous is installed (starlette ships it in its
+    # `full` extra, not its base requirements). Verified by uninstalling itsdangerous from an
+    # otherwise-complete env: `import main` then fails.
+    "starlette>=0.40",
+    "itsdangerous>=2.0",
 ]
 
 [project.urls]
@@ -100,23 +149,112 @@ Repository = "https://github.com/pcalnon/juniper-canopy"
 Issues = "https://github.com/pcalnon/juniper-canopy/issues"
 
 [project.optional-dependencies]
+# The test surface, declared rather than inherited from a `pip list --format=freeze` snapshot.
+#
+# Every CI lane used to get pytest and friends from conf/requirements_ci.txt, which is generator
+# output (`juniper-generate-dep-docs`) in which 49 of 75 requirement lines are transitives declared
+# as direct. That made dependabot open PRs against packages canopy does not use, and one of them --
+# `pre_commit`, which no lane that installs the file ever runs -- dragged in `virtualenv` and its
+# `filelock<4` cap, making #646's `filelock>=4.0.0` unsatisfiable. canopy was the only repo of nine
+# still installing that file; the `security` job here (ci.yml) and all five sibling repos already
+# install from pyproject extras.
+#
+# Deliberately NOT [dev]: that extra pulls [demo], hence torch, hence ~2GB per lane.
+test = [
+    "pytest>=9.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    # pyproject's [tool.pytest.ini_options] sets `timeout = 60` under `--strict-config`, so an env
+    # without pytest-timeout is a hard collection error, not a degraded run.
+    "pytest-mock>=3.12",
+    "pytest-timeout>=2.4.0",
+    "coverage>=7.16.0",
+    # Imported directly by the suite: anyio by src/tests/conftest.py, packaging by
+    # src/tests/unit/test_client_version_floors.py. Both previously arrived only as transitives.
+    "anyio>=4.15.1",
+    "packaging>=26.3",
+]
 juniper-data = [
     # METRICS-MON R4.3 / seed-13: bumped from >=0.3.0 to >=0.4.1 because
     # canopy now constructs ``JuniperDataClient`` with the ``on_request``
     # instrumentation kwarg (added in 0.4.1). Pin floor matches the
     # release that introduced the kwarg.
-    "juniper-data-client>=0.4.1",
+    #
+    # 2026-09-21: raised 0.4.1 -> 0.5.0. Decision 11 (the three-partition NPZ
+    # contract, ``NPZ_SPLITS == ("train", "val", "test")``) shipped in
+    # data-client 0.5.0, released 2026-09-10/11. canopy's whole dataset path
+    # assumes that contract -- every §12 seed depends on it -- while the floor
+    # still admitted 0.4.1 and 0.4.2, which predate it. ``requirements.lock``
+    # already resolved 0.5.0, so this closes the gap between what the lock
+    # tests and what the published metadata permits a consumer to install.
+    # Verified from the published wheel, not a checkout: 0.5.0 exports
+    # ``validate_npz_contract``; 0.4.x does not. Ceiling left at <0.6.0.
+    "juniper-data-client>=0.5.0,<0.6.0",
     "requests>=2.28.0",
 ]
 juniper-cascor = [
-    "juniper-cascor-client>=0.1.0",
+    # Floor 0.7.0 (CL2, juniper-ml training-runtime defects plan §7/§13): the
+    # CascorServiceAdapter liveness seams consume the cascor-client CL1 surface
+    # shipped in 0.7.0 (cascor-client#92) — the stream classes' ``is_connected``
+    # / ``is_alive(window_sec)`` liveness properties and WS auto-pong — and the
+    # metrics relay retires its manual heartbeat-pong workaround because 0.7.0's
+    # ``CascorTrainingStream`` auto-pongs and never yields ``ping`` frames.
+    # ``FakeCascorTrainingStream`` gained matching liveness parity in 0.7.0.
+    # Earlier releases lack the surface, so the floor is the oldest version the
+    # adapter can run against. (Prior floor 0.6.0: FakeCascorClient ``_request``
+    # in-memory parity, cascor-client#91.)
+    #
+    # Floor 0.8.0 (2026-09-05, the X7 C8 fix): 0.8.0 narrows
+    # ``RETRY_ALLOWED_METHODS`` to ``["HEAD", "GET"]``, so a failed
+    # ``POST /v1/training/start`` is no longer retried into up to four training
+    # runs (cascor-client ``APD-CCLIENT-001``). Every earlier release -- 0.7.0
+    # included -- retries ``POST``/``PUT``/``PATCH``/``DELETE``, and canopy is
+    # the consumer that issues the training-start. The floor is what stops a
+    # resolver handing canopy a client that does that; the cap alone would not.
+    # 0.8.0 rather than 0.7.1 because it also adds ``backoff_factor`` as a
+    # public constructor parameter (``APD-CCLIENT-013``) -- additive public API
+    # is a feature, so MINOR. The ``<0.8.0`` cap this replaced was widened to
+    # ``<0.9.0`` first (canopy#584), because a cap excluding the artefact would
+    # have blocked the release outright; the floor could only follow, since a
+    # floor pinned at an unpublished version resolves nothing.
+    # Verified against the published wheel, not the checkout:
+    # ``pip install juniper-cascor-client==0.8.0`` then
+    # ``constants.RETRY_ALLOWED_METHODS`` -> ``['HEAD', 'GET']``.
+    "juniper-cascor-client>=0.8.0,<0.9.0",
 ]
 observability = [
-    "prometheus-client>=0.20.0",
+    # prometheus-client moved to [project] dependencies on 2026-05-10
+    # (see comment near juniper-cascor-protocol). Kept here is sentry,
+    # which is genuinely opt-in.
     "sentry-sdk>=2.0.0",
 ]
+ui-test = [
+    # Issue #4 / FRONTEND_ISSUES_PLAN_2026-05-09.md §5: Playwright-based browser
+    # automation for the UI sub-suite. Skeleton landed in PR-3; full inventory
+    # lands in PR-10. Browser binaries installed via ``playwright install
+    # --with-deps chromium`` (see .github/workflows/ci.yml ui-tests lane).
+    "pytest-playwright>=0.5",
+    "playwright>=1.45",
+]
+demo = [
+    # CFG-01 (v7 roadmap §13439): ``torch`` is imported unconditionally at
+    # module level by ``src/demo_mode.py:63`` and ``src/backend/demo_backend.py:45``.
+    # ``pip install juniper-canopy`` without this extra cannot import the
+    # demo modules. Kept out of ``[project] dependencies`` to avoid the
+    # ~2GB install footprint on production deployments that drive a remote
+    # cascor service via ``[juniper-cascor]`` and never load demo mode
+    # (matches the lazy-import convention in ``src/backend/data_adapter.py:363,406``
+    # whose existing comments call out the size cost explicitly).
+    # The standalone demo runner ``util/juniper_canopy-demo.bash`` continues
+    # to install torch via ``conf/requirements.txt`` + the PyTorch CPU index
+    # URL for size-optimised bash-script installs; this extra is the
+    # canonical path for ``pip install juniper-canopy[demo]``.
+    # SEC-F17 (CVE-2025-3001, lstm_cell memory corruption, fixed 2.10.0):
+    # floor raised 2.0.0 -> 2.10.0 to exclude the vulnerable 2.0-2.9 range.
+    "torch>=2.10.0",
+]
 dev = [
-    "juniper-canopy[juniper-data,juniper-cascor,observability]",
+    "juniper-canopy[juniper-data,juniper-cascor,observability,demo]",
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "pytest-asyncio>=0.23",
@@ -130,6 +268,48 @@ dev = [
 [tool.setuptools.packages.find]
 where = [".", "src"]
 include = ["juniper_canopy*", "backend*", "communication*", "frontend*", "logger*"]
+
+# ``packages.find`` collects PACKAGES -- directories carrying ``__init__.py``. Every bare
+# ``src/<name>.py`` is a top-level MODULE, which it never collects, so releases 0.5.0
+# through 0.8.0 shipped ``frontend/dashboard_manager.py`` without the ``canopy_constants``
+# it imports on its first line (canopy#631). Thirteen of the 49 shipped files imported a
+# module that was not in the wheel.
+#
+# ``py-modules`` resolves against ``package-dir``, NOT against ``packages.find.where``, and
+# adding it without the block below is worse than useless: the build succeeds and produces a
+# wheel with none of the modules in it. ``juniper_canopy`` needs its own mapping because it
+# sits at the repository root while everything else is under ``src/``; without it the build
+# fails with "package directory 'src/juniper_canopy' does not exist".
+#
+# ``util/wheel_import_smoke.py`` runs in ``publish.yml`` and fails the publish if any of
+# these stops reaching the wheel. Adding a new ``src/*.py`` means adding it in both places.
+[tool.setuptools]
+py-modules = [
+    "audit_log",
+    "canopy_constants",
+    "config_manager",
+    "csrf",
+    "dataset_import",
+    "dataset_schema",
+    "demo_mode",
+    "discovery",
+    "health",
+    "main",
+    "middleware",
+    "model_registry",
+    "observability",
+    "outbound_errors",
+    "provenance",
+    "secrets_util",
+    "security",
+    "settings",
+    "validation_gate",
+    "ws_security",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+juniper_canopy = "juniper_canopy"
 
 # ==========================================
 # Black Configuration
@@ -266,6 +446,13 @@ addopts = [
     "--strict-config",
     "--continue-on-collection-errors",
     "--tb=short",
+    # Exclude the Playwright UI subsuite from the default invocation.
+    # pytest-playwright's session-level browser fixture leaks an event loop
+    # that breaks every async test that runs after a UI test in the same
+    # pytest session (180 async failures with UI included → 0 without).
+    # Run UI tests via a separate invocation: `make test-ui` (or
+    # `pytest src/tests/ui --override-ini=addopts=`).
+    "--ignore=src/tests/ui",
 ]
 markers = [
   "unit: Unit tests (fast, no external dependencies)",
@@ -281,6 +468,7 @@ markers = [
   "requires_display: Tests requiring display for visualization",
   "api: Tests for API endpoints",
   "generators: Tests for data generators",
+  "ui: Browser-automation tests (Playwright; requires `playwright install chromium` and the `ui-test` extra)",
 ]
 asyncio_mode = "auto"
 consider_namespace_packages = false

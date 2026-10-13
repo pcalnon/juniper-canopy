@@ -35,6 +35,7 @@
 #####################################################################################################################################################################################################
 # import logging
 # from typing import Dict, Any, List, Optional
+import json
 import os
 from typing import Any, Dict, List, Tuple
 
@@ -47,9 +48,194 @@ from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
 from canopy_constants import DashboardConstants
+from frontend.internal_api import internal_api_headers
 from settings import get_settings
 
 from ..base_component import BaseComponent, create_empty_plot
+
+# F-CANOPY-054: the replay block's one writer of ``replay-state``, run in the browser. Its arguments
+# are its Inputs then its State, in registration order (``register_callbacks``). ``__PREFIX__`` and
+# ``__CONTROLS__`` are replaced with JSON literals at registration: the component-id prefix and
+# ``MetricsPanel.REPLAY_CONTROL_IDS``. Each control's effect, for one click, is the merged server
+# callback's of canopy#658, unchanged; ``src/tests/unit/frontend/test_f054_replay_block_clientside.py``
+# runs this function under node against verbatim copies of the old callbacks. Outputs, in order:
+# state, interval disabled, interval period, slider value, slider max, position index, position max,
+# play label.
+REPLAY_CONTROLS_JS = """
+function(playClicks, backClicks, forwardClicks, startClicks, endClicks, speed1x, speed2x, speed4x, sliderValue, nIntervals, currentState, metricsData) {
+    var dc = window.dash_clientside;
+    var noUpdate = dc.no_update;
+    var ctx = dc.callback_context || {};
+    var prefix = __PREFIX__;
+    var controls = __CONTROLS__;
+    var tickId = prefix + "replay-interval";
+    var maxIndex = (metricsData && metricsData.length) ? metricsData.length - 1 : 0;
+    var tickN = (typeof nIntervals === "number") ? nIntervals : 0;
+    var state = currentState ? Object.assign({}, currentState) : {mode: "stopped", speed: 1.0, current_index: 0, start_index: 0, end_index: null};
+    if (typeof state.current_index !== "number") { state.current_index = 0; }
+    var num = function (v) { return (typeof v === "number" && isFinite(v)) ? v : 0; };
+
+    // EVENTS COME FROM VALUES, NOT ONLY FROM TRIGGERS. A trigger can be lost before this runs:
+    // a request of this callback waiting for one of the renderer's 12 slots (``prioritized``)
+    // is replaced by the next tick's request of the same callback, and only requests still in
+    // ``requested`` merge their changed-prop ids. The click counts survive in the Inputs, so
+    // ``state.clicks`` keeps each button's count as of its last applied click, and anything
+    // above it is applied now. A trigger alone applies nothing: it only orders the events.
+    // The slider is a seek when its value differs from the value this callback last wrote to
+    // it (``state.slider_w``).
+    var counts = {
+        "replay-play": playClicks, "replay-step-back": backClicks, "replay-step-forward": forwardClicks,
+        "replay-start": startClicks, "replay-end": endClicks,
+        "speed-1x": speed1x, "speed-2x": speed2x, "speed-4x": speed4x
+    };
+    var seen = Object.assign({}, (state.clicks && typeof state.clicks === "object") ? state.clicks : {});
+    var pending = {};
+    Object.keys(counts).forEach(function (c) {
+        var n = num(counts[c]);
+        var s = num(seen[c]);
+        if (n < s) { s = 0; }  // the button was re-created and its count restarted
+        seen[c] = s;
+        pending[c] = n - s;
+    });
+    var sliderOk = (typeof sliderValue === "number") && isFinite(sliderValue);
+    var sliderMoved = sliderOk && (typeof state.slider_w === "number") && sliderValue !== state.slider_w;
+
+    // Apply order: controls whose trigger was lost come first, because their clicks predate
+    // this run's triggers. Then the triggers, in the order the renderer merged them. Two LOST
+    // clicks of different controls apply in REPLAY_CONTROL_IDS order, not click order: step
+    // forward then play, both lost, ends paused. Only n_clicks_timestamp could order them, and
+    // two lost in one run is rare (both reviewers, round 2).
+    var triggered = ctx.triggered || [];
+    var order = [];
+    var inTriggers = {};
+    for (var k = 0; k < triggered.length; k++) {
+        var propId = String(triggered[k].prop_id || "");
+        var cid = propId.slice(0, Math.max(0, propId.lastIndexOf(".")));
+        if (cid === tickId) { order.push("tick"); continue; }
+        if (cid.indexOf(prefix) !== 0) { continue; }
+        var name = cid.slice(prefix.length);
+        if (controls.indexOf(name) < 0 || inTriggers[name]) { continue; }
+        inTriggers[name] = true;
+        order.push(name);
+    }
+    var lost = controls.filter(function (c) {
+        if (inTriggers[c]) { return false; }
+        return (c === "replay-slider") ? sliderMoved : pending[c] > 0;
+    });
+    order = lost.concat(order);
+
+    var controlFired = false;
+    var ticked = false;
+    var sliderReset = false;
+    for (var e = 0; e < order.length; e++) {
+        var ev = order[e];
+        if (ev === "tick") {
+            if (state.mode !== "playing") { continue; }
+            // Merged ticks arrive as ONE request, with n_intervals read at execution: advance
+            // by the ticks since the last one consumed, not by one.
+            var last = (typeof state.tick_n === "number") ? state.tick_n : tickN - 1;
+            var steps = tickN - last;
+            if (steps <= 0) { continue; }
+            var endIndex = state.end_index || maxIndex;
+            var next = state.current_index + steps;
+            if (next > endIndex) {
+                state.mode = "stopped";
+                state.current_index = endIndex;
+            } else {
+                state.current_index = next;
+            }
+            state.tick_n = tickN;
+            ticked = true;
+            continue;
+        }
+        if (ev === "replay-slider" && !sliderOk) {
+            // A cleared number box sends NaN. That is not a seek: write the slider back.
+            sliderReset = true;
+            continue;
+        }
+        // A button applies exactly its unapplied clicks; its trigger only orders it. An earlier
+        // run can already have applied this click from the count -- it ran after the click
+        // wrote n_clicks and before this request did -- and applying it again would undo the
+        // pause (Lane B2, round 2). A slider trigger carrying the value this callback last wrote
+        // is not a seek: re-reading the thumb, trunc(v / 100 * max) can land one index low. The
+        // cost: a real drag landing exactly on that value does not pause. It is a whole number
+        // only at row 0, the last row, or where max divides 100 * row (round 3).
+        if (ev === "replay-slider") {
+            if (typeof state.slider_w === "number" && sliderValue === state.slider_w) { continue; }
+        } else if (pending[ev] <= 0) {
+            continue;
+        }
+        var times = (ev === "replay-slider") ? 1 : pending[ev];
+        if (ev !== "replay-slider") { seen[ev] = num(counts[ev]); }
+        if (!controlFired) {
+            state.end_index = state.end_index || maxIndex;
+            controlFired = true;
+        }
+        if (ev === "replay-play") {
+            // ONE toggle per run, however many clicks are pending. Stock Dash toggles once for a
+            // merged double click, and on a page this slow a second click is usually the user
+            // repeating a pause that has not shown yet, not undoing it. By parity, a lost pause
+            // plus that repeat would cancel out and leave the replay playing. It helps only
+            // when both clicks are pending in ONE run: a repeat made after the pause applied,
+            // but before the page shows it, toggles back. That is the toggle's own limit.
+            state.mode = (state.mode === "playing") ? "paused" : "playing";
+            if (state.mode === "playing") { state.tick_n = tickN; }
+        } else if (ev === "replay-step-back") {
+            state.mode = "paused";
+            state.current_index = Math.max(0, state.current_index - times);
+        } else if (ev === "replay-step-forward") {
+            state.mode = "paused";
+            state.current_index = Math.min(maxIndex, state.current_index + times);
+        } else if (ev === "replay-start") {
+            state.current_index = (typeof state.start_index === "number") ? state.start_index : 0;
+            state.mode = "paused";
+        } else if (ev === "replay-end") {
+            state.current_index = state.end_index || maxIndex;
+            state.mode = "paused";
+        } else if (ev === "speed-1x") {
+            state.speed = 1.0;
+        } else if (ev === "speed-2x") {
+            state.speed = 2.0;
+        } else if (ev === "speed-4x") {
+            state.speed = 4.0;
+        } else if (ev === "replay-slider") {
+            state.current_index = maxIndex > 0 ? Math.trunc((sliderValue / 100) * maxIndex) : 0;
+            state.mode = "paused";
+        }
+    }
+    var idx = state.current_index;
+    var sliderOut = maxIndex > 0 ? (idx / maxIndex * 100) : 0;
+    var label = (state.mode === "playing") ? "\\u23f8" : "\\u25b6";
+    var disabled = state.mode !== "playing";
+    if (order.length > 0 && !controlFired && !ticked && !sliderReset) {
+        // Events, none with anything to do: a tick while not playing or already consumed, a
+        // trigger whose click was already applied, the slider's own value. Write nothing.
+        return [noUpdate, noUpdate, noUpdate, noUpdate, noUpdate, noUpdate, noUpdate, noUpdate];
+    }
+    // Every path below writes the slider, and every one records what it wrote, so a later
+    // slider value that differs from ``slider_w`` can only be the user's. (The refill below
+    // never writes the slider.) Writing the state triggers nothing: no callback takes it as
+    // an Input.
+    state.clicks = seen;
+    state.slider_w = sliderOut;
+    if (controlFired) {
+        var speed = (typeof state.speed === "number" && state.speed > 0) ? state.speed : 1.0;
+        return [state, disabled, Math.trunc(1000 / speed), sliderOut, 100, String(idx), String(maxIndex), label];
+    }
+    if (ticked) {
+        return [state, disabled, noUpdate, sliderOut, noUpdate, String(idx), String(maxIndex), label];
+    }
+    // Mount, a tab rebuild, or a cleared slider box: render from the state, change nothing.
+    return [state, noUpdate, noUpdate, sliderOut, 100, String(idx), String(maxIndex), label];
+}
+"""
+
+# F-CANOPY-054: a metrics refill re-renders the "/ <max>" half of the position text (M-METRICS-17).
+REPLAY_REFILL_POSITION_JS = """
+function(metricsData) {
+    return String((metricsData && metricsData.length) ? metricsData.length - 1 : 0);
+}
+"""
 
 
 class MetricsPanel(BaseComponent):
@@ -63,6 +249,53 @@ class MetricsPanel(BaseComponent):
     - Training phase indicators (output training vs candidate training)
     - Current network statistics
     """
+
+    # ------------------------------------------------------------------
+    # N9 (training-runtime defects plan §4-U U-2/U-3/U-4 display) — the
+    # classification-metrics series contract (SINGLE SOURCE OF TRUTH).
+    # ------------------------------------------------------------------
+    # Trace 0 of each plot is the WS-bridge ``extendTraces`` target (appended
+    # by index in the clientside callback in ``register_callbacks``); every
+    # other series (validation overlays + the C7 scalars below) is looked up by
+    # its exact display *name*. The names here MUST match the ``findTraceIndex``
+    # lookups in that JS — a mismatch would silently mis-append WS points to the
+    # wrong trace. ``test_n9_metrics_visualization`` pins both sides together.
+    OUTPUT_TRACE_NAME = "Output Training"  # loss plot, trace 0
+    ACCURACY_TRACE_NAME = "Accuracy"  # classification plot, trace 0
+    ACCURACY_COLOR = "#28a745"  # green — matches the Accuracy tile
+
+    # C7 (U-4) scalar classification metrics rendered on the classification
+    # (accuracy) plot, in trace order *after* "Accuracy". Each tuple is
+    # ``(row key, Plotly trace display name, series color)``. The row key is the
+    # flat scalar name in cascor's C7 contract
+    # (``classification_metrics.METRIC_KEYS`` — f1/precision/recall/roc_auc);
+    # the metrics panel reads it from each row's nested ``metrics`` dict
+    # (REST path) and the WS clientside callback reads the same flat field off
+    # the frame. Colors are chosen for mutual contrast and legibility on both
+    # the light (#f8f9fa/#ffffff) and dark (#242424) figure backgrounds. All are
+    # bounded to [0, 1] so they share the accuracy plot's percentage y-axis.
+    SCALAR_SERIES: Tuple[Tuple[str, str, str], ...] = (
+        ("f1", "F1", "#6f42c1"),  # violet
+        ("precision", "Precision", "#fd7e14"),  # orange
+        ("recall", "Recall", "#0dcaf0"),  # cyan
+        ("roc_auc", "ROC-AUC", "#d63384"),  # magenta
+    )
+
+    # F-CANOPY-048: the replay controls, as the suffixes of their component ids
+    # (``f"{component_id}-{suffix}"``). ``REPLAY_CONTROLS_JS`` (F-CANOPY-054: the block is
+    # clientside) dispatches on exact membership of this list, injected at registration, so the
+    # tick Input (``replay-interval``) can never be mistaken for a control.
+    REPLAY_CONTROL_IDS: Tuple[str, ...] = (
+        "replay-play",
+        "replay-step-back",
+        "replay-step-forward",
+        "replay-start",
+        "replay-end",
+        "speed-1x",
+        "speed-2x",
+        "speed-4x",
+        "replay-slider",
+    )
 
     def __init__(self, config: Dict[str, Any], component_id: str = "metrics-panel"):
         """
@@ -80,6 +313,12 @@ class MetricsPanel(BaseComponent):
 
         # Update interval (milliseconds)
         # Priority: 1. Passed config, 2. Environment variable, 3. Default (1000ms)
+        #
+        # This value drives nothing. It set the period of the panel's own ``-update-interval``,
+        # which no callback consumed and which was removed. It is still parsed, so a config or
+        # an environment that sets ``update_interval`` / JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS
+        # behaves exactly as it did: without effect. The metrics refresh is
+        # ``metrics-store-interval`` (dashboard_manager.py).
         if "update_interval" in config:
             self.update_interval = config["update_interval"]
         elif update_interval_env := os.getenv("JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS"):
@@ -289,7 +528,7 @@ class MetricsPanel(BaseComponent):
                                     className="me-1",
                                     title="Go to end",
                                 ),
-                                html.Span("|", style={"margin": "0 10px", "color": "#ccc"}),
+                                html.Span("|", style={"margin": "0 10px", "color": "var(--border-color)"}),
                                 dbc.ButtonGroup(
                                     [
                                         dbc.Button(
@@ -322,9 +561,16 @@ class MetricsPanel(BaseComponent):
                         # Progress slider
                         html.Div(
                             [
+                                # "<current> / <max>" (M-METRICS-17). Two child spans: the controls
+                                # callback is the only writer of the index, and the refill writes
+                                # the max alone, so a refill can never write a stale index.
                                 html.Span(
                                     id=f"{self.component_id}-replay-position",
-                                    children="0 / 0",
+                                    children=[
+                                        html.Span("0", id=f"{self.component_id}-replay-position-index"),
+                                        " / ",
+                                        html.Span("0", id=f"{self.component_id}-replay-position-max"),
+                                    ],
                                     style={"marginRight": "10px", "fontSize": "12px", "minWidth": "60px"},
                                 ),
                                 dcc.Slider(
@@ -376,7 +622,7 @@ class MetricsPanel(BaseComponent):
                                     step=10,
                                     size="sm",
                                     style={"width": "80px", "display": "inline-block"},
-                                    debounce=True,
+                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                 ),
                             ],
                             id=f"{self.component_id}-window-size-container",
@@ -442,8 +688,13 @@ class MetricsPanel(BaseComponent):
                             style={"flex": "1", "textAlign": "center", "padding": "15px"},
                         ),
                     ],
+                    id=f"{self.component_id}-classification-metrics",
                     style={"display": "flex", "justifyContent": "space-around", "marginBottom": "20px", "gap": "10px"},
                 ),
+                # A1-iii-b2: one-shot (recurrence / LMU) regression result card. Hidden for a
+                # live model; for a one_shot model the classification cards + plots above/below
+                # are hidden and this card is shown + populated by ``render_model_class_metrics``.
+                html.Div(id=f"{self.component_id}-oneshot-result", style={"display": "none"}),
                 # Training progress bars
                 html.Div(
                     id=f"{self.component_id}-progress-bars",
@@ -493,9 +744,16 @@ class MetricsPanel(BaseComponent):
                     style={"height": "300px"},
                 ),
                 # Candidate Pool Section moved to CandidateMetricsPanel (candidate_metrics_panel.py)
-                # Data store for metrics
+                # Data store for metrics. Hydrated by the dashboard-level
+                # /api/metrics/history poll on every fast-interval tick (1 s) —
+                # un-gated per N1 (the bridge posture until WS-primary lands,
+                # Q6/C6/N8); the WS extendTraces path remains the chart fast path.
                 dcc.Store(id=f"{self.component_id}-metrics-store", data=[]),
-                dcc.Store(id=f"{self.component_id}-network-stats-store", data={}),
+                # F-CANOPY-034: ``-network-stats-store`` was removed here. Its writer
+                # (the dead ``fetch_network_stats`` poller) went in F-CANOPY-027 /
+                # canopy#507; the store itself was retained then only to keep that PR's
+                # diff free of a layout-snapshot rewrite. It had no Input and no State
+                # consumer anywhere in src/, so nothing reads it.
                 dcc.Store(id=f"{self.component_id}-training-state-store", data={}),
                 # View state store for preserving graph zoom/pan
                 dcc.Store(
@@ -507,8 +765,9 @@ class MetricsPanel(BaseComponent):
                         "accuracy_yaxis_range": None,
                     },
                 ),
-                # Update interval
-                dcc.Interval(id=f"{self.component_id}-update-interval", interval=self.update_interval, n_intervals=0),
+                # The panel's own 1 Hz ``-update-interval`` was removed: no callback took it as an
+                # Input, and every tick was still a store update that re-ran the page's
+                # selectors. ``test_every_interval_has_a_consumer`` keeps the class out.
                 dcc.Interval(id=f"{self.component_id}-stats-update-interval", interval=5000, n_intervals=0),
                 # Replay functionality stores
                 dcc.Store(
@@ -540,25 +799,59 @@ class MetricsPanel(BaseComponent):
             app: Dash application instance
         """
 
-        # PERF-CN-01: prevent_initial_call=False — must hit the API on mount to
-        # populate network stats before the first interval tick.
-        @app.callback(
-            Output(f"{self.component_id}-network-stats-store", "data"),
-            [Input(f"{self.component_id}-stats-update-interval", "n_intervals")],
-            prevent_initial_call=False,
-        )
-        def fetch_network_stats(n_intervals):
-            return self._fetch_network_stats_handler(n_intervals=n_intervals)
+        # F-CANOPY-027: the ``fetch_network_stats`` poller that used to live here was DEAD
+        # WORK. It GET /api/network/stats every 5 s and wrote
+        # ``metrics-panel-network-stats-store`` — a store with no Input and no State consumer
+        # anywhere in src/ (verified repo-wide; the only other reference is its own
+        # ``dcc.Store`` declaration). Under dash-renderer's 12-slot concurrency cap that was a
+        # permanently-occupied slot bought for nothing, so it is removed rather than gated.
+        #
+        # The ``dcc.Store`` itself is deliberately RETAINED (it is inert, and the layout
+        # regression snapshot pins it); removing the store is tracked separately as
+        # F-CANOPY-034 so this PR's diff stays reviewable. ``_fetch_network_stats_handler``
+        # is likewise retained — it is exercised by existing unit tests.
 
         # PERF-CN-01: prevent_initial_call=False — must hit the API on mount to
         # populate training state before the first interval tick.
+        # N8 (training-runtime defects plan §4 I-1, posture O1 / Q6): the O1 half — a
+        # liveness-gated REST poll that fires on EVERY stats tick (the interval is the
+        # sole trigger, so it can never be starved) and reads the liveness signal as
+        # STATE. While the state stream is fresh (state_live) it returns ``no_update``
+        # (the WS-primary append callback below owns the store); when stale it polls
+        # /api/state (with an empty-guard).
+        #
+        # CRITICAL (Dash execution model): ws-state-buffer is deliberately NOT an Input
+        # here. Its clientside producer no_updates while the WS is quiet, and a chained
+        # Input whose producer no_updates makes Dash SKIP this interval-only callback
+        # for that tick — silently re-creating the I-1 starvation. The WS buffer is
+        # consumed by a separate ``allow_duplicate`` append callback triggered ONLY by
+        # ws-state-buffer; ws-liveness-store rides as State for the same reason.
         @app.callback(
             Output(f"{self.component_id}-training-state-store", "data"),
             [Input(f"{self.component_id}-stats-update-interval", "n_intervals")],
+            [
+                State("ws-liveness-store", "data"),
+                State(f"{self.component_id}-training-state-store", "data"),
+            ],
             prevent_initial_call=False,
         )
-        def fetch_training_state(n_intervals):
-            return self._fetch_training_state_handler(n_intervals=n_intervals)
+        def fetch_training_state(n_intervals, ws_liveness, current_state):
+            ws_live = bool(ws_liveness and ws_liveness.get("state_live"))
+            return self._fetch_training_state_handler(n_intervals=n_intervals, ws_live=ws_live, current_state=current_state)
+
+        # N8 (posture O3 half): WS-PRIMARY state. Triggered ONLY by a ws-state-buffer
+        # change (the clientside drainState emits it only when a real ``state`` frame
+        # arrived), so this is the sole path that writes WS state into the store; when
+        # the stream is quiet it does not fire and the poll above carries the store.
+        # ``allow_duplicate`` co-owns the Output with the poll (prevent_initial_call
+        # required). Latest-only (replace, not accumulate) since state is a snapshot.
+        @app.callback(
+            Output(f"{self.component_id}-training-state-store", "data", allow_duplicate=True),
+            [Input("ws-state-buffer", "data")],
+            prevent_initial_call=True,
+        )
+        def append_ws_training_state(ws_state_buffer):
+            return self._append_ws_training_state_handler(ws_state_buffer=ws_state_buffer)
 
         # Candidate pool callbacks moved to CandidateMetricsPanel (candidate_metrics_panel.py)
 
@@ -687,6 +980,27 @@ class MetricsPanel(BaseComponent):
         def update_metrics_display(metrics_data: List[Dict[str, Any]], theme: str, display_mode_state: Dict, view_state: Dict, training_state: Dict):
             return self._update_metrics_display_handler(metrics_data=metrics_data, theme=theme, view_state=view_state, display_mode_state=display_mode_state, training_state=training_state)
 
+        # A1-iii-b2: render the one-shot regression result for a recurrence (LMU) model and
+        # hide the classification surface (the accuracy cards + per-epoch loss/accuracy plots
+        # are meaningless for a single regression fit). Driven by the b1 ``model-class-store``;
+        # re-fires on each metrics-store update so the result card fills in when the fit lands.
+        @app.callback(
+            [
+                Output(f"{self.component_id}-oneshot-result", "children"),
+                Output(f"{self.component_id}-oneshot-result", "style"),
+                Output(f"{self.component_id}-classification-metrics", "style"),
+                Output(f"{self.component_id}-loss-plot", "style"),
+                Output(f"{self.component_id}-accuracy-plot", "style"),
+            ],
+            [
+                Input("model-class-store", "data"),
+                Input(f"{self.component_id}-metrics-store", "data"),
+            ],
+            prevent_initial_call=False,
+        )
+        def render_model_class_metrics(model_class: str, metrics_data: List[Dict[str, Any]]):
+            return self._render_model_class_metrics(model_class, metrics_data)
+
         # Phase B: Incremental chart update via Plotly.extendTraces (§S7).
         # When WS bridge pushes new metrics events, append them to the
         # existing chart traces without rebuilding the full figure.
@@ -707,6 +1021,11 @@ class MetricsPanel(BaseComponent):
                 var events = wsBuffer.events;
                 var epochs = [], losses = [], accuracies = [];
                 var valEpochs = [], valLosses = [], valAccs = [];
+                // N9 (C7/U-4): parallel arrays for the scalar classification
+                // metrics, pushed under the SAME gate as loss/accuracy so every
+                // series stays x-aligned with accuracy trace 0 (a length skew
+                // would silently mis-append WS points). null => gap, never 0.
+                var f1s = [], precisions = [], recalls = [], rocAucs = [];
                 for (var i = 0; i < events.length; i++) {
                     var e = events[i];
                     var epoch = e.epoch || e.current_epoch || i;
@@ -716,6 +1035,13 @@ class MetricsPanel(BaseComponent):
                         epochs.push(epoch);
                         losses.push(loss);
                         accuracies.push(acc !== undefined && acc !== null ? acc : 0);
+                        // N9 (C7/U-4): read each scalar flat off the frame under
+                        // the loss gate; null (missing / candidate phase / the
+                        // ~every-25th-epoch sparsity) becomes a gap, not a zero.
+                        f1s.push((e.f1 !== undefined && e.f1 !== null) ? e.f1 : null);
+                        precisions.push((e.precision !== undefined && e.precision !== null) ? e.precision : null);
+                        recalls.push((e.recall !== undefined && e.recall !== null) ? e.recall : null);
+                        rocAucs.push((e.roc_auc !== undefined && e.roc_auc !== null) ? e.roc_auc : null);
                     }
                     // GAP-WS-14: collect validation values when present so the
                     // overlay traces stay in sync without forcing a rebuild.
@@ -768,6 +1094,21 @@ class MetricsPanel(BaseComponent):
                         try {
                             Plotly.extendTraces(accEl, {x: [epochs], y: [accuracies]}, [0], 5000);
                         } catch(e) {}
+                        // N9 (C7/U-4): extend each scalar series by name. Names
+                        // MUST match MetricsPanel.SCALAR_SERIES display names.
+                        // Absent traces (metric disabled / all-null at build
+                        // time) are skipped; the 1 Hz REST rebuild adds the
+                        // trace once real values land, then WS extends keep it
+                        // live. Shares [epochs] so it stays aligned with acc[0].
+                        var n9Series = [{n: "F1", v: f1s}, {n: "Precision", v: precisions}, {n: "Recall", v: recalls}, {n: "ROC-AUC", v: rocAucs}];
+                        for (var s = 0; s < n9Series.length; s++) {
+                            var n9Idx = findTraceIndex(accEl, n9Series[s].n);
+                            if (n9Idx >= 0) {
+                                try {
+                                    Plotly.extendTraces(accEl, {x: [epochs], y: [n9Series[s].v]}, [n9Idx], 5000);
+                                } catch(e) {}
+                            }
+                        }
                     }
                     if (valEpochs.length > 0) {
                         var valAccIdx = findTraceIndex(accEl, "Validation Accuracy");
@@ -830,11 +1171,91 @@ class MetricsPanel(BaseComponent):
                 return {**base_style, "display": "block"}
             return {**base_style, "display": "none"}
 
-        @app.callback(
+        # F-CANOPY-054: the replay block runs in the BROWSER, and ONE callback is the only
+        # writer of ``replay-state``.
+        #
+        # F-CANOPY-048 (canopy#658) merged the controls and the slider render into one server
+        # callback, because two callbacks feeding each other were never ready. It kept the
+        # server ``replay_tick`` (Input ``replay-interval.n_intervals``, State
+        # ``replay-state``; an ``allow_duplicate`` writer of the state) and the play-label
+        # callback beside it. So the state had two writers, each a server round trip away, and
+        # the tick computed the next state from the State read when its request was SENT. The
+        # page's response-delivery latency L is ~5 s (p50 at idle, measured 2026-09-22) against
+        # a 250-1000 ms tick, so a tick is almost always in flight when the user pauses. The
+        # pause disables the interval, so no later tick evicts that one, and its response --
+        # computed from ``playing`` -- lands after the pause and restores ``playing`` with the
+        # interval off: the label stays ⏸ and nothing moves (F-CANOPY-054).
+        #
+        # Moving only the tick clientside is NOT a fix. The server controls callback read
+        # ``replay-state.data`` as an Input, so a clientside tick re-requests it on every tick,
+        # and dash-renderer drops an in-flight request whenever a new request of the same
+        # callback arrives (the requestedCallbacks observer's ``wDuplicates`` step,
+        # dash_renderer.dev.js :3027, removal at :3151; the late response is discarded at
+        # :2697-2704). With L above the tick period, every click made during playback is
+        # evicted. Clean room, with the four shapes side by side: juniper-ml
+        # ``util/ad-hoc/2026-09-23_f054_replay_tick_cleanroom.py`` (results in the E2E ledger,
+        # Phase 8).
+        #
+        # A clientside callback has no in-flight window: ``executeCallback`` fills its Inputs
+        # and State from one layout snapshot and calls it synchronously, and what follows is
+        # promise resolution inside the same macrotask. So once this runs, nothing lands
+        # between its read and its apply, and nothing computes from a stale state. That is why
+        # the tick can be folded into this callback, when folding it into the SERVER callback
+        # would have had the ticks evict each other.
+        #
+        # It CAN still lose a trigger BEFORE it runs. Clientside callbacks share the
+        # renderer's 12 execution slots (:2846). A request waiting in ``prioritized`` for a
+        # slot is replaced by the next tick's request of this same callback (``pDuplicates``,
+        # :3024), and only requests still in ``requested`` merge their changed-prop ids
+        # (:3004). So the trigger list alone cannot be trusted. Events come from VALUES:
+        # ``state.clicks`` holds each button's count as of its last applied click, and any
+        # count above it is applied at the next run, before that run's own triggers. The
+        # slider is a seek when its value differs from the one this callback last wrote
+        # (``state.slider_w``, recorded on every write). A lost pause therefore applies at this
+        # callback's next run to get a slot -- a later request can replace the replacer too, and
+        # under sustained contention the wait can be seconds -- instead of never. A trigger alone applies nothing, so a
+        # click an earlier run already applied from its count is not applied again when its own
+        # request runs; applying it again would undo the pause. Review evidence (juniper-ml
+        # ``reports/e2e-canopy-2026-09-02/consensus/2026-09-23_validator_reports_round*.md``):
+        # with trigger-only dispatch the pause was lost 3/3 under forced slot saturation (Lane
+        # B, round 1); with "count or trigger" one click applied twice (Lane B2, round 2).
+        #
+        # ``metrics-store.data`` is STATE, not an Input. ``getReadyCallbacks`` holds a
+        # requested callback while any of its INPUTS lies in the downstream closure of a
+        # pending callback (State is never checked), and the store's primary writer
+        # ``update_metrics_store`` is pending most of the time: a request/ack-paced poll
+        # (``running=``-gated until F-CANOPY-058) against L ~5 s. With the store as an Input the controls waited on every poll, the
+        # condition canopy#658 recorded; now no pending callback holds back their readiness
+        # (``test_nothing_pending_can_hold_the_replay_controls``) -- a ready run can still wait
+        # for a slot, as above. The cost: a refill no longer
+        # moves the slider THUMB, only the position text (the callback below); the thumb
+        # catches up on the next control or tick. Nothing else may write the thumb, because
+        # this callback reads the slider as its seek Input, so another writer's value would
+        # arrive here as a user seek and pause playback.
+        #
+        # Ticks are counted, not assumed. While this callback waits (a busy main thread, or
+        # two timer firings queued before a renderer pass) the renderer merges the queued
+        # requests into one, and ``n_intervals`` is read at execution. So the state records
+        # the last ``n_intervals`` it consumed (``tick_n``, an optional key) and a tick
+        # advances by the difference.
+        #
+        # Reaching the end stops the interval. ``replay_tick`` set ``stopped`` and left the
+        # interval running, so a finished replay kept a server round trip a second, and the
+        # two refreshes it re-triggered, alive until the next click.
+        #
+        # PERF-CN-01: prevent_initial_call=False -- renders the initial slider, the "0 / 0"
+        # position and the "▶" label on mount.
+        app.clientside_callback(
+            REPLAY_CONTROLS_JS.replace("__PREFIX__", json.dumps(f"{self.component_id}-")).replace("__CONTROLS__", json.dumps(list(self.REPLAY_CONTROL_IDS))),
             [
                 Output(f"{self.component_id}-replay-state", "data"),
                 Output(f"{self.component_id}-replay-interval", "disabled"),
                 Output(f"{self.component_id}-replay-interval", "interval"),
+                Output(f"{self.component_id}-replay-slider", "value"),
+                Output(f"{self.component_id}-replay-slider", "max"),
+                Output(f"{self.component_id}-replay-position-index", "children"),
+                Output(f"{self.component_id}-replay-position-max", "children"),
+                Output(f"{self.component_id}-replay-play", "children"),
             ],
             [
                 Input(f"{self.component_id}-replay-play", "n_clicks"),
@@ -846,137 +1267,27 @@ class MetricsPanel(BaseComponent):
                 Input(f"{self.component_id}-speed-2x", "n_clicks"),
                 Input(f"{self.component_id}-speed-4x", "n_clicks"),
                 Input(f"{self.component_id}-replay-slider", "value"),
+                Input(f"{self.component_id}-replay-interval", "n_intervals"),
             ],
             [
                 State(f"{self.component_id}-replay-state", "data"),
                 State(f"{self.component_id}-metrics-store", "data"),
             ],
-            prevent_initial_call=True,
-        )
-        def handle_replay_controls(
-            play_clicks,
-            back_clicks,
-            forward_clicks,
-            start_clicks,
-            end_clicks,
-            speed_1x,
-            speed_2x,
-            speed_4x,
-            slider_value,
-            current_state,
-            metrics_data,
-        ):
-            """Handle replay control button clicks."""
-            ctx = dash.callback_context
-            if not ctx.triggered:
-                return current_state, True, 1000
-
-            trigger = ctx.triggered[0]["prop_id"].split(".")[0]
-            state = (
-                current_state.copy()
-                if current_state
-                else {
-                    "mode": "stopped",
-                    "speed": 1.0,
-                    "current_index": 0,
-                    "start_index": 0,
-                    "end_index": None,
-                }
-            )
-
-            max_index = len(metrics_data) - 1 if metrics_data else 0
-            state["end_index"] = state.get("end_index") or max_index
-
-            if "replay-play" in trigger:
-                state["mode"] = "paused" if state["mode"] == "playing" else "playing"
-            elif "step-back" in trigger:
-                state["mode"] = "paused"
-                state["current_index"] = max(0, state["current_index"] - 1)
-            elif "step-forward" in trigger:
-                state["mode"] = "paused"
-                state["current_index"] = min(max_index, state["current_index"] + 1)
-            elif "replay-start" in trigger:
-                state["current_index"] = state["start_index"]
-                state["mode"] = "paused"
-            elif "replay-end" in trigger:
-                state["current_index"] = state["end_index"] or max_index
-                state["mode"] = "paused"
-            elif "speed-1x" in trigger:
-                state["speed"] = 1.0
-            elif "speed-2x" in trigger:
-                state["speed"] = 2.0
-            elif "speed-4x" in trigger:
-                state["speed"] = 4.0
-            elif "replay-slider" in trigger:
-                state["current_index"] = int((slider_value / 100) * max_index) if max_index > 0 else 0
-                state["mode"] = "paused"
-
-            base_interval = 1000
-            interval = int(base_interval / state["speed"])
-            disabled = state["mode"] != "playing"
-
-            return state, disabled, interval
-
-        @app.callback(
-            Output(f"{self.component_id}-replay-state", "data", allow_duplicate=True),
-            Input(f"{self.component_id}-replay-interval", "n_intervals"),
-            [
-                State(f"{self.component_id}-replay-state", "data"),
-                State(f"{self.component_id}-metrics-store", "data"),
-            ],
-            prevent_initial_call=True,
-        )
-        def replay_tick(n_intervals, state, metrics_data):
-            """Advance replay by one step on interval tick."""
-            if not state or state["mode"] != "playing":
-                return state
-
-            max_index = len(metrics_data) - 1 if metrics_data else 0
-            end_index = state.get("end_index") or max_index
-
-            new_index = state["current_index"] + 1
-            if new_index > end_index:
-                state["mode"] = "stopped"
-                state["current_index"] = end_index
-            else:
-                state["current_index"] = new_index
-
-            return state
-
-        # PERF-CN-01: prevent_initial_call=False — sets initial slider position
-        # and "0 / 0" replay-position text on mount.
-        @app.callback(
-            [
-                Output(f"{self.component_id}-replay-slider", "value"),
-                Output(f"{self.component_id}-replay-slider", "max"),
-                Output(f"{self.component_id}-replay-position", "children"),
-            ],
-            [
-                Input(f"{self.component_id}-replay-state", "data"),
-                Input(f"{self.component_id}-metrics-store", "data"),
-            ],
             prevent_initial_call=False,
         )
-        def update_replay_ui(state, metrics_data):
-            """Update replay slider and position display."""
-            max_index = len(metrics_data) - 1 if metrics_data else 0
-            current_index = state.get("current_index", 0) if state else 0
 
-            slider_value = (current_index / max_index * 100) if max_index > 0 else 0
-            position_text = f"{current_index} / {max_index}"
-
-            return slider_value, 100, position_text
-
-        # PERF-CN-01: prevent_initial_call=False — sets initial play-button icon
-        # ("▶") on mount.
-        @app.callback(
-            Output(f"{self.component_id}-replay-play", "children"),
-            Input(f"{self.component_id}-replay-state", "data"),
-            prevent_initial_call=False,
+        # F-CANOPY-054: a metrics refill re-renders the "/ max" half of the position text
+        # (M-METRICS-17). It writes the max ALONE: a refill and a control that run in one
+        # renderer pass read one layout snapshot, so a refill that also wrote the index could
+        # overwrite a click's index with the pre-click one (Lane B review, 2/2). Its only Output
+        # is an ``allow_duplicate`` one, which keeps its ``@<hash>`` in the renderer and so
+        # reaches nothing: while it waits on the store's writer it holds no other callback.
+        app.clientside_callback(
+            REPLAY_REFILL_POSITION_JS,
+            Output(f"{self.component_id}-replay-position-max", "children", allow_duplicate=True),
+            Input(f"{self.component_id}-metrics-store", "data"),
+            prevent_initial_call=True,
         )
-        def update_play_button(state):
-            """Update play button icon based on replay state."""
-            return "⏸" if state and state.get("mode") == "playing" else "▶"
 
         # Layout Save/Load Callbacks (P3-4)
         # PERF-CN-01: prevent_initial_call=False — must populate the saved-layouts
@@ -1057,48 +1368,92 @@ class MetricsPanel(BaseComponent):
 
         self.logger.debug(f"Callbacks registered for {self.component_id}")
 
-    def _fetch_network_stats_handler(self, n_intervals=None):
-        # sourcery skip: class-extract-method
+    # F-CANOPY-034: ``_fetch_network_stats_handler`` was removed here along with its
+    # store. Its callback went with the dead poller in F-CANOPY-027 / canopy#507, after
+    # which nothing in src/ called it — it was reachable only from its own five unit
+    # tests, which is precisely the shape that makes dead code look live. Those tests
+    # went with it. `GET /api/network/stats` itself is untouched and still served.
+
+    @staticmethod
+    def _extract_ws_training_state(ws_state_buffer):
+        """Unwrap the training-state dict from a ws-state-buffer frame (N8).
+
+        The WS ``state`` payload is either the flat training-state dict
+        (``broadcast_state_change`` / on-connect / relay forward) or a wrapper
+        carrying it under ``training_state`` (snapshot restore, main.py). Returns a
+        non-empty state dict, or ``None`` when the frame carries no usable state (so
+        the caller preserves the last-known-good store rather than blanking it).
         """
-        Fetch network statistics from API periodically.
+        if not isinstance(ws_state_buffer, dict):
+            return None
+        inner = ws_state_buffer.get("training_state")
+        if isinstance(inner, dict) and inner:
+            return inner
+        # Flat state dict: accept only when it carries recognizable state fields, so a
+        # bare wrapper ({action, snapshot_id}) or an empty {} is not promoted.
+        if any(key in ws_state_buffer for key in ("status", "phase", "current_epoch", "learning_rate")):
+            return ws_state_buffer
+        return None
+
+    def _append_ws_training_state_handler(self, ws_state_buffer=None):
+        """N8 (posture O3): feed the training-state store from a WS ``state`` push.
+
+        Runs only when ``ws-state-buffer`` changes (a real ``state`` frame arrived).
+        Returns the unwrapped state (latest-only replace), or ``dash.no_update`` when
+        the frame carries no usable state so the last-known-good store is preserved.
+        Because it is triggered ONLY by real WS pushes it can never starve the store
+        when the stream is quiet — the liveness-gated poll is the sole writer then.
+        """
+        import dash
+
+        state = self._extract_ws_training_state(ws_state_buffer)
+        return state if state else dash.no_update
+
+    def _fetch_training_state_handler(self, n_intervals=None, ws_live=None, current_state=None):
+        """Liveness-gated REST poll for the training-state store (N8 posture O1).
+
+        Fires on every stats-interval tick (the interval is the sole trigger, so the
+        callback can never be starved — see the callback's Dash-model note on why the
+        WS buffer must NOT be an Input here). Two regimes:
+
+        - **Demoted while WS-primary is live**: when the state stream is fresh
+          (``ws_live``), return ``dash.no_update`` — the /api/state poll is SKIPPED and
+          the ``allow_duplicate`` append callback (``_append_ws_training_state_handler``)
+          owns the store from the WS buffer.
+        - **Liveness-gated REST fallback (O1)**: when the stream is stale/absent
+          (``ws_live`` falsy — the default for every non-WS caller, so the pre-N8
+          behavior is preserved), poll /api/state, guarded so a transient upstream
+          error never wipes a populated store. ``ws_live`` is derived from the bridge's
+          state-frame arrival age (never a sticky flag), so a quiet stream flips stale
+          within ``WS_LIVENESS_WINDOW_MS`` and the poll re-engages next tick — the
+          anti-sticky guarantee.
 
         Args:
-            n_intervals: Number of intervals elapsed
+            n_intervals: Number of intervals elapsed.
+            ws_live: Whether the state stream is fresh per ws-liveness-store.
+            current_state: The store's current value (for the empty-guard).
 
         Returns:
-            Network statistics dictionary
+            Training state dictionary, or ``dash.no_update`` to preserve the store.
         """
+        import dash
         import requests
 
-        try:
-            response = requests.get(f"{self._api_base_url}/api/network/stats", timeout=2)
-            if response.status_code == 200:
-                return response.json()
-        except Exception as e:
-            self.logger.debug(f"Failed to fetch network stats: {e}")
-
-        return {}
-
-    def _fetch_training_state_handler(self, n_intervals=None):
-        """
-        Fetch training state from API periodically.
-
-        Args:
-            n_intervals: Number of intervals elapsed
-
-        Returns:
-            Training state dictionary
-        """
-        import requests
+        # N8 poll demotion (O1): while WS-primary is live, skip REST — the append
+        # callback carries the store from the WS buffer.
+        if ws_live:
+            return dash.no_update
 
         try:
-            response = requests.get(f"{self._api_base_url}/api/state", timeout=2)
+            response = requests.get(f"{self._api_base_url}/api/state", timeout=2, headers=internal_api_headers())
             if response.status_code == 200:
                 return response.json()
+            self.logger.debug(f"Training state API returned {response.status_code}")
         except Exception as e:
             self.logger.debug(f"Failed to fetch training state: {e}")
 
-        return {}
+        # Empty-guard: never wipe a populated store on a transient failure/non-200.
+        return dash.no_update if current_state else {}
 
     def _update_progress_detail_handler(self, state=None):
         """Build inline progress text from training state progress fields."""
@@ -1157,8 +1512,10 @@ class MetricsPanel(BaseComponent):
             return hidden_style, 0, "", 0, ""
 
         grow_iter = state.get("grow_iteration")
-        # Use max_hidden_units as meaningful progress target; fall back to grow_max
-        # (grow_max is max_epochs from grow_network, which is a theoretical limit)
+        # Use max_hidden_units as the practical growth-progress target (units are
+        # added one per admitted iteration), falling back to grow_max. N6/C2b: grow_max
+        # is ``max_iterations`` (the cascade growth-iteration cap), NOT max_epochs —
+        # the effective growth ceiling is ``min(max_iterations, max_hidden_units)``.
         grow_max = state.get("max_hidden_units") or state.get("grow_max")
         cand_epoch = state.get("candidate_epoch")
         cand_total = state.get("candidate_total_epochs")
@@ -1191,7 +1548,21 @@ class MetricsPanel(BaseComponent):
         try:
             started = datetime.fromisoformat(phase_started)
             if started.tzinfo is None:
-                started = started.replace(tzinfo=timezone.utc)
+                # F-CANOPY-026: a naive stamp is LOCAL, not UTC. cascor used to emit
+                # ``datetime.now().isoformat()`` here (fixed upstream to tz-aware UTC),
+                # and stamping that as UTC shifted it by the whole host offset: a phase
+                # 2m29s old rendered as "Phase Duration: 302m 29s" on a CDT box —
+                # 18000 s out, exactly -0500. East of UTC the same error runs the other
+                # way, pushing ``started`` into the future so the ``< 0`` guard below
+                # blanks the readout entirely.
+                #
+                # ``astimezone()`` on a naive value interprets it as local and returns
+                # an aware one, which is right whenever canopy and cascor share a clock
+                # (the co-located case, where this was observed). Split hosts in
+                # different zones cannot be repaired from this side at all — that is why
+                # the real fix is upstream, and why this branch is only a compat path
+                # for a dashboard pointed at an un-upgraded cascor.
+                started = started.astimezone()
             elapsed = datetime.now(timezone.utc) - started
             total_seconds = int(elapsed.total_seconds())
             if total_seconds < 0:
@@ -1279,7 +1650,24 @@ class MetricsPanel(BaseComponent):
 
         # Get current values
         latest = metrics_data[-1]
-        current_epoch = latest.get("epoch", 0)
+        # N6/C2b: metrics rows carry a ``kind`` discriminator — ``training_step``
+        # rows number ``epoch`` as completed training steps; ``output_epoch`` rows
+        # number ``epoch`` as the within-pass inner epoch (sampled ~every 25th
+        # epoch). The "Training Step" tile must show the completed-step count, so
+        # prefer the latest ``training_step`` row (or the authoritative
+        # ``training_state.current_epoch``); never a within-pass inner epoch — that
+        # was the tile-level "Training Step: 10000 vs 12" flip-flop (S12/I-1c).
+        # Rows without ``kind`` default to ``training_step`` (pre-C2b / demo rows
+        # used step numbering), so legacy payloads are unaffected. During a
+        # candidate phase no new ``training_step`` rows arrive (metrics freeze), so
+        # this holds the last step value instead of blanking.
+        step_rows = [m for m in metrics_data if m.get("kind", "training_step") == "training_step"]
+        if step_rows:
+            current_epoch = step_rows[-1].get("epoch", 0)
+        elif isinstance(training_state, dict) and training_state.get("current_epoch") is not None:
+            current_epoch = training_state.get("current_epoch")
+        else:
+            current_epoch = latest.get("epoch", 0)
         current_loss = latest.get("metrics", {}).get("loss", 0)
         current_accuracy = latest.get("metrics", {}).get("accuracy", 0)
         hidden_units = latest.get("network_topology", {}).get("hidden_units", 0)
@@ -1308,6 +1696,10 @@ class MetricsPanel(BaseComponent):
             status_style,
         )
 
+    # F-CANOPY-054: ``_handle_replay_controls_handler`` (canopy#658's merged controls logic) moved
+    # to the browser as ``REPLAY_CONTROLS_JS``; a verbatim copy is the oracle in
+    # ``src/tests/unit/frontend/test_f054_replay_block_clientside.py``.
+
     # Layout Save/Load Handlers (P3-4)
     def _fetch_layout_options_handler(self) -> List[Dict[str, str]]:
         """
@@ -1319,7 +1711,7 @@ class MetricsPanel(BaseComponent):
         import requests
 
         try:
-            response = requests.get(f"{self._api_base_url}/api/v1/metrics/layouts", timeout=2)
+            response = requests.get(f"{self._api_base_url}/api/v1/metrics/layouts", timeout=2, headers=internal_api_headers())
             if response.status_code == 200:
                 data = response.json()
                 layouts = data.get("layouts", [])
@@ -1360,6 +1752,7 @@ class MetricsPanel(BaseComponent):
                     "zoom_ranges": view_state or {},
                 },
                 timeout=5,
+                headers=internal_api_headers(),
             )
 
             if response.status_code == 201:
@@ -1397,6 +1790,7 @@ class MetricsPanel(BaseComponent):
             response = requests.get(
                 f"{self._api_base_url}/api/v1/metrics/layouts/{layout_name}",
                 timeout=2,
+                headers=internal_api_headers(),
             )
 
             if response.status_code == 200:
@@ -1440,6 +1834,7 @@ class MetricsPanel(BaseComponent):
             response = requests.delete(
                 f"{self._api_base_url}/api/v1/metrics/layouts/{layout_name}",
                 timeout=5,
+                headers=internal_api_headers(),
             )
 
             if response.status_code == 200:
@@ -1456,6 +1851,70 @@ class MetricsPanel(BaseComponent):
         except Exception as e:
             self.logger.error(f"Failed to delete layout: {e}")
             return f"❌ Error: {str(e)}", None, layout_name
+
+    def _render_model_class_metrics(self, model_class: str, metrics_data: List[Dict[str, Any]]):
+        """Toggle the metrics surface by model class (A1-iii-b2).
+
+        Returns ``(oneshot_children, oneshot_style, classification_style, loss_plot_style,
+        accuracy_plot_style)``. For a ``"one_shot"`` model the regression result card is shown
+        and the classification cards + both per-epoch plots are hidden; otherwise the normal
+        (live) surface is shown and the result card stays hidden. Pure — directly unit-testable.
+        """
+        cards_style = {"display": "flex", "justifyContent": "space-around", "marginBottom": "20px", "gap": "10px"}
+        plot_style = {"height": "300px"}
+        if model_class == "one_shot":
+            hidden_cards = {**cards_style, "display": "none"}
+            hidden_plot = {**plot_style, "display": "none"}
+            return self._build_oneshot_result(metrics_data), {"display": "block", "marginBottom": "20px"}, hidden_cards, hidden_plot, hidden_plot
+        # live (demo / cascor): classification surface visible, result card hidden
+        return [], {"display": "none"}, cards_style, plot_style, plot_style
+
+    def _build_oneshot_result(self, metrics_data: List[Dict[str, Any]]):
+        """Build the one-shot regression result card from the latest metrics (A1-iii-b2).
+
+        ``metrics_data`` is ``RecurrenceBackend.get_metrics_history()`` — a single flat point
+        ``{r2, mse, rmse, mae, loss, epoch}`` once the fit lands, or empty while it runs (then a
+        spinner is shown). Regression-generic: never an accuracy/percentage readout.
+
+        The numbers are IN-SAMPLE (W0.7; plan findings F-S5 / F-SCI3): ``POST /v1/train`` scores
+        the fit on the training split it was fitted on, so the card says so in its title and
+        caption rather than presenting them as a held-out result. No number changes.
+        """
+        if not metrics_data:
+            return html.Div(
+                [
+                    dbc.Spinner(size="sm", color="primary"),
+                    html.Span("  Awaiting recurrence (LMU) fit result…", style={"marginLeft": "8px", "color": "var(--text-muted)"}),
+                ],
+                style={"textAlign": "center", "padding": "30px"},
+            )
+        latest = metrics_data[-1] if isinstance(metrics_data, list) else metrics_data
+
+        def _fmt(key: str) -> str:
+            value = latest.get(key)
+            return f"{value:.4f}" if isinstance(value, (int, float)) and not isinstance(value, bool) else "--"
+
+        cards = [
+            html.Div(
+                [html.H5(label, style={"color": "var(--text-muted)", "marginBottom": "4px"}), html.H3(_fmt(key), style={"color": color})],
+                className="metric-card",
+                style={"flex": "1", "textAlign": "center", "padding": "12px"},
+            )
+            for label, key, color in (
+                ("R²", "r2", "#28a745"),
+                ("RMSE", "rmse", "#dc3545"),
+                ("MSE", "mse", "#fd7e14"),
+                ("MAE", "mae", "#6f42c1"),
+                ("Loss", "loss", "#17a2b8"),
+            )
+        ]
+        return html.Div(
+            [
+                html.H5("Recurrence (LMU) — in-sample (train split) regression metrics", style={"marginBottom": "4px"}),
+                html.P("Computed on the training split the fit saw; not a held-out score.", style={"fontSize": "0.85rem", "color": "var(--text-muted)", "marginBottom": "12px"}),
+                html.Div(cards, style={"display": "flex", "justifyContent": "space-around", "gap": "10px"}),
+            ]
+        )
 
     def _create_loss_plot(self, metrics_data: List[Dict[str, Any]], theme: str = "light") -> go.Figure:
         """
@@ -1520,9 +1979,10 @@ class MetricsPanel(BaseComponent):
                     x=output_epochs,
                     y=output_losses,
                     mode="lines+markers",
-                    name="Output Training",
+                    name=self.OUTPUT_TRACE_NAME,
                     line={"color": "#1f77b4", "width": 2},
                     marker={"size": 6},
+                    hovertemplate="%{fullData.name}: %{y:.4f}<extra></extra>",
                 )
             )
         return fig
@@ -1537,6 +1997,7 @@ class MetricsPanel(BaseComponent):
                     name="Candidate Training",
                     line={"color": "#ff7f0e", "width": 2},
                     marker={"size": 6},
+                    hovertemplate="%{fullData.name}: %{y:.4f}<extra></extra>",
                 )
             )
 
@@ -1571,6 +2032,96 @@ class MetricsPanel(BaseComponent):
                 )
             )
         return fig
+
+    @staticmethod
+    def _add_scalar_series(fig: go.Figure, metrics_data: List[Dict[str, Any]], field_name: str, trace_name: str, color: str) -> go.Figure:
+        """Add one bounded-[0,1] C7 scalar classification series (N9 / U-4).
+
+        Reads the flat scalar ``field_name`` from each row's nested ``metrics``
+        dict (the REST-path shape produced by the adapter / demo). Rows where
+        the value is missing or ``None`` become **gaps** (``None`` y +
+        ``connectgaps=False``) — never zeros — so a metric that is only
+        computed on the terminal ~every-25th-epoch training-step row (and is
+        ``None`` through candidate phases) stays an honest sparse series rather
+        than a line dragged to the floor. Drawn as ``lines+markers`` so those
+        sparse points stay legible. The trace is added only when at least one
+        row carries a real value, so a disabled/unavailable metric does not
+        clutter the legend (mirrors ``_add_validation_overlay``). ``bool`` is
+        excluded from the numeric check because ``True``/``False`` are ints.
+        """
+        epochs: List[Any] = []
+        values: List[Any] = []
+        has_value = False
+        for m in metrics_data:
+            val = m.get("metrics", {}).get(field_name) if isinstance(m, dict) else None
+            epochs.append(m.get("epoch", 0) if isinstance(m, dict) else 0)
+            if isinstance(val, (int, float)) and not isinstance(val, bool):
+                values.append(val)
+                has_value = True
+            else:
+                values.append(None)  # gap, not zero
+        if not has_value:
+            return fig
+        fig.add_trace(
+            go.Scatter(
+                x=epochs,
+                y=values,
+                mode="lines+markers",
+                name=trace_name,
+                line={"color": color, "width": 2},
+                marker={"size": 6},
+                connectgaps=False,
+                hovertemplate="%{fullData.name}: %{y:.1%}<extra></extra>",
+            )
+        )
+        return fig
+
+    @staticmethod
+    def _latest_eval_metrics(metrics_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Return the most-recent non-empty ``eval_metrics`` block, or ``None``.
+
+        C7's self-describing metadata (``average``/``split``/``n_samples``/
+        ``n_classes``/``undefined``) rides the ``GET /v1/metrics`` snapshot and
+        demo rows, but NOT every history row (cascor's monitor rows carry only
+        the flat scalars). Scan newest-first and return the first block found so
+        the annotation reflects the latest eval; return ``None`` when absent —
+        the ``average``/``split`` metadata is reported, never guessed.
+        """
+        for m in reversed(metrics_data):
+            eval_metrics = m.get("eval_metrics") if isinstance(m, dict) else None
+            if isinstance(eval_metrics, dict) and eval_metrics:
+                return eval_metrics
+        return None
+
+    @staticmethod
+    def _eval_metrics_legend_title(eval_metrics: Dict[str, Any]) -> str:
+        """Legend title carrying the eval ``average`` + ``split`` (or ``None``).
+
+        Places the C7 averaging strategy and evaluation split *in the legend*
+        (per the plan: "the average/split metadata belongs in the legend/hover,
+        not guessed"). Returns ``None`` when no metadata is available so the
+        legend stays untitled rather than inventing a strategy.
+        """
+        if not isinstance(eval_metrics, dict) or not eval_metrics:
+            return None
+        parts = [str(eval_metrics[k]) for k in ("average", "split") if eval_metrics.get(k)]
+        return "Metrics · " + " · ".join(parts) if parts else None
+
+    @staticmethod
+    def _eval_metrics_undefined_note(eval_metrics: Dict[str, Any]) -> str:
+        """Unobtrusive note listing any undefined metric + reason (or ``None``).
+
+        Surfaces C7's ``undefined`` map (e.g. ``roc_auc: single_class``) as a
+        small annotation so a metric that reads as absent is explained rather
+        than mysterious — visible but unobtrusive.
+        """
+        if not isinstance(eval_metrics, dict):
+            return None
+        undefined = eval_metrics.get("undefined")
+        if not isinstance(undefined, dict) or not undefined:
+            return None
+        items = ", ".join(f"{key}: {reason}" for key, reason in sorted(undefined.items()))
+        return f"undefined — {items}"
 
     @staticmethod
     def _phase_band_color(phase: str) -> str:
@@ -1661,15 +2212,22 @@ class MetricsPanel(BaseComponent):
         return fig
 
     def _training_loss_per_time(self, fig: go.Figure = None, theme: str = "light") -> go.Figure:
+        # N9 (U-3 readability): loss keeps its own unbounded y-axis (loss is not
+        # bounded to [0, 1] like the classification metrics, so it never shares
+        # their axis). Subtle gridlines + an ``x unified`` hover let the operator
+        # read every series at a given training step without chasing points.
         is_dark = theme == "dark"
+        grid_color = "#3a3a3a" if is_dark else "#e9ecef"
         fig.update_layout(
             title="Training Loss Over Time",
             xaxis_title="Iteration",
             yaxis_title="Loss",
-            hovermode="closest",
+            xaxis={"showgrid": True, "gridcolor": grid_color, "zeroline": False},
+            yaxis={"showgrid": True, "gridcolor": grid_color, "zeroline": False, "rangemode": "tozero"},
+            hovermode="x unified",
             showlegend=True,
-            legend={"x": 0.7, "y": 0.95},
-            margin={"l": 50, "r": 20, "t": 40, "b": 40},
+            legend={"x": 0.7, "y": 0.95, "bgcolor": "rgba(0,0,0,0)"},
+            margin={"l": 55, "r": 20, "t": 40, "b": 40},
             template="plotly_dark" if is_dark else "plotly",
             plot_bgcolor="#242424" if is_dark else "#f8f9fa",
             paper_bgcolor="#242424" if is_dark else "#ffffff",
@@ -1678,81 +2236,122 @@ class MetricsPanel(BaseComponent):
         return fig
 
     def _create_accuracy_plot(self, metrics_data: List[Dict[str, Any]], theme: str = "light") -> go.Figure:
-        """
-        Create accuracy plot from metrics data.
+        """Create the classification-metrics plot (N9 / U-2/U-3/U-4 display).
+
+        Trace 0 is **Accuracy** — the WS-bridge ``extendTraces`` target
+        (appended by index; keep it first). Layered on top, where present, are
+        the C7 scalar classification metrics (F1 / precision / recall / ROC-AUC
+        from :data:`SCALAR_SERIES`), the dashed validation-accuracy overlay, the
+        output/candidate phase bands, and the hidden-unit growth markers. Every
+        series here is bounded to [0, 1] and shares one percentage y-axis
+        (loss keeps its own unbounded axis on the separate loss plot) — the
+        scaling/overlap fix from U-3. Accuracy renders only on output-training
+        rows (gaps through candidate phases); the C7 scalars render as honest
+        gaps wherever they are ``None`` (never dragged to zero).
 
         Args:
-            metrics_data: List of metrics dictionaries
-            theme: Current theme ("light" or "dark")
+            metrics_data: List of metrics dictionaries.
+            theme: Current theme ("light" or "dark").
 
         Returns:
-            Plotly figure object
+            Plotly figure object.
         """
-        epochs = []
-        accuracies = []
-        phases = []
+        epochs: List[Any] = []
+        accuracies: List[Any] = []
+        phases: List[Any] = []
 
         for metric in metrics_data:
             epochs.append(metric.get("epoch", 0))
             acc = metric.get("metrics", {}).get("accuracy", 0)
             phases.append(metric.get("phase", "unknown"))
-            # Only include accuracy for output training phases
+            # Accuracy is only meaningful during output-training phases; leave a
+            # gap (None) through candidate phases so the line breaks cleanly.
             if "output" in metric.get("phase", ""):
                 accuracies.append(acc)
             else:
-                accuracies.append(None)  # Gap in plot for candidate training
+                accuracies.append(None)
 
         fig = go.Figure()
 
+        # Trace 0 — Accuracy (WS-bridge extendTraces target; must stay first).
+        # N9 (U-3): the old solid fill under this trace obscured the overlaid
+        # C7 series, so it is dropped in favour of a clean line+markers.
         fig.add_trace(
             go.Scatter(
                 x=epochs,
                 y=accuracies,
                 mode="lines+markers",
-                name="Accuracy",
-                line={"color": "#28a745", "width": 2},
+                name=self.ACCURACY_TRACE_NAME,
+                line={"color": self.ACCURACY_COLOR, "width": 2},
                 marker={"size": 6},
-                fill="tozeroy",
-                fillcolor="rgba(40, 167, 69, 0.1)",
+                connectgaps=False,
+                hovertemplate="%{fullData.name}: %{y:.1%}<extra></extra>",
             )
         )
 
+        # C7 (U-4) scalar classification metrics, in SCALAR_SERIES order, each
+        # added only when it carries at least one real value.
+        for field_name, trace_name, color in self.SCALAR_SERIES:
+            self._add_scalar_series(fig, metrics_data, field_name, trace_name, color)
+
+        # Dashed validation-accuracy overlay (looked up by name in the WS bridge).
         self._add_validation_overlay(fig, metrics_data, "val_accuracy", "Validation Accuracy", "#82e0aa")
 
-        # Add phase background bands (reuse shared method)
+        # Phase background bands + hidden-unit growth markers (shared helpers).
         fig = self._add_phase_bg_bands(fig=fig, epochs=epochs, phases=phases)
+        fig = self._hidden_unit_addition_markers(metrics_data=metrics_data, fig=fig, theme=theme)
 
-        # Add hidden unit addition markers
-        for i in range(1, len(metrics_data)):
-            prev_hidden = metrics_data[i - 1].get("network_topology", {}).get("hidden_units", 0)
-            curr_hidden = metrics_data[i].get("network_topology", {}).get("hidden_units", 0)
+        return self._classification_layout(fig=fig, metrics_data=metrics_data, theme=theme)
 
-            if curr_hidden > prev_hidden:
-                epoch = metrics_data[i].get("epoch", 0)
-                # Add vertical line
-                fig.add_vline(
-                    x=epoch,
-                    line_dash="dash",
-                    line_color="#17a2b8",
-                    line_width=2,
-                    annotation_text=f"+Unit #{curr_hidden}",
-                    annotation_position="top",
-                )
+    def _classification_layout(self, fig: go.Figure, metrics_data: List[Dict[str, Any]], theme: str = "light") -> go.Figure:
+        """Apply the shared classification-plot layout (N9 / U-2/U-3).
 
+        Bounded percentage y-axis (accuracy presentation + axis bounds, U-2),
+        subtle gridlines and an ``x unified`` hover for readability (U-3), and
+        the C7 ``eval_metrics`` metadata surfaced without guessing: the
+        ``average``/``split`` in the legend title and any ``undefined`` reasons
+        in an unobtrusive annotation.
+        """
         is_dark = theme == "dark"
+        grid_color = "#3a3a3a" if is_dark else "#e9ecef"
+        eval_metrics = self._latest_eval_metrics(metrics_data)
+
+        legend: Dict[str, Any] = {"x": 0.7, "y": 0.98, "bgcolor": "rgba(0,0,0,0)"}
+        legend_title = self._eval_metrics_legend_title(eval_metrics)
+        if legend_title:
+            legend["title"] = {"text": legend_title}
+
         fig.update_layout(
-            title="Training Accuracy Over Time",
+            title="Classification Metrics",
             xaxis_title="Iteration",
-            yaxis_title="Accuracy",
-            yaxis={"range": [0, 1.0]},
-            hovermode="closest",
-            margin={"l": 50, "r": 20, "t": 40, "b": 40},
+            yaxis_title="Score",
+            # U-2: accuracy/metric presentation — bounded [0, 1] on a percentage
+            # axis so accuracy reads as a percentage and every bounded metric
+            # shares one honest scale.
+            yaxis={"range": [0, 1.0], "tickformat": ".0%", "showgrid": True, "gridcolor": grid_color, "zeroline": False},
+            xaxis={"showgrid": True, "gridcolor": grid_color, "zeroline": False},
+            hovermode="x unified",
+            showlegend=True,
+            legend=legend,
+            margin={"l": 55, "r": 20, "t": 40, "b": 40},
             template="plotly_dark" if is_dark else "plotly",
             plot_bgcolor="#242424" if is_dark else "#f8f9fa",
             paper_bgcolor="#242424" if is_dark else "#ffffff",
             font={"color": "#e9ecef" if is_dark else "#212529"},
         )
 
+        undefined_note = self._eval_metrics_undefined_note(eval_metrics)
+        if undefined_note:
+            fig.add_annotation(
+                text=undefined_note,
+                xref="paper",
+                yref="paper",
+                x=0.0,
+                y=1.08,
+                showarrow=False,
+                xanchor="left",
+                font={"size": 11, "color": "#adb5bd" if is_dark else "#6c757d"},
+            )
         return fig
 
     def _get_status_style(self, phase: str) -> Dict[str, str]:
@@ -1824,7 +2423,7 @@ class MetricsPanel(BaseComponent):
             Dash Div with formatted table
         """
         if not stats:
-            return html.Div("Loading network information...", style={"color": "#888", "fontSize": "14px"})
+            return html.Div("Loading network information...", style={"color": "var(--text-muted)", "fontSize": "14px"})
 
         weight_stats = stats.get("weight_statistics", {})
         z_dist = weight_stats.get("z_score_distribution", {})
@@ -1864,7 +2463,7 @@ class MetricsPanel(BaseComponent):
                 table_rows.append(
                     html.Tr(
                         [html.Td("", colSpan=2, style={"height": "5px", "padding": "0"})],
-                        style={"borderBottom": "1px solid #e0e0e0"},
+                        style={"borderBottom": "1px solid var(--border-color)"},
                     )
                 )
             else:

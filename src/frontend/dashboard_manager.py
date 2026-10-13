@@ -33,10 +33,11 @@
 #
 #####################################################################################################################################################################################################
 
+import json
 import logging
 import os
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, Final, List, Optional, Tuple
 
 import dash
 import dash_bootstrap_components as dbc
@@ -44,9 +45,13 @@ import requests
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
-from canopy_constants import DashboardConstants, TrainingConstants
+from canopy_constants import CascorPatchBounds, DashboardConstants, TrainingConstants
+from dataset_schema import apply_availability_gate, apply_seeded_defaults, availability_is_known, form_excluded_fields, generator_name_for_type, is_generator_available, parse_schema_fields, unavailable_hint, unavailable_reason
+from frontend.internal_api import internal_api_headers
+from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, RECURRENCE_BACKEND_TYPE, compatible, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason, model_requirement, selection_is_live
 from settings import get_settings
 
+from . import ui_standards
 from .base_component import BaseComponent
 from .callback_context import get_callback_context
 from .components.about_panel import AboutPanel
@@ -62,6 +67,7 @@ from .components.network_evolution import MAX_SNAPSHOTS as _EVOLUTION_MAX_SNAPSH
 from .components.network_evolution import NetworkEvolution
 from .components.network_visualizer import NetworkVisualizer
 from .components.parameters_panel import ParametersPanel
+from .components.recurrence_request_preview import RecurrenceRequestPreview
 from .components.redis_panel import RedisPanel
 from .components.replay_player_panel import ReplayPlayerPanel
 from .components.tutorial_panel import TutorialPanel
@@ -104,7 +110,7 @@ from .walkthrough_steps import get_walkthrough_steps as _walkthrough_steps  # CA
 # server-side handler produced, so existing Dash outputs
 # (``training-control-action``, ``button-states``) keep their shape.
 PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS = r"""
-function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, last_click, button_states) {
+function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, last_click, button_states, oneshot_start_body) {
     var dc = window.dash_clientside || {};
     var no_update = (dc.no_update !== undefined) ? dc.no_update : null;
     var ctx = dc.callback_context || {};
@@ -140,22 +146,96 @@ function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, l
     var newStates = Object.assign({}, button_states || {});
     newStates[command] = { disabled: true, loading: true, timestamp: now };
 
+    // Phase D §S10: push the *real* async outcome into the training-control-
+    // action store so the surface_training_control_outcome callback can render a
+    // dismissable danger alert. Without this a rejected command (WS error ack or
+    // REST non-2xx) only ever reached the browser console — the "dead button"
+    // class. See notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md.
+    function reportFailure(detail) {
+        try {
+            if (dc && typeof dc.set_props === 'function') {
+                dc.set_props('training-control-action', {
+                    // detail is the alert's 300-char slice; detail_full keeps the producer's own
+                    // sentence (which symbols, how many rows) for the partial-data prompt.
+                    data: { last: triggerId, ts: Date.now() / 1000.0, success: false, command: command, detail: String(detail || '').slice(0, 300), detail_full: String(detail || '').slice(0, 4000) }
+                });
+            }
+        } catch (e) {
+            console.error('[Phase D] reportFailure failed for ' + command + ':', e);
+        }
+    }
+
+    // F-CANOPY-003: the success ack never reached the dashboard -- the WS success
+    // path only logged and the REST path did nothing on 2xx -- so a button stayed
+    // on its optimistic loading state until the interval-driven timeout sweep
+    // landed (30 s to minutes under callback congestion; a wedged button blocked
+    // the next command for the rest of a run). Report the ack the same way
+    // failures are reported AND clear this button's loading state directly: the
+    // ack is the primary release, the sweep stays as the backstop.
+    function reportSuccess(transport, commandId) {
+        try {
+            if (dc && typeof dc.set_props === 'function') {
+                dc.set_props('training-control-action', {
+                    data: { last: triggerId, ts: Date.now() / 1000.0, success: true, command: command, transport: transport, command_id: commandId }
+                });
+                var cleared = Object.assign({}, newStates);
+                cleared[command] = { disabled: false, loading: false, timestamp: 0 };
+                dc.set_props('button-states', { data: cleared });
+            }
+        } catch (e) {
+            console.error('[Phase D] reportSuccess failed for ' + command + ':', e);
+        }
+    }
+
     function restFallback(reason) {
         if (reason) {
             console.warn('[Phase D] REST fallback (' + command + '):', reason);
         }
         try {
-            fetch('/api/train/' + command, { method: 'POST', credentials: 'same-origin' })
+            // A1-iv-3c: a one-shot Start carries the dataset-ref body (generator + registry
+            // params); every other command and a live-model Start post no body (route unchanged).
+            var fetchOpts = { method: 'POST', credentials: 'same-origin' };
+            if (command === 'start' && oneshot_start_body) {
+                fetchOpts.headers = { 'Content-Type': 'application/json' };
+                fetchOpts.body = JSON.stringify(oneshot_start_body);
+            }
+            // PR-1 (Start-Training 401 fix): attach the CSRF token (bootstrapped
+            // and cached by websocket_client.js on page load) so the keyless REST
+            // fallback satisfies require_browser_control_auth on the server. The
+            // session cookie already rides on credentials:'same-origin'. Skipped
+            // when no token is set (CSRF disabled -> server falls back to Origin-only).
+            if (window.__canopy_csrf) {
+                fetchOpts.headers = Object.assign({}, fetchOpts.headers || {}, { 'X-CSRF-Token': window.__canopy_csrf });
+            }
+            fetch('/api/train/' + command, fetchOpts)
                 .then(function(resp) {
+                    if (resp.ok) {
+                        reportSuccess('rest', null);
+                        return;
+                    }
                     if (!resp.ok) {
                         console.warn('[Phase D] REST /api/train/' + command + ' returned ' + resp.status);
+                        resp.text().then(function(body) {
+                            var msg = '';
+                            try {
+                                var parsed = JSON.parse(body);
+                                msg = (parsed && parsed.error && (parsed.error.message || parsed.error.detail)) || (parsed && (parsed.message || parsed.detail)) || '';
+                            } catch (e) {
+                                msg = body || '';
+                            }
+                            reportFailure('HTTP ' + resp.status + (msg ? ': ' + msg : ''));
+                        }).catch(function() {
+                            reportFailure('HTTP ' + resp.status);
+                        });
                     }
                 })
                 .catch(function(err) {
                     console.error('[Phase D] REST /api/train/' + command + ' failed:', err);
+                    reportFailure((err && err.message) || 'request failed');
                 });
         } catch (err) {
             console.error('[Phase D] REST fallback threw for ' + command + ':', err);
+            reportFailure((err && err.message) || 'request error');
         }
     }
 
@@ -172,14 +252,33 @@ function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, l
             commandId = 'btn-' + now.toFixed(3) + '-' + Math.floor(Math.random() * 1e9).toString(16);
         }
         try {
-            var sendPromise = ws.send({ command: command, command_id: commandId });
+            // A1-iv-3c: attach the one-shot dataset-ref body as the WS ``params`` (the /ws/control
+            // start handler feeds it to _recurrence_start_kwargs); a live-model Start sends none.
+            var sendMsg = { command: command, command_id: commandId };
+            if (command === 'start' && oneshot_start_body) {
+                sendMsg.params = oneshot_start_body;
+            }
+            var sendPromise = ws.send(sendMsg);
             if (sendPromise && typeof sendPromise.then === 'function') {
                 sendPromise
                     .then(function(data) {
                         console.log('[Phase D] WS command success:', command, data && data.command_id);
+                        reportSuccess('ws', (data && data.command_id) || commandId);
                     })
                     .catch(function(err) {
-                        restFallback('WS rejected: ' + (err && err.message));
+                        // F-CANOPY-005: fall back ONLY on transport-class failures
+                        // (timeout / socket closed / send threw — err.transport is
+                        // set by websocket_client.js). A business rejection means
+                        // the server RECEIVED and adjudicated the command; a REST
+                        // retry re-issues a state-changing command the backend
+                        // already answered (the observed resume->409 double-fire),
+                        // so surface it to the operator instead.
+                        if (err && err.transport) {
+                            restFallback('WS transport failure: ' + (err && err.message));
+                        } else {
+                            console.warn('[Phase D] WS business rejection (' + command + '):', err && err.message);
+                            reportFailure((err && err.message) || 'command rejected');
+                        }
                     });
             } else {
                 // send() returned something non-thenable — treat as failure.
@@ -324,6 +423,297 @@ TAB_HEADER_MAP = {
     "boundaries": "Candidate Parameters",
     "dataset": "Dataset Parameters",
 }
+
+
+# A1-iii-b1: viz tabs that are cascade-network-specific and meaningless for a one-shot
+# (recurrence / LMU) model — hidden when the active model's execution is "one_shot".
+_CASCADE_ONLY_TAB_IDS = frozenset({"candidates", "topology", "evolution", "boundaries", "workers"})
+
+
+# F-CANOPY-027 (callback starvation): every poller ``dcc.Interval`` whose ``disabled``
+# prop this dashboard owns, paired with the tab that arms it. ``None`` means the
+# interval carries GLOBAL consumers (status bar, training status, button acks) and is
+# therefore never tab-gated — it is clamped only by apply-in-flight (CAN-000).
+#
+# WHY THIS EXISTS. dash-renderer runs at most 12 callbacks concurrently — a hard-coded
+# literal in the renderer bundle (``dash_renderer.dev.js:2846``):
+#
+#     available = Math.max(0, 12 - executing.length - watched.length);
+#
+# and it will not promote a queued callback while any of its Inputs is an output claimed
+# by a still-pending callback. Canopy ran 22 perpetual pollers against those 12 slots
+# (~10.8 callback-starts/s against a measured 3.7 completions/s), so the pool sat full
+# 83.6% of the time and the lowest-priority callbacks — the terminal render callbacks of
+# the Candidate Metrics, Decision Boundary and Dataset View panels — never got a slot at
+# all. Those three panels held their mount defaults through entire live runs.
+#
+# Gating on the SERVER does not help: a handler that returns ``dash.no_update`` because
+# its tab is inactive has already spent the round-trip and the slot to decide that. The
+# gate has to be on the CLIENT, which is what ``_setup_poll_gating`` does.
+#
+# Design of record: notes/JUNIPER_2026-08-23_JUNIPER-CANOPY_CALLBACK-STARVATION-REMEDIATION-DESIGN.md
+# Evidence:         juniper-ml notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md
+# F-CANOPY-035: the metrics-store poll's dedicated lane id, referenced by the layout,
+# its pacer's ``Input`` (``_setup_poll_pacers``), the trigger the feeder hands its
+# handler (``_metrics_store_trigger``), and the full-history modulus gate in
+# ``_update_metrics_store_handler``. Named once so those four cannot drift apart — the
+# handler's gate is a ``trigger.startswith(...)`` string test, which fails SILENTLY
+# (every tick refetches the complete history) if the interval is renamed without it.
+_METRICS_STORE_INTERVAL: Final[str] = "metrics-store-interval"
+
+# F-CANOPY-055 / F-CANOPY-058 / F-CANOPY-068: REQUEST/ACK PACING for a poll whose round
+# trip can exceed its trigger's period.
+#
+# dash-renderer evicts a ``watched`` request the moment the same callback identity is
+# requested again, and discards the evicted request's response (see the
+# ``update_metrics_store`` comment). A poll triggered straight off an Interval is therefore
+# re-requested over itself whenever its round trip outlasts the period, and it never
+# applies: F-CANOPY-055 measured the top status bar at 0 of 36 responses applied.
+#
+# canopy#613's answer for the metrics store was a ``running=`` guard on the Interval's
+# ``disabled``. That guard cannot hold. The renderer releases it from ``completeJob()`` for
+# EVERY completion, including an evicted request's late one, with no check that the request
+# is still current. So any re-enable that lets the next request be made before the in-flight
+# response lands starts a chain in which each evicted request's late completion re-enables
+# the lane under its successor (F-CANOPY-058, observed live in runs of up to 11 evictions and
+# 34.8 s). The guard needed a strand watchdog, which sampled ``disabled`` every 5 s against a
+# ~4.9 s cycle and fired falsely ~31-36 times an hour, each time mid-fetch (F-CANOPY-068;
+# that its samples kept phase with the cycle is the ledger's inference, not a measurement).
+#
+# The pacer replaces both. Each paced poll has:
+#
+#   * a REQUEST store, written only by a clientside pacer and the feeder's ONLY Input;
+#   * an ACK store, a second Output of the feeder, which echoes the request's ``seq`` on
+#     every return path of the feeder, a raised handler included;
+#   * the pacer, which runs on the lane's ticks (and on the poll's other Input, if it has
+#     one) and writes a new request only when the ack has caught up with the last request,
+#     or when that request is older than its stale bound (``poll_pacer_js``).
+#
+# So the PACER never re-requests a feeder while its request is in flight, with one deliberate
+# exception: the stale re-issue, which is the recovery for a request that never gets a
+# response. Two other paths can still re-request a feeder, and each costs at most one
+# response with no chain, because no guard is left to release: the renderer's initial call
+# when ``suppress_cascade_tabs`` rebuilds the tab container that holds the metrics store (a
+# live/one-shot model switch), and a pacer write that lands while that initial call is in
+# flight. No callback writes ``disabled`` for pacing, so the tab/apply gate is again the
+# lane's only writer and the Apply clamp holds. The stale recovery is measured from the
+# outstanding request's own ``issued_at``, which is progress, not from samples of a prop.
+# The ack is read as State, never as an Input: an Input would close the cycle
+# pacer -> feeder -> pacer.
+#
+# One cost: a failure OUTSIDE the feeder's own ``try`` (a non-OK HTTP reply from Dash or a
+# middleware, a network failure) lands no ack, so the lane waits out the stale bound,
+# >= 30 s, where canopy#613's guard retried on the next tick after a non-OK reply.
+_METRICS_STORE_REQUEST: Final[str] = "metrics-store-request"
+_METRICS_STORE_ACK: Final[str] = "metrics-store-ack"
+_STATUS_BAR_REQUEST: Final[str] = "status-bar-request"
+_STATUS_BAR_ACK: Final[str] = "status-bar-ack"
+# The stale bound grows with the page: a request is re-issued over only once it is older
+# than ``POLL_PACER_STALE_MS`` AND this many times the longest round trip (a lower bound) seen
+# on its poll. On the branch's own verify leg, on a host loaded by other work, requests
+# stayed in flight up to 16.4 s and 17.3 s in two runs, so a fixed 30 s would leave a margin under 2x.
+PACER_STALE_RTT_FACTOR: Final[int] = 3
+# ...and never beyond this, so no measurement can push recovery out indefinitely.
+PACER_STALE_CAP_MS: Final[int] = 120000
+# Every request/ack-paced poll: (request store, the Interval its pacer rides). The F-027
+# poller census counts each paced feeder against that lane.
+_PACED_POLLS: Final[Tuple[Tuple[str, str], ...]] = (
+    (_METRICS_STORE_REQUEST, _METRICS_STORE_INTERVAL),
+    (_STATUS_BAR_REQUEST, "fast-update-interval"),
+)
+
+
+def poll_pacer_js(key: str, stale_ms: int, extra_input: bool) -> str:
+    """Return the clientside pacer for one request/ack-paced poll (F-055/F-058/F-068).
+
+    ``key`` names the poll's per-page pacer state in ``window`` (its first sighting, its
+    longest round trip, its last unacknowledged sighting). Pass the REQUEST store's id, so
+    two paced polls never share state even if they ride one Interval.
+
+    Arguments, in registration order: the lane Interval's ``n_intervals``, then (when
+    ``extra_input``) the poll's other Input, then the REQUEST and ACK stores as State.
+
+    Returns ``no_update`` while the last request is unacknowledged and younger than the
+    stale bound; otherwise a new request ``{seq, issued_at, reason, extra_key, stale}``.
+
+    * ``reason`` is ``"extra"`` when the other Input's VALUE differs from the one the last
+      request was issued with (or the last request recorded none, as the layout's seq-0
+      request does), or when the last request was itself an unacknowledged ``"extra"``
+      that this one re-issues; else ``"tick"`` when the last request was acknowledged,
+      else ``"stale"``. So a display-mode change reaches the handler as one even when its
+      own request is lost. (A handler that raises still acks it with ``no_update``; the
+      next request is then a ``"tick"``.) The extra Input is compared by value, not by
+      trigger, because the renderer replaces a queued request with a newer one of the same
+      callback and loses its trigger.
+    * ``stale`` is true when the request is re-issued over an unacknowledged one. That
+      re-issue evicts the request in flight, deliberately: it is the recovery for a request
+      that never gets a response. The feeders read ``seq`` and ``reason``; ``stale`` is for
+      instruments and logs.
+    * The stale bound is ``min(PACER_STALE_CAP_MS, max(stale_ms, PACER_STALE_RTT_FACTOR x
+      the longest round trip this page has seen on this poll))``, so a slow page does not
+      re-issue over its own legitimate requests. Each round trip is a LOWER bound: from
+      ``issued_at`` to the last pacer run that still saw the request unacknowledged, so a
+      run delayed by a throttled background tab or a sleep cannot inflate it. (A review
+      lane probed a draft that read it at the run that saw the ack: one throttled tick
+      stretched the bound to ~180 s.)
+
+    A request with no ``issued_at`` (the layout's seq-0 request, answered by the feeder's
+    mount call) is aged from the first time this page's pacer sees it. Times are
+    ``performance.now()``, monotonic and per page, so a step of the wall clock neither
+    fires a false re-issue nor inflates the bound; ``Date.now()`` is the fallback where
+    ``performance`` is missing.
+    """
+    params = "n, extra, req, ack" if extra_input else "n, req, ack"
+    extra_key = "JSON.stringify(extra === undefined ? null : extra)" if extra_input else "null"
+    key_js = json.dumps(key)
+    return f"""
+            function({params}) {{
+                var NU = window.dash_clientside.no_update;
+                var perf = window.performance;
+                var now = (perf && typeof perf.now === 'function') ? perf.now() : Date.now();
+                var seq = (req && typeof req.seq === 'number') ? req.seq : 0;
+                var acked = Boolean(ack) && ack.seq === seq;
+                var firstSeen = window.__junPollPacerFirstSeen || (window.__junPollPacerFirstSeen = {{}});
+                var maxRtt = window.__junPollPacerMaxRtt || (window.__junPollPacerMaxRtt = {{}});
+                var lastUnacked = window.__junPollPacerLastUnacked || (window.__junPollPacerLastUnacked = {{}});
+                var issuedAt = (req && typeof req.issued_at === 'number') ? req.issued_at : (firstSeen[{key_js}] || (firstSeen[{key_js}] = now));
+                var seen = lastUnacked[{key_js}];
+                if (acked && seen && seen.seq === seq && typeof req.issued_at === 'number') {{
+                    // A LOWER bound on this round trip: the request was still unanswered at
+                    // the last run that saw it. A late run (a throttled background tab, a
+                    // sleep) cannot inflate it, as the time of this run would.
+                    maxRtt[{key_js}] = Math.max(maxRtt[{key_js}] || 0, seen.t - req.issued_at);
+                }}
+                var staleMs = Math.min({int(PACER_STALE_CAP_MS)}, Math.max({int(stale_ms)}, {int(PACER_STALE_RTT_FACTOR)} * (maxRtt[{key_js}] || 0)));
+                if (!acked && now - issuedAt < staleMs) {{
+                    lastUnacked[{key_js}] = {{seq: seq, t: now}};
+                    return NU;
+                }}
+                var extraKey = {extra_key};
+                var changed = extraKey !== null && (!(req && req.extra_key === extraKey) || (!acked && req.reason === 'extra'));
+                var reason = changed ? 'extra' : (acked ? 'tick' : 'stale');
+                return {{seq: seq + 1, issued_at: now, reason: reason, extra_key: extraKey, stale: !acked}};
+            }}
+            """
+
+
+_GATED_POLL_INTERVALS: Final[Tuple[Tuple[str, Optional[str]], ...]] = (
+    # shared lanes — global consumers, apply-clamped only (CAN-000)
+    ("fast-update-interval", None),
+    ("slow-update-interval", None),
+    # F-CANOPY-035: the metrics-store poll's own lane. Registered here so the CAN-000
+    # apply clamp still silences it exactly as it did while the poll rode the fast
+    # lane. It now drives the poll's request/ack pacer (F-CANOPY-058), so this gate is
+    # the ONLY writer of its ``disabled``: the ``running=`` guard and the strand
+    # watchdog that also wrote it are gone, and a tab or apply change landing
+    # mid-fetch can no longer re-request the feeder.
+    (_METRICS_STORE_INTERVAL, None),
+    # dashboard-owned per-tab lanes (live OUTSIDE visualization-tabs, so the
+    # A1-iii-b1 children rebuild cannot reset their gate)
+    ("tabpoll-topology", "topology"),
+    ("tabpoll-dataset", "dataset"),
+    ("tabpoll-workers", "workers"),
+    ("tabpoll-boundaries", "boundaries"),
+    # panel-owned intervals, gated in place
+    ("candidate-metrics-panel-update-interval", "candidates"),
+    ("metrics-panel-stats-update-interval", "metrics"),
+    ("cassandra-panel-interval", "cassandra"),
+    ("redis-panel-refresh-interval", "redis"),
+    ("hdf5-snapshots-panel-refresh-interval", "snapshots"),
+    ("network-editor-panel-fsm-poll", "network-editor"),
+)
+
+
+# N3b (canopy training-runtime defects plan, I-6 / Q3): the restart confirm modal's
+# expandable granular section allows in-place MODIFICATION of what the restart will do
+# (N3 shipped it read-only VERIFY). These tuples are the single source of truth wiring
+# each modal field id to its logical key + display label, shared by the layout builders,
+# the open/summary/execute handlers, and the tests — so the field set cannot drift.
+#
+# Dataset = exactly the fields ``StageDatasetRequest`` carries (an edit re-stages via the
+# existing ``/api/stage_dataset`` route). Params = a focused, restart-relevant subset of
+# the training meta-params, every one governed by N5's ``CascorPatchBounds`` so the same
+# clamp → apply → applied/skipped machinery handles them (no duplicated bounds/toast
+# logic). (field_id, key, label).
+# F-CANOPY-017: distinguishes "caller omitted this optional kwarg" from "the
+# widget delivered None". Only the latter is an invalid-input signal; see
+# ``_apply_parameters_handler``.
+_UNSET = object()
+
+RESTART_MODAL_DATASET_FIELDS = (
+    ("restart-ds-type", "dataset_type", "Dataset type"),
+    ("restart-ds-samples", "n_samples", "Samples"),
+    ("restart-ds-noise", "noise", "Noise"),
+    ("restart-ds-rotations", "rotations", "Spiral rotations"),
+    ("restart-ds-spirals", "n_spirals", "Spirals"),
+)
+RESTART_MODAL_PARAM_FIELDS = (
+    ("restart-p-nn-learning-rate", "nn_learning_rate", "Learning rate"),
+    ("restart-p-nn-max-hidden-units", "nn_max_hidden_units", "Max hidden units"),
+    ("restart-p-nn-patience", "nn_patience", "Patience"),
+    ("restart-p-cn-pool-size", "cn_pool_size", "Candidate pool size"),
+    ("restart-p-cn-selected", "cn_selected_candidates", "Selected candidates"),
+    ("restart-p-cn-corr-thresh", "cn_correlation_threshold", "Correlation threshold"),
+)
+
+
+# Partial-data contract -- how canopy recognises a cascor Start refusal caused by
+# juniper-data being unable to produce the staged dataset in full. cascor#633 opens that
+# message with a machine-readable token (``_PROJECT_API_SHORTFALL_REFUSAL_TOKEN`` there);
+# the fixed sentence is matched as well so the prompt keeps working against a cascor that
+# predates the token. Neither string occurs in any other refusal cascor emits -- an outage
+# reads "juniper-data fetch failed: ..." -- and an outage must never open a prompt whose
+# every option re-sends the request.
+DATASET_SHORTFALL_REFUSAL_MARKER = "[dataset_shortfall_refused]"
+DATASET_SHORTFALL_REFUSAL_SENTENCE = "could not produce the requested dataset in full"
+
+# F1 (owner ruling 2026-09-24) -- how canopy recognises cascor refusing a Start that would
+# continue a network NARROWER than the staged dataset. cascor opens that message with
+# ``_PROJECT_API_START_FRESH_REQUIRED_MARKER``. The only remedy is a start-fresh, which here
+# is the Restart modal's "Start fresh" toggle, so the alert points there. There is no
+# fallback sentence, unlike the shortfall marker above: a cascor that predates the marker
+# consumed the staged dataset before refusing, so the pending banner that opens the modal is
+# gone, and pointing the operator at it would send them to a control that is not there.
+START_FRESH_REQUIRED_MARKER = "[start_fresh_required]"
+
+# The three options, as the owner specified them (2026-09-05 ruling): option 3 -- fail -- is
+# the one that cancels the load and deselects the dataset. Options 1 and 2 are juniper-data
+# request parameters and travel on the generic ``nn_dataset_params`` channel.
+DATASET_SHORTFALL_OPTIONS = {
+    "dataset-shortfall-accept-button": {"allow_truncation": True, "incomplete_rows": "accept"},
+    "dataset-shortfall-drop-button": {"allow_truncation": True, "incomplete_rows": "drop"},
+}
+DATASET_SHORTFALL_FAIL_BUTTON = "dataset-shortfall-fail-button"
+
+# cascor's staged-config dialect -> canopy's ``/api/stage_dataset`` body keys, for re-staging
+# the config cascor still holds after a refused Start (it leaves the pending config in place
+# precisely so the operator can retry). The inverse of the adapter's ``_DATASET_PARAM_MAP``;
+# kept here rather than imported because the adapter is a service-mode module and this
+# handler must also run against demo mode.
+_CASCOR_TO_CANOPY_DATASET_KEYS = {
+    "dataset_type": "nn_dataset_type",
+    "n_samples": "nn_dataset_elements",
+    "noise": "nn_dataset_noise",
+    "rotations": "nn_spiral_rotations",
+    "n_spirals": "nn_spiral_number",
+}
+
+
+def selection_axis_unset(value) -> bool:
+    """True when a selection axis carries no value -- the design's ``⊥``.
+
+    ``⊥`` is the universal cut vertex that makes every compatible ``(model, dataset)`` pair
+    reachable: it is compatible with everything, so it joins the two otherwise-disjoint components
+    of the compatibility graph. It is an **incomplete** state, never a valid one, and that
+    distinction is enforced by the callers of this predicate rather than assumed -- every path that
+    could *commit* a ``⊥`` is guarded, and every control that could act on one is disabled.
+
+    dash 4.2.0's Dropdown ✕ emits ``null``, verified against the shipped component source. ``""``
+    is accepted as well so that a future widget change cannot silently reopen the commit paths
+    this guards; ``not value`` is deliberately not used, because truthiness is not an "is it set"
+    test and would mis-handle a legitimately falsy key.
+    """
+    return value is None or value == ""
 
 
 class DashboardManager:
@@ -485,6 +875,9 @@ class DashboardManager:
         # Remote Worker Monitoring Panel
         self.worker_panel = WorkerPanel(self.config.get("worker_panel", {}), component_id="worker-panel")
 
+        # W1.2 / ruling R7: the read-only effective-request preview above Start (one-shot models only).
+        self.recurrence_request_preview = RecurrenceRequestPreview(self.config.get("recurrence_request_preview", {}), component_id="recurrence-request-preview")
+
         # Register components
         self.register_component(self.metrics_panel)
         self.register_component(self.candidate_metrics_panel)
@@ -501,6 +894,7 @@ class DashboardManager:
         self.register_component(self.tutorial_panel)
         self.register_component(self.network_evolution)
         self.register_component(self.worker_panel)
+        self.register_component(self.recurrence_request_preview)
 
         self.logger.info("All MVP components initialized and registered")
 
@@ -545,6 +939,71 @@ class DashboardManager:
                 dcc.Store(id="dark-mode-store", storage_type="local", data=False),
                 # Theme state for components (tracks current theme)
                 dcc.Store(id="theme-state", data="light"),
+                # Phase 2 P2-4 (Issue #3): Experimental Functions gate state.
+                # The Switch in the sidebar (Network Information section)
+                # writes here via callback; downstream P2-5 reads here to
+                # decide whether to render the Live Dataset Switch button.
+                # Reconciled to cascor's authoritative state on page load
+                # and on every Switch change (F2.10). Persisted to
+                # localStorage so the toggle survives page reloads — but
+                # the on-load reconciliation overrides stale persistence
+                # if cascor's gate is currently closed.
+                dcc.Store(
+                    id="experimental-flags-store",
+                    storage_type="local",
+                    data={"experimental_functions": False},
+                ),
+                # Phase 2 P2-5 (Issue #3): training status mirror store.
+                # The existing /api/status poller writes its response here
+                # each fast-update-interval tick so gate callbacks (Live
+                # Dataset Switch enable/disable + future P2-7 timeline)
+                # subscribe to a single source instead of each hitting
+                # the REST endpoint themselves. ``memory`` storage —
+                # rebuilt on every page reload from /api/status.
+                dcc.Store(
+                    id="training-status-store",
+                    storage_type="memory",
+                    data={"is_running": False, "phase": "idle"},
+                ),
+                # Phase 2 P2-5 (Issue #3): live-swap in-flight tracker.
+                # ``in_flight=True`` while the POST /api/live_dataset_swap
+                # is awaiting cascor's response (5–30 s for real fetches).
+                # Drives the progress-alert visibility + Cancel-button
+                # enable state. ``memory`` storage — a page reload during
+                # an in-flight swap clears this client-side view, but
+                # cascor's swap continues server-side (the user can fetch
+                # the result via /api/history/dataset_swaps once the
+                # post-swap event records).
+                dcc.Store(
+                    id="live-swap-in-flight-store",
+                    storage_type="memory",
+                    data={"in_flight": False},
+                ),
+                # Phase 2 P2-7 (Issue #3): dataset_swap event feed for
+                # the three P2-7 panels (replay timeline marker, History
+                # paired-diff, Snapshots tab badges). Populated each
+                # slow-update-interval tick from /api/history/dataset_swaps
+                # (proxies cascor follow-up B). Shared across panels so
+                # they all render against a single source of truth.
+                # ``memory`` storage — rebuilt from the route on each
+                # page load.
+                dcc.Store(
+                    id="dataset-swap-events-store",
+                    storage_type="memory",
+                    data={"events": []},
+                ),
+                # P2-7 follow-up (Issue #3): per-snapshot swap history,
+                # hydrated when the active replay session loads a
+                # snapshot. Separate from the live store above so the
+                # ReplayPlayerPanel can render two trace groups (live
+                # markers AND snapshot-history markers) without one
+                # source clobbering the other. Cleared when no snapshot
+                # is loaded.
+                dcc.Store(
+                    id="loaded-snapshot-swap-events-store",
+                    storage_type="memory",
+                    data={"events": [], "snapshot_id": None},
+                ),
                 # Unified Top Status Bar - Connection, Status, Phase, Metrics, and Latency
                 dbc.Row(
                     [
@@ -571,45 +1030,49 @@ class DashboardManager:
                                                             [
                                                                 html.Span(
                                                                     "Status: ",
-                                                                    style={"color": "#6c757d"},
+                                                                    style={"color": "var(--text-muted)"},
                                                                 ),
                                                                 html.Span(
                                                                     id="top-status-display",
                                                                     children="Stopped",
-                                                                    style={"fontWeight": "bold", "color": "#6c757d"},
+                                                                    style={"fontWeight": "bold", "color": "var(--text-muted)"},
                                                                 ),
                                                             ],
                                                             style={"marginRight": "8px"},
                                                         ),
                                                         html.Span(
                                                             " | ",
-                                                            style={"color": "#6c757d", "marginRight": "8px"},
+                                                            style={"color": "var(--text-muted)", "marginRight": "8px"},
                                                         ),
                                                         # Phase with label
                                                         html.Span(
                                                             [
                                                                 html.Span(
                                                                     "Phase: ",
-                                                                    style={"color": "#6c757d"},
+                                                                    style={"color": "var(--text-muted)"},
                                                                 ),
                                                                 html.Span(
                                                                     id="top-phase-display",
                                                                     children="Idle",
-                                                                    style={"fontWeight": "bold", "color": "#6c757d"},
+                                                                    style={"fontWeight": "bold", "color": "var(--text-muted)"},
                                                                 ),
                                                             ],
                                                             style={"marginRight": "8px"},
                                                         ),
                                                         html.Span(
                                                             " | ",
-                                                            style={"color": "#6c757d", "marginRight": "8px"},
+                                                            style={"color": "var(--text-muted)", "marginRight": "8px"},
                                                         ),
-                                                        # Epoch display
+                                                        # Step display — completed training steps
+                                                        # (``current_epoch``); NOT an inner output epoch.
+                                                        # N6/C2b: relabelled from "Epoch" to "Step" to
+                                                        # match the C2b counter contract (the S12
+                                                        # "Epoch: 10000 vs 12" confusion).
                                                         html.Span(
                                                             [
                                                                 html.Span(
-                                                                    "Epoch: ",
-                                                                    style={"color": "#6c757d"},
+                                                                    "Step: ",
+                                                                    style={"color": "var(--text-muted)"},
                                                                 ),
                                                                 html.Span(
                                                                     id="top-epoch-display",
@@ -621,14 +1084,21 @@ class DashboardManager:
                                                         ),
                                                         html.Span(
                                                             " | ",
-                                                            style={"color": "#6c757d", "marginRight": "8px"},
+                                                            style={"color": "var(--text-muted)", "marginRight": "8px"},
                                                         ),
-                                                        # Iteration (Hidden Units) display
+                                                        # Hidden Units display — installed cascade units
+                                                        # vs the reconciled ``max_hidden_units`` cap.
+                                                        # N6/C2b: relabelled from "Iteration" to "Hidden
+                                                        # Units"; this segment (id ``top-hidden-units-display``)
+                                                        # always showed the unit count — only the label was
+                                                        # wrong (S12's "Iteration: 0 / 10000"). The true
+                                                        # growth "Iteration" (grow_iteration/grow_max) lives
+                                                        # in the Network Info panel.
                                                         html.Span(
                                                             [
                                                                 html.Span(
-                                                                    "Iteration: ",
-                                                                    style={"color": "#6c757d"},
+                                                                    "Hidden Units: ",
+                                                                    style={"color": "var(--text-muted)"},
                                                                 ),
                                                                 html.Span(
                                                                     id="top-hidden-units-display",
@@ -636,6 +1106,11 @@ class DashboardManager:
                                                                     style={"fontWeight": "bold", "color": "#17a2b8"},
                                                                 ),
                                                             ],
+                                                            # A1-iii-b1: id so a one_shot (recurrence) model can hide
+                                                            # this cascade-only hidden-units segment. The id keeps its
+                                                            # historical name (``status-iteration-segment``) so the
+                                                            # ``toggle_iteration_segment`` callback wiring is stable.
+                                                            id="status-iteration-segment",
                                                             style={"marginRight": "20px"},
                                                         ),
                                                         # Latency display (right side)
@@ -644,7 +1119,7 @@ class DashboardManager:
                                                             children="",
                                                             style={
                                                                 "marginLeft": "auto",
-                                                                "color": "#6c757d",
+                                                                "color": "var(--text-muted)",
                                                                 "fontSize": "0.9em",
                                                             },
                                                         ),
@@ -681,6 +1156,11 @@ class DashboardManager:
                                         dbc.CardHeader(html.H5("Training Controls")),
                                         dbc.CardBody(
                                             [
+                                                # A1-iv-5 / D8 (§5.7): when a non-live model is selected it is shown +
+                                                # selectable but NOT trainable — this status reason explains why Start is
+                                                # disabled (filled by ``annotate_train_gate``). Empty/hidden for a live model.
+                                                html.Div(id="train-gate-notice", className="mb-2"),
+                                                self.recurrence_request_preview.get_layout(),
                                                 html.Div(
                                                     [
                                                         dbc.Button(
@@ -749,22 +1229,22 @@ class DashboardManager:
                                                                                 id="nn-max-iterations-input",
                                                                                 type="number",
                                                                                 value=self.training_defaults.get("max_iterations", TrainingConstants.DEFAULT_MAX_GROWTH_ITERATIONS),
-                                                                                step=100,
+                                                                                step=1,
                                                                                 min=TrainingConstants.MIN_MAX_GROWTH_ITERATIONS,
                                                                                 max=TrainingConstants.MAX_MAX_GROWTH_ITERATIONS,
                                                                                 className="mb-2",
-                                                                                debounce=True,
+                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                             ),
                                                                             html.P("Maximum Total Epochs:", className="mb-1 fw-bold"),
                                                                             dbc.Input(
                                                                                 id="nn-max-total-epochs-input",
                                                                                 type="number",
                                                                                 value=self.training_defaults.get("epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS),
-                                                                                step=1000,
+                                                                                step=1,
                                                                                 min=self._settings.get_training_param_config("epochs")["min"],
                                                                                 max=self._settings.get_training_param_config("epochs")["max"],
                                                                                 className="mb-2",
-                                                                                debounce=True,
+                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                             ),
                                                                             html.P("Output Epochs (per pass):", className="mb-1 fw-bold"),
                                                                             dbc.Input(
@@ -775,7 +1255,7 @@ class DashboardManager:
                                                                                 min=TrainingConstants.MIN_OUTPUT_EPOCHS,
                                                                                 max=TrainingConstants.MAX_OUTPUT_EPOCHS,
                                                                                 className="mb-2",
-                                                                                debounce=True,
+                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                             ),
                                                                             html.P("Output Weight Init:", className="mb-1 fw-bold"),
                                                                             dcc.Dropdown(
@@ -806,11 +1286,11 @@ class DashboardManager:
                                                                                 id="nn-learning-rate-input",
                                                                                 type="number",
                                                                                 value=self.training_defaults.get("learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE),
-                                                                                step=0.001,
+                                                                                step="any",
                                                                                 min=self._settings.get_training_param_config("learning_rate")["min"],
                                                                                 max=self._settings.get_training_param_config("learning_rate")["max"],
                                                                                 className="mb-2",
-                                                                                debounce=True,
+                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                             ),
                                                                             html.P("Maximum Hidden Units:", className="mb-1 fw-bold"),
                                                                             dbc.Input(
@@ -821,7 +1301,7 @@ class DashboardManager:
                                                                                 min=self._settings.get_training_param_config("hidden_units")["min"],
                                                                                 max=self._settings.get_training_param_config("hidden_units")["max"],
                                                                                 className="mb-2",
-                                                                                debounce=True,
+                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                             ),
                                                                         ],
                                                                         id="sidebar-nn-top-params",
@@ -885,11 +1365,11 @@ class DashboardManager:
                                                                                                     id="nn-growth-preset-epochs-input",
                                                                                                     type="number",
                                                                                                     value=self.training_defaults.get("preset_epochs", TrainingConstants.DEFAULT_PRESET_EPOCHS),
-                                                                                                    step=10,
+                                                                                                    step=1,
                                                                                                     min=TrainingConstants.MIN_PRESET_EPOCHS,
                                                                                                     max=TrainingConstants.MAX_PRESET_EPOCHS,
                                                                                                     className="mb-2 ms-4",
-                                                                                                    debounce=True,
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                                     disabled=True,
                                                                                                     style={"width": "calc(100% - 1.5rem)"},
                                                                                                 ),
@@ -903,11 +1383,11 @@ class DashboardManager:
                                                                                                     id="nn-growth-convergence-threshold-input",
                                                                                                     type="number",
                                                                                                     value=TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD,
-                                                                                                    step=0.0001,
+                                                                                                    step="any",
                                                                                                     min=TrainingConstants.MIN_CONVERGENCE_THRESHOLD,
                                                                                                     max=TrainingConstants.MAX_CONVERGENCE_THRESHOLD,
                                                                                                     className="mb-2 ms-4",
-                                                                                                    debounce=True,
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                                     disabled=False,
                                                                                                     style={"width": "calc(100% - 1.5rem)"},
                                                                                                 ),
@@ -925,7 +1405,7 @@ class DashboardManager:
                                                                                                     min=TrainingConstants.MIN_PATIENCE,
                                                                                                     max=TrainingConstants.MAX_PATIENCE,
                                                                                                     className="mb-2 ms-4",
-                                                                                                    debounce=True,
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                                     disabled=False,
                                                                                                     style={"width": "calc(100% - 1.5rem)"},
                                                                                                 ),
@@ -940,6 +1420,47 @@ class DashboardManager:
                                                                         ],
                                                                         id="sidebar-nn-growth-triggers",
                                                                     ),
+                                                                    # ── Model (A1b-1: dedicated selection surface) ──
+                                                                    # The sidebar dropdown is replaced by a compact summary + a "▸ change"
+                                                                    # button that opens the dedicated model-selection modal (D7/§5.1). The
+                                                                    # full, gated model table lives there; the sidebar stays width-pinned and
+                                                                    # carries no scale pressure as the model population grows.
+                                                                    html.Div(
+                                                                        [
+                                                                            html.Hr(),
+                                                                            html.P("Model:", className="mb-1 fw-bold mt-1"),
+                                                                            html.Div(
+                                                                                [
+                                                                                    # ``nn-model-summary`` is KEPT (the select callback writes it);
+                                                                                    # seeded with the default model so it reads honestly at first paint
+                                                                                    # now that the dropdown no longer shows the current value.
+                                                                                    html.Span(
+                                                                                        self._initial_model_summary(),
+                                                                                        id="nn-model-summary",
+                                                                                        className="small text-muted",
+                                                                                    ),
+                                                                                    dbc.Button(
+                                                                                        "▸ change",
+                                                                                        id="nn-model-change-button",
+                                                                                        color="link",
+                                                                                        size="sm",
+                                                                                        className="p-0 ms-2 align-baseline text-decoration-none",
+                                                                                    ),
+                                                                                ],
+                                                                                className="ms-3 mb-2 d-flex align-items-baseline",
+                                                                            ),
+                                                                            # A1b-2 (§5.3): the reverse-gate annotation — names the model
+                                                                            # constraint the CURRENT dataset imposes ("3-D models only"),
+                                                                            # the dataset-side mirror of the table's per-row greying. Seeded
+                                                                            # for the default dataset; updated by the dataset→hint callback.
+                                                                            html.Div(
+                                                                                self._initial_dataset_model_hint(),
+                                                                                id="nn-model-dataset-hint",
+                                                                                className="ms-3 mb-2 small text-muted fst-italic",
+                                                                            ),
+                                                                        ],
+                                                                        id="sidebar-nn-model",
+                                                                    ),
                                                                     # ── Spiral Dataset ──
                                                                     html.Div(
                                                                         [
@@ -947,7 +1468,10 @@ class DashboardManager:
                                                                             html.H6(
                                                                                 [
                                                                                     html.Span("▼", id="ctx-spiral-dataset-icon", className="collapse-icon"),
-                                                                                    "Current Dataset",
+                                                                                    # N7 (U-6): the section title is renamed per selected dataset type
+                                                                                    # (e.g. "Current Dataset — MNIST") by ``render_dataset_params`` so the
+                                                                                    # left menu reflects the actually-selected type, not a fixed Spiral view.
+                                                                                    html.Span(self._initial_dataset_section_title(), id="nn-dataset-section-title"),
                                                                                 ],
                                                                                 id="ctx-spiral-dataset-header",
                                                                                 className="collapsible-header",
@@ -955,54 +1479,131 @@ class DashboardManager:
                                                                             dbc.Collapse(
                                                                                 html.Div(
                                                                                     [
-                                                                                        html.P("Spiral:", className="mb-1 fw-bold mt-1"),
-                                                                                        html.P("Rotations:", className="mb-1 ms-3"),
-                                                                                        dbc.Input(
-                                                                                            id="nn-spiral-rotations-input",
-                                                                                            type="number",
-                                                                                            value=TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
-                                                                                            step=0.5,
-                                                                                            min=TrainingConstants.MIN_SPIRAL_ROTATIONS,
-                                                                                            max=TrainingConstants.MAX_SPIRAL_ROTATIONS,
+                                                                                        # N7 (I-7): the four spiral-form typed inputs render only for the
+                                                                                        # spiral generator; ``render_dataset_params`` hides this block for
+                                                                                        # other types, which render schema-driven fields into
+                                                                                        # ``nn-dataset-schema-params`` and forward them via the generic
+                                                                                        # ``params`` staging channel (not these typed fields).
+                                                                                        html.Div(
+                                                                                            [
+                                                                                                html.P("Spiral:", className="mb-1 fw-bold mt-1"),
+                                                                                                html.P("Rotations:", className="mb-1 ms-3"),
+                                                                                                dbc.Input(
+                                                                                                    id="nn-spiral-rotations-input",
+                                                                                                    type="number",
+                                                                                                    value=TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
+                                                                                                    step="any",
+                                                                                                    min=TrainingConstants.MIN_SPIRAL_ROTATIONS,
+                                                                                                    max=TrainingConstants.MAX_SPIRAL_ROTATIONS,
+                                                                                                    className="mb-2 ms-3",
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
+                                                                                                    style={"width": "calc(100% - 1rem)"},
+                                                                                                ),
+                                                                                                html.P("Number:", className="mb-1 ms-3"),
+                                                                                                dbc.Input(
+                                                                                                    id="nn-spiral-number-input",
+                                                                                                    type="number",
+                                                                                                    value=TrainingConstants.DEFAULT_SPIRAL_NUMBER,
+                                                                                                    step=1,
+                                                                                                    min=TrainingConstants.MIN_SPIRAL_NUMBER,
+                                                                                                    max=TrainingConstants.MAX_SPIRAL_NUMBER,
+                                                                                                    className="mb-2 ms-3",
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
+                                                                                                    style={"width": "calc(100% - 1rem)"},
+                                                                                                ),
+                                                                                                html.P("Dataset:", className="mb-1 fw-bold mt-2"),
+                                                                                                html.P("Elements:", className="mb-1 ms-3"),
+                                                                                                dbc.Input(
+                                                                                                    id="nn-dataset-elements-input",
+                                                                                                    type="number",
+                                                                                                    value=TrainingConstants.DEFAULT_DATASET_ELEMENTS,
+                                                                                                    step=1,
+                                                                                                    min=TrainingConstants.MIN_DATASET_ELEMENTS,
+                                                                                                    max=TrainingConstants.MAX_DATASET_ELEMENTS,
+                                                                                                    className="mb-2 ms-3",
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
+                                                                                                    style={"width": "calc(100% - 1rem)"},
+                                                                                                ),
+                                                                                                html.P("Noise:", className="mb-1 ms-3"),
+                                                                                                dbc.Input(
+                                                                                                    id="nn-dataset-noise-input",
+                                                                                                    type="number",
+                                                                                                    value=TrainingConstants.DEFAULT_DATASET_NOISE,
+                                                                                                    step="any",
+                                                                                                    min=TrainingConstants.MIN_DATASET_NOISE,
+                                                                                                    max=TrainingConstants.MAX_DATASET_NOISE,
+                                                                                                    className="mb-2 ms-3",
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
+                                                                                                    style={"width": "calc(100% - 1rem)"},
+                                                                                                ),
+                                                                                            ],
+                                                                                            id="nn-dataset-typed-fields",
+                                                                                        ),
+                                                                                        # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1
+                                                                                        # Issue #3 Phase 1 — dataset_type selector
+                                                                                        # routed through the new POST /v1/training/dataset
+                                                                                        # endpoint (cascor #242). Apply Dataset stages
+                                                                                        # the change; restart applies it (cold-swap).
+                                                                                        html.P("Type:", className="mb-1 ms-3"),
+                                                                                        dcc.Dropdown(
+                                                                                            id="nn-dataset-type-dropdown",
+                                                                                            options=gated_dataset_options(DEFAULT_MODEL_KEY),
+                                                                                            # OQ-N2 / D-N13: ``⊥`` is the MOUNT state -- the first interaction is an
+                                                                                            # explicit choice, not a seeded default. D-N10 made that safe only once
+                                                                                            # the mount hydration existed (design PR 2): it fills this from the
+                                                                                            # backend, so ``⊥`` survives only when the backend holds nothing canopy
+                                                                                            # can name. Demo mode still lands on spirals because the simulator holds
+                                                                                            # them, not because of a seed. See ``_hydrated_dataset_value``.
+                                                                                            value=None,
+                                                                                            # §4.1 -- THE reachability fix. The dataset gate and the model gate each
+                                                                                            # read the other axis, so with no way to leave a dataset selected the two
+                                                                                            # gates trap the UI in whichever component it started in: (recurrence,
+                                                                                            # equities_seq) was compatible but unreachable. The ✕ restores ``⊥``, the
+                                                                                            # cut vertex joining both components. Every commit path out of ``⊥`` is
+                                                                                            # guarded (``selection_axis_unset``) and Start/Apply are disabled there,
+                                                                                            # so ``I-cover`` is gained without weakening ``I-safe``.
+                                                                                            clearable=True,
                                                                                             className="mb-2 ms-3",
-                                                                                            debounce=True,
                                                                                             style={"width": "calc(100% - 1rem)"},
                                                                                         ),
-                                                                                        html.P("Number:", className="mb-1 ms-3"),
-                                                                                        dbc.Input(
-                                                                                            id="nn-spiral-number-input",
-                                                                                            type="number",
-                                                                                            value=TrainingConstants.DEFAULT_SPIRAL_NUMBER,
-                                                                                            step=1,
-                                                                                            min=TrainingConstants.MIN_SPIRAL_NUMBER,
-                                                                                            max=TrainingConstants.MAX_SPIRAL_NUMBER,
+                                                                                        # §4.3 / N4 — the gate's notice renders HERE, at the locus, not in a
+                                                                                        # detached toast. ``role="status"`` + ``aria-live="polite"`` make it the
+                                                                                        # accessible channel: Y7 measured zero aria-* attributes in this file, and
+                                                                                        # dash 4.2.0's dropdown emits no ``aria-disabled``, so a greyed option's
+                                                                                        # gate is invisible to assistive technology. A toast alone would have been
+                                                                                        # an accessibility regression against simply rendering it inline.
+                                                                                        html.Div(id="dataset-gate-notice", className="ms-3", role="status", **{"aria-live": "polite"}),
+                                                                                        # N7 (I-7 / U-6): schema-driven parameter inputs for the selected
+                                                                                        # non-spiral generator, rebuilt by ``render_dataset_params`` from the
+                                                                                        # generator's JSON schema (labels/bounds/defaults). Each input carries a
+                                                                                        # pattern-matching id ``{"type": "nn-gen-param", "name": <field>}`` and is
+                                                                                        # read directly by ``apply_dataset`` into the generic ``params`` channel.
+                                                                                        html.Div(id="nn-dataset-schema-params", className="ms-3"),
+                                                                                        dbc.Button(
+                                                                                            "Apply Dataset",
+                                                                                            id="apply-dataset-button",
+                                                                                            color="secondary",
+                                                                                            outline=True,
+                                                                                            size="sm",
                                                                                             className="mb-2 ms-3",
-                                                                                            debounce=True,
                                                                                             style={"width": "calc(100% - 1rem)"},
                                                                                         ),
-                                                                                        html.P("Dataset:", className="mb-1 fw-bold mt-2"),
-                                                                                        html.P("Elements:", className="mb-1 ms-3"),
-                                                                                        dbc.Input(
-                                                                                            id="nn-dataset-elements-input",
-                                                                                            type="number",
-                                                                                            value=TrainingConstants.DEFAULT_DATASET_ELEMENTS,
-                                                                                            step=100,
-                                                                                            min=TrainingConstants.MIN_DATASET_ELEMENTS,
-                                                                                            max=TrainingConstants.MAX_DATASET_ELEMENTS,
+                                                                                        # Phase 2 P2-5 (Issue #3): Live Dataset Switch
+                                                                                        # button. Sibling of Apply Dataset — same form,
+                                                                                        # two destinations (cold swap vs live swap).
+                                                                                        # Spec §4.2: ``color="warning"``, default
+                                                                                        # ``disabled=True`` (F2.3); gated by the
+                                                                                        # experimental-flags-store + training-status-store
+                                                                                        # combination (see
+                                                                                        # _setup_live_dataset_switch_callbacks below).
+                                                                                        dbc.Button(
+                                                                                            "Live Dataset Switch",
+                                                                                            id="live-dataset-switch-button",
+                                                                                            color="warning",
+                                                                                            outline=True,
+                                                                                            size="sm",
+                                                                                            disabled=True,
                                                                                             className="mb-2 ms-3",
-                                                                                            debounce=True,
-                                                                                            style={"width": "calc(100% - 1rem)"},
-                                                                                        ),
-                                                                                        html.P("Noise:", className="mb-1 ms-3"),
-                                                                                        dbc.Input(
-                                                                                            id="nn-dataset-noise-input",
-                                                                                            type="number",
-                                                                                            value=TrainingConstants.DEFAULT_DATASET_NOISE,
-                                                                                            step=0.05,
-                                                                                            min=TrainingConstants.MIN_DATASET_NOISE,
-                                                                                            max=TrainingConstants.MAX_DATASET_NOISE,
-                                                                                            className="mb-2 ms-3",
-                                                                                            debounce=True,
                                                                                             style={"width": "calc(100% - 1rem)"},
                                                                                         ),
                                                                                     ]
@@ -1048,18 +1649,18 @@ class DashboardManager:
                                                                                 min=TrainingConstants.MIN_CANDIDATE_POOL_SIZE,
                                                                                 max=TrainingConstants.MAX_CANDIDATE_POOL_SIZE,
                                                                                 className="mb-2",
-                                                                                debounce=True,
+                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                             ),
                                                                             html.P("Correlation Threshold:", className="mb-1 fw-bold"),
                                                                             dbc.Input(
                                                                                 id="cn-correlation-threshold-input",
                                                                                 type="number",
                                                                                 value=TrainingConstants.DEFAULT_CANDIDATE_CORRELATION_THRESHOLD,
-                                                                                step=0.0001,
+                                                                                step="any",
                                                                                 min=TrainingConstants.MIN_CANDIDATE_CORRELATION_THRESHOLD,
                                                                                 max=TrainingConstants.MAX_CANDIDATE_CORRELATION_THRESHOLD,
                                                                                 className="mb-2",
-                                                                                debounce=True,
+                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                             ),
                                                                             html.P("Selected Candidates:", className="mb-1 fw-bold"),
                                                                             dbc.Input(
@@ -1070,7 +1671,18 @@ class DashboardManager:
                                                                                 min=TrainingConstants.MIN_SELECTED_CANDIDATES,
                                                                                 max=TrainingConstants.MAX_SELECTED_CANDIDATES,
                                                                                 className="mb-2",
-                                                                                debounce=True,
+                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
+                                                                            ),
+                                                                            # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C2.2 — fast-feedback
+                                                                            # validator for the (S, T, R, P) candidate-pool triple. The
+                                                                            # cascor server's _validate_candidate_pool_triple stays
+                                                                            # authoritative; this just mirrors the truth table client-side
+                                                                            # so the user sees violations on input change instead of on
+                                                                            # Apply-click.
+                                                                            html.Div(
+                                                                                id="cn-pool-triple-feedback",
+                                                                                className="text-danger small mb-2",
+                                                                                children="",
                                                                             ),
                                                                         ],
                                                                         id="sidebar-cn-pool-params",
@@ -1106,11 +1718,11 @@ class DashboardManager:
                                                                                                     id="cn-training-iterations-input",
                                                                                                     type="number",
                                                                                                     value=TrainingConstants.DEFAULT_CANDIDATE_TRAINING_ITERATIONS,
-                                                                                                    step=10,
+                                                                                                    step=1,
                                                                                                     min=TrainingConstants.MIN_CANDIDATE_TRAINING_ITERATIONS,
                                                                                                     max=TrainingConstants.MAX_CANDIDATE_TRAINING_ITERATIONS,
                                                                                                     className="mb-2 ms-4",
-                                                                                                    debounce=True,
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                                     disabled=False,
                                                                                                     style={"width": "calc(100% - 1.5rem)"},
                                                                                                 ),
@@ -1124,11 +1736,11 @@ class DashboardManager:
                                                                                                     id="cn-training-convergence-threshold-input",
                                                                                                     type="number",
                                                                                                     value=TrainingConstants.DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD,
-                                                                                                    step=0.00001,
+                                                                                                    step="any",
                                                                                                     min=TrainingConstants.MIN_CANDIDATE_CONVERGENCE_THRESHOLD,
                                                                                                     max=TrainingConstants.MAX_CANDIDATE_CONVERGENCE_THRESHOLD,
                                                                                                     className="mb-2 ms-4",
-                                                                                                    debounce=True,
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                                     disabled=True,
                                                                                                     style={"width": "calc(100% - 1.5rem)"},
                                                                                                 ),
@@ -1146,7 +1758,7 @@ class DashboardManager:
                                                                                                     min=TrainingConstants.MIN_CN_PATIENCE,
                                                                                                     max=TrainingConstants.MAX_CN_PATIENCE,
                                                                                                     className="mb-2 ms-4",
-                                                                                                    debounce=True,
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                                     disabled=False,
                                                                                                     style={"width": "calc(100% - 1.5rem)"},
                                                                                                 ),
@@ -1177,7 +1789,12 @@ class DashboardManager:
                                                                                     dbc.RadioItems(
                                                                                         id="cn-candidate-selection-radio",
                                                                                         options=[
-                                                                                            {"label": "Add Top Tier Candidates", "value": "top_tier"},
+                                                                                            # F-CANOPY-022: value MUST be one of cascor's
+                                                                                            # Literal["top","random","mixed"] (juniper-cascor
+                                                                                            # api/models/training.py:159,:327). This shipped as
+                                                                                            # "top_tier", which cascor rejected with a pydantic
+                                                                                            # literal_error, so this option could never be applied.
+                                                                                            {"label": "Add Top Tier Candidates", "value": "top"},
                                                                                             {"label": "Add Random Candidates", "value": "random"},
                                                                                         ],
                                                                                         value=None,
@@ -1195,7 +1812,7 @@ class DashboardManager:
                                                                                                 min=TrainingConstants.MIN_TOP_CANDIDATES_COUNT,
                                                                                                 max=TrainingConstants.MAX_TOP_CANDIDATES_COUNT,
                                                                                                 className="mb-2 ms-4",
-                                                                                                debounce=True,
+                                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                                 disabled=True,
                                                                                                 style={"width": "calc(100% - 1.5rem)"},
                                                                                             ),
@@ -1213,7 +1830,7 @@ class DashboardManager:
                                                                                                 min=TrainingConstants.MIN_RANDOM_CANDIDATES_COUNT,
                                                                                                 max=TrainingConstants.MAX_RANDOM_CANDIDATES_COUNT,
                                                                                                 className="mb-2 ms-4",
-                                                                                                debounce=True,
+                                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                                 disabled=True,
                                                                                                 style={"width": "calc(100% - 1.5rem)"},
                                                                                             ),
@@ -1235,6 +1852,40 @@ class DashboardManager:
                                                     id="sidebar-cn-section",
                                                 ),
                                                 html.Hr(id="sidebar-params-divider"),
+                                                # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.2 P1
+                                                # Issue #3 Phase 1 — pending dataset banner.
+                                                # Visibility is driven by the status-bar
+                                                # interval reading the cascor-side
+                                                # `pending_dataset` field (cascor #242);
+                                                # buttons offer the user the explicit
+                                                # cold-swap restart or a Cancel out.
+                                                dbc.Alert(
+                                                    [
+                                                        html.Span("Dataset change pending — restart training to apply.", className="me-2"),
+                                                        html.Br(),
+                                                        dbc.ButtonGroup(
+                                                            [
+                                                                dbc.Button(
+                                                                    "Stop & Restart with new dataset",
+                                                                    id="restart-with-new-dataset-button",
+                                                                    color="primary",
+                                                                    size="sm",
+                                                                ),
+                                                                dbc.Button(
+                                                                    "Cancel pending change",
+                                                                    id="cancel-pending-dataset-button",
+                                                                    color="secondary",
+                                                                    outline=True,
+                                                                    size="sm",
+                                                                ),
+                                                            ],
+                                                            className="mt-2",
+                                                        ),
+                                                    ],
+                                                    id="pending-dataset-banner",
+                                                    color="warning",
+                                                    is_open=False,
+                                                ),
                                                 # ── Shared Apply Button ──
                                                 html.Div(
                                                     [
@@ -1250,7 +1901,7 @@ class DashboardManager:
                                                             children="",
                                                             style={
                                                                 "fontSize": "0.85em",
-                                                                "color": "#6c757d",
+                                                                "color": "var(--text-muted)",
                                                                 "textAlign": "center",
                                                             },
                                                         ),
@@ -1304,6 +1955,42 @@ class DashboardManager:
                                     ],
                                     id="sidebar-network-info-section",
                                 ),
+                                # Phase 2 P2-4 (Issue #3): Experimental Functions gate.
+                                # Sidebar location (under Network Information) is per
+                                # ISSUE_3_PHASE_2_LIVE_DATASET_SWAP_2026-05-09 §4.1 — the
+                                # toggle affects the whole session, not a single tab.
+                                # F2.10: the cascor server is authoritative; this
+                                # switch's value is reconciled to cascor's state on
+                                # page load and on every change. The companion
+                                # ``experimental-flags-store`` (declared near the
+                                # other ``storage_type='local'`` stores) is what
+                                # P2-5's Live Dataset Switch button reads.
+                                html.Div(
+                                    dbc.Card(
+                                        [
+                                            dbc.CardHeader(
+                                                html.H5("Experimental Functions", className="mb-0"),
+                                            ),
+                                            dbc.CardBody(
+                                                [
+                                                    dbc.Switch(
+                                                        id="experimental-functions-toggle",
+                                                        label="Enable Experimental Functions",
+                                                        value=False,
+                                                        persistence=True,
+                                                        persistence_type="local",
+                                                    ),
+                                                    html.Div(
+                                                        id="experimental-functions-alert",
+                                                        className="mt-2",
+                                                    ),
+                                                ]
+                                            ),
+                                        ],
+                                        className="mb-3",
+                                    ),
+                                    id="sidebar-experimental-functions-section",
+                                ),
                                 # CAN-005: Pinned Parameters mirror.
                                 # Hidden when nothing is pinned; otherwise
                                 # shows name + current value rows for every
@@ -1323,94 +2010,32 @@ class DashboardManager:
                                     style={"display": "none"},
                                 ),
                             ],
-                            width=3,
+                            id="sidebar-col",
+                            # FRONTEND_ISSUES_PLAN_2026-05-09 §6.4 / Issue #6 —
+                            # initial value matches the metrics tab (the default
+                            # ``active_tab``); the per-tab callback below adjusts
+                            # this on every tab change. Width values come from
+                            # ``frontend.ui_standards`` — the single source of
+                            # truth pinned by tests/regression/test_tab_sidebar_widths.py.
+                            width=ui_standards.TAB_SIDEBAR_WIDTH["metrics"],
                         ),
                         # Right panel - Visualizations with tabs
                         dbc.Col(
                             [
                                 dbc.Tabs(
-                                    [
-                                        dbc.Tab(
-                                            self.metrics_panel.get_layout(),
-                                            label="Training Metrics",
-                                            tab_id="metrics",
-                                        ),
-                                        dbc.Tab(
-                                            self.candidate_metrics_panel.get_layout(),
-                                            label="Candidate Metrics",
-                                            tab_id="candidates",
-                                        ),
-                                        dbc.Tab(
-                                            self.network_visualizer.get_layout(),
-                                            label="Network Topology",
-                                            tab_id="topology",
-                                        ),
-                                        dbc.Tab(
-                                            self.network_evolution.get_layout(),
-                                            label="Network Evolution",
-                                            tab_id="evolution",
-                                        ),
-                                        dbc.Tab(
-                                            self.decision_boundary.get_layout(),
-                                            label="Decision Boundary",
-                                            tab_id="boundaries",
-                                        ),
-                                        dbc.Tab(
-                                            self.dataset_plotter.get_layout(),
-                                            label="Dataset View",
-                                            tab_id="dataset",
-                                        ),
-                                        dbc.Tab(
-                                            self.worker_panel.get_layout(),
-                                            label="Workers",
-                                            tab_id="workers",
-                                        ),
-                                        dbc.Tab(
-                                            self.parameters_panel.get_layout(),
-                                            label="Parameters",
-                                            tab_id="parameters",
-                                        ),
-                                        dbc.Tab(
-                                            self.hdf5_snapshots_panel.get_layout(),
-                                            label="Snapshots",
-                                            tab_id="snapshots",
-                                        ),
-                                        dbc.Tab(
-                                            self.replay_player_panel.get_layout(),
-                                            label="Replay",
-                                            tab_id="replay",
-                                        ),
-                                        dbc.Tab(
-                                            self.network_editor_panel.get_layout(),
-                                            label="Network Editor",
-                                            tab_id="network-editor",
-                                        ),
-                                        dbc.Tab(
-                                            self.redis_panel.get_layout(),
-                                            label="Redis",
-                                            tab_id="redis",
-                                        ),
-                                        dbc.Tab(
-                                            self.cassandra_panel.get_layout(),
-                                            label="Cassandra",
-                                            tab_id="cassandra",
-                                        ),
-                                        dbc.Tab(
-                                            self.tutorial_panel.get_layout(),
-                                            label="Tutorial",
-                                            tab_id="tutorial",
-                                        ),
-                                        dbc.Tab(
-                                            self.about_panel.get_layout(),
-                                            label="About",
-                                            tab_id="about",
-                                        ),
-                                    ],
+                                    # A1-iii-b1: the tab list is built by a method so the
+                                    # model-class suppression callback can rebuild it with the
+                                    # cascade-only tabs filtered out for a one_shot model.
+                                    self._all_visualization_tabs(),
                                     id="visualization-tabs",
                                     active_tab="metrics",
                                 )
                             ],
-                            width=9,
+                            id="visualization-col",
+                            # FRONTEND_ISSUES_PLAN_2026-05-09 §6.4 / Issue #6 —
+                            # complement of the sidebar width; the per-tab
+                            # callback keeps the sum at GRID_COLUMNS=12.
+                            width=ui_standards.visualization_width_for("metrics"),
                         ),
                     ]
                 ),
@@ -1445,22 +2070,115 @@ class DashboardManager:
                 # events. Each entry is a tiny dict with counts only — full
                 # connections lists would explode the store at 20×.
                 dcc.Store(id="evolution-snapshots-store", data=[]),
+                # A1-iii-b1: the active model's execution paradigm ("live" | "one_shot"),
+                # hydrated from GET /api/train/status. Drives cascade-panel suppression — a
+                # "one_shot" (recurrence) model hides the 5 cascade-only viz tabs + the
+                # status-bar iteration segment. Defaults "live" so the full dashboard renders.
+                dcc.Store(id="model-class-store", storage_type="memory", data="live"),
+                # A1-iv-3a: the currently-selected model key, written by the sidebar picker's
+                # POST /api/model/select callback (the runtime backend swap, A1-iv-2).
+                dcc.Store(id="model-selection-store", storage_type="memory", data=DEFAULT_MODEL_KEY),
+                # N5: the LAST ``/api/model/select`` payload -- ``nn_model`` / ``backend`` /
+                # ``execution`` / ``status`` / ``swapped`` -- written by the same callback that
+                # writes ``model-selection-store`` (one writer; the key and the payload move
+                # together). The Start gate and the train-gate notice read provider agreement off
+                # it, so a "recurrence" selection recorded over the cascor/demo backend disables
+                # Start instead of filing a cascor run under Recurrence. ``None`` until the first
+                # round-trip (unknown is not disagreement) and again after a model clear.
+                dcc.Store(id="model-state-store", storage_type="memory", data=None),
+                # A1-iv-3c: the one-shot (recurrence) Start dataset-ref body — ``{"dataset": {...}}``
+                # or None. A single Python callback resolves it from model-class-store +
+                # nn-dataset-type-dropdown so BOTH training-button transports (the server-side REST
+                # handler and the Phase D clientside WS/REST JS) forward the same generator + registry
+                # params on Start; None for a live (cascor/demo) model leaves their start POST unchanged.
+                dcc.Store(id="oneshot-start-params-store", storage_type="memory", data=None),
                 # Update intervals
                 dcc.Interval(id="fast-update-interval", interval=DashboardConstants.FAST_UPDATE_INTERVAL_MS, n_intervals=0),
                 dcc.Interval(id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0),
+                # F-CANOPY-035: the metrics-store poll's own lane. Since F-CANOPY-058 it
+                # clocks the poll's request/ack pacer rather than the feeder itself.
+                # Same nominal cadence as the fast lane; see ``METRICS_STORE_POLL_INTERVAL_MS``.
+                dcc.Interval(id=_METRICS_STORE_INTERVAL, interval=DashboardConstants.METRICS_STORE_POLL_INTERVAL_MS, n_intervals=0),
+                # F-CANOPY-055/058/068: the request/ack stores of the two paced polls. The
+                # seq-0 requests are answered by each feeder's mount call; every later
+                # request is written by the pacer in ``_setup_poll_pacers``.
+                dcc.Store(id=_METRICS_STORE_REQUEST, storage_type="memory", data={"seq": 0}),
+                dcc.Store(id=_METRICS_STORE_ACK, storage_type="memory", data=None),
+                dcc.Store(id=_STATUS_BAR_REQUEST, storage_type="memory", data={"seq": 0}),
+                dcc.Store(id=_STATUS_BAR_ACK, storage_type="memory", data=None),
+                # F-CANOPY-027: per-tab poll lanes. These carry the panel-scoped pollers that
+                # used to ride the shared fast/slow intervals, so an inactive tab costs ZERO
+                # renderer slots instead of one round-trip per tick per poller. They start
+                # ``disabled=True`` and are armed by ``_setup_poll_gating``'s clientside gate,
+                # which fires on mount. Deliberately declared HERE, outside ``visualization-tabs``,
+                # so the A1-iii-b1 ``suppress_cascade_tabs`` children rebuild cannot reset them.
+                # See ``_GATED_POLL_INTERVALS`` for the full rationale.
+                dcc.Interval(id="tabpoll-topology", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0, disabled=True),
+                dcc.Interval(id="tabpoll-dataset", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0, disabled=True),
+                dcc.Interval(id="tabpoll-workers", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0, disabled=True),
+                # Stage 2 lever 3 (design §12.6 / §13 row 5): SLOW cadence. At the fast
+                # cadence both boundary feeders' round-trips covered their own 1 s
+                # period, so the panel's render callback — whose Inputs they claim —
+                # was never promoted again after mount (80 fills vs 1 render / 115 s,
+                # run 20260824T080426Z). The dataset panel proves slow-lane feeders
+                # leave promotion gaps. Tab activation and the refresh button still
+                # fetch immediately (both are Inputs of the feeders).
+                dcc.Interval(id="tabpoll-boundaries", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0, disabled=True),
                 # One-shot interval for parameter initialization (fires once, 1s after load)
                 dcc.Interval(id="params-init-interval", interval=1000, max_intervals=1, n_intervals=0),
                 # CAN-000: pause periodic update intervals while the Apply Parameters
                 # button is in flight, so a server roundtrip isn't racing against
                 # interval-driven REST polls / clientside drains.
                 dcc.Store(id="apply-in-flight", data=False),
+                # E-3 (training-runtime defects plan §9): watchdog tick for the
+                # apply-in-flight clamp. Deliberately NOT one of the two clamped
+                # intervals — it must keep firing while they are disabled so a
+                # stuck clamp can always be force-released clientside.
+                dcc.Interval(id="apply-watchdog-interval", interval=DashboardConstants.APPLY_WATCHDOG_INTERVAL_MS, n_intervals=0),
+                # FRONTEND_ISSUES_PLAN_2026-05-09 §2.5 C / Issue #2 — write-only
+                # sink for the force-blur clientside callback. Dash requires
+                # an Output target on every callback; this Store exists solely
+                # to satisfy that contract without colliding with another
+                # callback's output.
+                dcc.Store(id="apply-blur-sink", data=None),
                 # Phase B: WebSocket drain stores (structured objects, D-07)
+                # N1 removed the then-dead-end ws-state-buffer / ws-candidate-progress
+                # stores; N8 (WS-primary wiring, wave 4) re-attaches ws-state-buffer as
+                # a live consumer — the drainState clientside callback below hydrates it
+                # and the metrics-panel training-state store prefers it while WS is fresh.
                 dcc.Store(id="ws-metrics-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
                 dcc.Store(id="ws-topology-buffer", data=None),
+                # N8: latest-only training-state frame (mirrors ws-topology-buffer's
+                # shape). Fed by drainState; consumed by fetch_training_state as the
+                # WS-primary source for the metrics-panel status strip.
                 dcc.Store(id="ws-state-buffer", data=None),
+                # N8: WS-data liveness (booleans only, so the value changes only on a
+                # live↔stale transition). A fast-interval clientside callback computes
+                # {metrics_live, state_live} from the bridge's frame-arrival clocks vs
+                # WS_LIVENESS_WINDOW_MS. The metrics / training-state polls read this to
+                # decide WS-primary (skip REST) vs REST fallback. Defaults stale so the
+                # mount fetch and any WS-quiet tab always poll (anti-starvation).
+                dcc.Store(id="ws-liveness-store", data={"metrics_live": False, "state_live": False}),
                 dcc.Store(id="ws-cascade-add-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
-                dcc.Store(id="ws-candidate-progress-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
+                # P2-7 follow-up: WS push buffer for dataset_swap events.
+                # Hydrated by a clientside drain of
+                # ``window._juniperWsDrain._datasetSwapBuffer``; a
+                # server-side merger then folds the events into
+                # ``dataset-swap-events-store`` with dedupe.
+                dcc.Store(id="ws-dataset-swap-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
+                # P2-5 follow-up A+B: no-op sink for the clientside
+                # callback that scrolls + pulses the Apply Dataset
+                # button when the user dismisses the Live Switch modal
+                # via "Return to Stop & Restart". The callback mutates
+                # the DOM directly; this Store exists only to satisfy
+                # Dash's "every clientside callback needs an Output".
+                dcc.Store(id="live-switch-fallback-sink", data=None),
                 dcc.Store(id="ws-connection-status", data={"connected": False, "reconnecting": False, "mode": "demo" if get_settings().demo_mode else "live"}),
+                # N2: canopy→cascor stream health (relay + control supervisor),
+                # polled from GET /api/stream_health on the slow interval. Feeds
+                # the degraded-mode dimension of the WS badge — browser-socket-
+                # open must not masquerade as end-to-end healthy.
+                dcc.Store(id="stream-health-store", data=None),
                 # GAP-WS-15: bridge for `settings.enable_raf_coalescer` → JS `window._juniperRafCoalescerEnabled`
                 dcc.Store(id="ws-config-init", data=None),
                 # Raw weight-oriented topology for heatmap view (OF-1)
@@ -1511,9 +2229,313 @@ class DashboardManager:
                     centered=True,
                     size="lg",
                 ),
+                # Phase 2 P2-5 (Issue #3): Live Dataset Switch warning modal.
+                # Per spec §4.3 — two-step warning + summary + accept/cancel.
+                # ``backdrop="static"`` + ``keyboard=False`` force an
+                # explicit choice (F2.4). The body's read-only summary
+                # (Q3 hybrid) renders the current sidebar dataset config
+                # so the user sees exactly what they're about to swap to.
+                dbc.Modal(
+                    [
+                        dbc.ModalHeader(dbc.ModalTitle("In-flight dataset migration")),
+                        dbc.ModalBody(
+                            [
+                                dbc.Alert(
+                                    "Warning: in-flight dataset migration will potentially " "alter Network Architecture and will permanently affect " "History, Snapshots, and Training Replay.",
+                                    color="warning",
+                                    className="mb-3",
+                                ),
+                                html.P("You are about to swap to:", className="mb-2"),
+                                dbc.ListGroup(
+                                    [],  # populated by callback from sidebar State refs
+                                    id="live-switch-dataset-summary",
+                                    flush=True,
+                                    className="mb-3",
+                                ),
+                                html.P(
+                                    "Choose how to proceed:",
+                                    className="mb-0 text-muted",
+                                ),
+                            ]
+                        ),
+                        dbc.ModalFooter(
+                            [
+                                dbc.Button(
+                                    "Return to Stop & Restart",
+                                    id="live-switch-fallback-button",
+                                    color="secondary",
+                                    outline=True,
+                                ),
+                                dbc.Button(
+                                    "Accept and proceed with live switch",
+                                    id="live-switch-accept-button",
+                                    color="warning",
+                                ),
+                            ]
+                        ),
+                    ],
+                    id="live-switch-modal",
+                    is_open=False,
+                    backdrop="static",
+                    keyboard=False,
+                    centered=True,
+                ),
+                # Phase 2 P2-5 (Issue #3): Live-swap progress alert.
+                # Opens on Accept (modal closes); shows spinner + Cancel
+                # button while cascor's POST is in flight (5–30 s for
+                # real fetches). The Cancel callback fires DELETE
+                # concurrently — see _setup_live_dataset_switch_callbacks.
+                # Styled as a floating alert (position:fixed via CSS in
+                # the className) so it stays visible regardless of which
+                # tab the user is on while the swap completes.
+                dbc.Alert(
+                    [
+                        dbc.Spinner(size="sm", color="light"),
+                        html.Span(" Swapping dataset…", className="ms-2"),
+                        dbc.Button(
+                            "Cancel",
+                            id="live-switch-cancel-button",
+                            color="danger",
+                            size="sm",
+                            className="ms-3",
+                        ),
+                    ],
+                    id="live-switch-progress-alert",
+                    is_open=False,
+                    color="info",
+                    dismissable=False,
+                    style={"position": "fixed", "top": "1rem", "right": "1rem", "zIndex": 1060, "minWidth": "20rem"},
+                ),
+                # Outcome alert — opens after the swap POST resolves
+                # (success / cancelled / error). Auto-dismisses after 5s.
+                html.Div(id="live-switch-outcome-alert", style={"position": "fixed", "top": "5rem", "right": "1rem", "zIndex": 1060, "minWidth": "20rem"}),
+                # N3 (I-6): Restart-with-new-dataset confirm modal (Q3/Q4).
+                # Replaces the pre-N3 fire-and-forget cold-swap — the sidebar
+                # "Stop & Restart with new dataset" banner button now opens this
+                # confirm dialog instead of silently POSTing. A simple confirm by
+                # default (assumes all other meta-parameters / structures /
+                # processes unchanged), leading with a start-fresh toggle (Q4,
+                # default OFF) and an expandable granular VERIFY/MODIFY section
+                # (Q3). N3b turns that section from read-only into in-place MODIFY:
+                # the staged dataset config (re-staged via /api/stage_dataset) and
+                # a focused set of restart-relevant training params (clamped +
+                # applied through N5's CascorPatchBounds / /api/set_params
+                # machinery) are editable before Confirm. Confirm →
+                # (re-stage if edited) → (apply params if edited) →
+                # POST /api/train/restart (stop → await stopped → start(staged));
+                # every step's outcome renders in restart-outcome-alert (T4).
+                # ``backdrop="static"`` + ``keyboard=False`` force an explicit
+                # choice — N3 turns a button that stopped nothing into one that can
+                # kill a multi-hour run (plan §11 skeptic #11).
+                dbc.Modal(
+                    [
+                        dbc.ModalHeader(dbc.ModalTitle("Confirm restart with new dataset")),
+                        dbc.ModalBody(
+                            [
+                                dbc.Alert(
+                                    "This stops the current run (if one is active), waits for it to settle, then restarts training with the staged dataset. Expand the section below to change the dataset or key training parameters before confirming; anything you leave unchanged is applied as-is.",
+                                    color="info",
+                                    className="mb-3",
+                                ),
+                                html.P("Restart plan:", className="mb-1 fw-semibold"),
+                                dbc.ListGroup([], id="restart-confirm-summary", flush=True, className="mb-3"),
+                                dbc.Switch(
+                                    id="restart-start-fresh-toggle",
+                                    label="Start fresh — discard the current model and its retained metrics/history (parameters and snapshots kept)",
+                                    value=False,
+                                ),
+                                html.Div(
+                                    # F2 (owner ruling 2026-09-24): "functionally a clean stack launch" stopped
+                                    # being true when cascor began carrying the applied params onto the rebuilt
+                                    # network -- a clean launch would reset them to the engine defaults.
+                                    "Off (default): continue the current model, retaining metrics/history for cross-dataset continuity. On: rebuild a vanilla, untrained network from the dataset. The applied parameters carry over, including any you edit below, and on-disk snapshots are kept.",
+                                    className="text-muted mb-3",
+                                    style={"fontSize": "0.85em"},
+                                ),
+                                dbc.Button(
+                                    "▸ Verify / modify what will happen",
+                                    id="restart-granular-toggle",
+                                    color="link",
+                                    size="sm",
+                                    className="p-0 mb-2",
+                                ),
+                                dbc.Collapse(
+                                    dbc.Card(
+                                        dbc.CardBody(
+                                            [
+                                                # N3b: read-only context (current engine
+                                                # state, populated on open) + the C5
+                                                # start-fresh consequence semantics.
+                                                html.Div(id="restart-granular-context", className="mb-2"),
+                                                html.Div(
+                                                    [
+                                                        html.Div([html.Strong("Start fresh OFF: "), "continue the current model, retaining metrics/history (cross-dataset continuity)."], className="text-muted", style={"fontSize": "0.82em"}),
+                                                        html.Div([html.Strong("Start fresh ON: "), "discard the model + retained metrics/history for a vanilla rebuild; the parameters (edits below included) and snapshots are kept."], className="text-muted mb-2", style={"fontSize": "0.82em"}),
+                                                    ]
+                                                ),
+                                                html.Hr(className="my-2"),
+                                                # N3b: editable staged-dataset config — the
+                                                # StageDatasetRequest fields, defaulting to the
+                                                # currently staged / current values; an edit
+                                                # re-stages via /api/stage_dataset before the
+                                                # restart proceeds.
+                                                html.P("Dataset for the restart", className="fw-semibold mb-1"),
+                                                self._build_restart_dataset_fields(),
+                                                html.Hr(className="my-2"),
+                                                # N3b: editable restart-relevant training params
+                                                # — clamped + applied through N5's machinery
+                                                # (CascorPatchBounds + /api/set_params partition)
+                                                # BEFORE the stop→await→start orchestration.
+                                                html.P("Key training parameters", className="fw-semibold mb-1"),
+                                                html.Div(
+                                                    "Edited values are clamped to the backend's accepted ranges and applied before the restart; unchanged fields are left as-is.",
+                                                    className="text-muted mb-2",
+                                                    style={"fontSize": "0.8em"},
+                                                ),
+                                                self._build_restart_param_fields(),
+                                            ]
+                                        )
+                                    ),
+                                    id="restart-granular-collapse",
+                                    is_open=False,
+                                ),
+                                # N3b: baseline captured on open (staged dataset + current
+                                # params) so Confirm re-stages / applies ONLY what the
+                                # operator actually changed, and the verify summary can show
+                                # the diff.
+                                dcc.Store(id="restart-modal-baseline", data={}),
+                            ]
+                        ),
+                        dbc.ModalFooter(
+                            [
+                                dbc.Button("Cancel", id="restart-cancel-button", color="secondary", outline=True),
+                                dbc.Button("Confirm & Restart", id="restart-confirm-button", color="primary"),
+                            ]
+                        ),
+                    ],
+                    id="restart-confirm-modal",
+                    is_open=False,
+                    backdrop="static",
+                    keyboard=False,
+                    centered=True,
+                ),
+                # N3: restart progress alert — opens on Confirm (spinner while the
+                # bounded stop → await → start POST is in flight). Split from the
+                # outcome callback so the spinner shows before the POST returns.
+                dbc.Alert(
+                    [
+                        dbc.Spinner(size="sm", color="light"),
+                        html.Span(" Restarting training…", className="ms-2"),
+                    ],
+                    id="restart-progress-alert",
+                    is_open=False,
+                    color="info",
+                    dismissable=False,
+                    style={"position": "fixed", "top": "13rem", "right": "1rem", "zIndex": 1060, "minWidth": "20rem"},
+                ),
+                # N3: restart outcome alert — success (incl. instant-convergence)
+                # or per-step failure (stop / await / start) with the upstream
+                # detail. Mirrors the live-switch / training-control *-outcome-alert
+                # idiom, but a DEDICATED surface (not the failure-only
+                # training-control renderer) so a truthful SUCCESS outcome can be
+                # shown too — the epoch-0 instant-convergence case must not read as
+                # frozen (folded finding 2). Sequential with the progress alert
+                # above (same slot: progress closes as this renders).
+                html.Div(id="restart-outcome-alert", style={"position": "fixed", "top": "13rem", "right": "1rem", "zIndex": 1060, "minWidth": "20rem"}),
+                # N3 (T4): Apply-Dataset staging outcome — surfaces a staging
+                # failure that was previously silent (``return dash.no_update``).
+                html.Div(id="dataset-stage-outcome-alert", style={"position": "fixed", "top": "17rem", "right": "1rem", "zIndex": 1060, "minWidth": "20rem"}),
+                # Model-selection surface (A1b-1; design D7/§5.2): a dedicated full-width modal
+                # opened from the sidebar "▸ change" button. ``toggle_model_modal`` fills the body
+                # container with a custom ``dbc.Table`` (status badge + compatibility cell + a
+                # per-row Select button disabled for incompatible models), gated against the
+                # current dataset. ``size="xl"`` caps the width (dbc 2.0.4 / Bootstrap 5) and
+                # ``scrollable`` scrolls the body as the model population grows — so the surface
+                # scales to many models with no manual sizing (modal chosen over a Models tab: the
+                # tab bar caps ``active_tab`` writers at two and is rebuilt by one-shot suppression;
+                # a modal's ``is_open`` toggle sidesteps both — OQ-1).
+                dbc.Modal(
+                    [
+                        dbc.ModalHeader(dbc.ModalTitle("Select a Model")),
+                        dbc.ModalBody(
+                            [
+                                # A1b search (§5.2): free-text filter over label + family + category + tags.
+                                # ``type="search"`` gives a native clear (×); the integer-ms debounce
+                                # (the repo standard — commits ~350 ms after the last keystroke, no blur
+                                # needed, per the no-boolean-debounce convention) rebuilds the table as
+                                # you type. Folded into ``toggle_model_modal`` (it owns the table
+                                # container), so there is no racy second writer.
+                                dbc.Input(
+                                    id="model-search-input",
+                                    type="search",
+                                    value="",
+                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
+                                    placeholder="Search models by name, family, category, or tag…",
+                                    className="mb-3",
+                                ),
+                                html.Div(id="model-selection-table-container"),
+                            ]
+                        ),
+                        dbc.ModalFooter(
+                            [
+                                # OQ-N6 / N11 — §5.5's SECOND affordance, deferred at canopy#394 on the
+                                # grounds that "the model is selected first" and never revisited. Its
+                                # absence is half of why the mutual gate had no exit. The label names
+                                # the CONSEQUENCE, not just the action (N4): clearing the model is how
+                                # you see every dataset again.
+                                dbc.Button("Clear model — show all datasets", id="model-selection-clear", color="link", className="me-auto"),
+                                dbc.Button("Close", id="model-selection-modal-close", color="secondary", outline=True),
+                            ]
+                        ),
+                    ],
+                    id="model-selection-modal",
+                    is_open=False,
+                    size="xl",
+                    scrollable=True,
+                    centered=True,
+                ),
+                # Partial-data contract -- the three-way prompt. Opens when a Start is refused
+                # because juniper-data could not produce the staged dataset in full (cascor
+                # leaves the staged config in place for exactly this retry). The operator must
+                # choose: accept the broken rows and continue, drop them and continue, or fail
+                # the load -- which cancels the staged change and deselects the dataset. Fed by
+                # ``training-control-action`` on BOTH transports, so it fires whether the Start
+                # went over WS or REST. Static backdrop and no close button: the contract asks
+                # for an affirmative choice, and dismissing the modal would leave the staged
+                # change in place with the question unanswered.
+                dcc.Store(id="dataset-shortfall-context", data=None),
+                dbc.Modal(
+                    [
+                        dbc.ModalHeader(dbc.ModalTitle("The dataset could not be produced in full"), close_button=False),
+                        dbc.ModalBody(id="dataset-shortfall-modal-body"),
+                        dbc.ModalFooter(
+                            [
+                                dbc.Button("Accept broken rows and continue", id="dataset-shortfall-accept-button", color="warning", className="me-2"),
+                                dbc.Button("Drop broken rows and continue", id="dataset-shortfall-drop-button", color="warning", outline=True, className="me-auto"),
+                                dbc.Button("Fail the load and pick another dataset", id="dataset-shortfall-fail-button", color="danger", outline=True),
+                            ]
+                        ),
+                    ],
+                    id="dataset-shortfall-modal",
+                    is_open=False,
+                    backdrop="static",
+                    keyboard=False,
+                    size="lg",
+                    centered=True,
+                ),
+                # Outcome of the operator's choice (re-staged + started / cancelled + deselected /
+                # could not re-stage). Below dataset-stage-outcome-alert (top:17rem).
+                html.Div(id="dataset-shortfall-outcome-alert", style={"position": "fixed", "top": "21rem", "right": "1rem", "zIndex": 1060, "minWidth": "20rem"}),
                 # Hidden div to store WebSocket data
                 html.Div(id="websocket-data", style={"display": "none"}),
                 dcc.Store(id="training-control-action", data=None),
+                # Training-control outcome alert — surfaces a dismissable danger
+                # alert when a Start/Pause/Stop/Resume/Reset command is rejected
+                # (fed by BOTH the server-side handler and the Phase D clientside
+                # JS via set_props). Offset below live-switch-outcome-alert
+                # (top:5rem) so the two fixed surfaces never overlap. See
+                # notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md.
+                html.Div(id="training-control-outcome-alert", style={"position": "fixed", "top": "9rem", "right": "1rem", "zIndex": 1060, "minWidth": "20rem"}),
                 # Button state management stores
                 dcc.Store(
                     id="button-states",
@@ -1550,6 +2572,242 @@ class DashboardManager:
         """
         return f"{self._api_base_url}/{path.lstrip('/')}"
 
+    def _resolve_model_class(self) -> str:
+        """Read the active backend's execution paradigm from ``/api/train/status``.
+
+        Returns ``"one_shot"`` for a recurrence / LMU fit, else ``"live"``. A transport
+        hiccup resolves to ``"live"`` (render the full dashboard) — the safe default.
+
+        Extracted from ``hydrate_model_class`` so the resolved value can be compared against
+        the store's current value before writing it (F-CANOPY-027: a no-op write rebuilds the
+        whole tab bar), and so the resolution is unit-testable without a Dash context.
+        """
+        try:
+            resp = requests.get(
+                self._api_url("/api/train/status"),
+                timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT,
+                headers=internal_api_headers(),
+            )
+            if resp.ok and resp.json().get("execution") == "one_shot":
+                return "one_shot"
+        except Exception as exc:
+            # Transport hiccup → keep the default "live" (render the full dashboard).
+            self.logger.debug("model-class hydration failed; defaulting to 'live': %s", exc)
+        return "live"
+
+    def _setup_poll_gating(self):
+        """F-CANOPY-027 + CAN-000: the single owner of every poller interval's ``disabled`` prop.
+
+        Two concerns, deliberately fused into ONE clientside callback because Dash allows only
+        one un-duplicated writer per prop and two competing writers would race:
+
+        * **CAN-000 (apply clamp)** — while the Apply Parameters roundtrip is in flight, every
+          poller is silenced so the write is not raced by interval-driven REST polls. This is
+          the behaviour the previous two-output callback provided; it is preserved exactly.
+        * **F-CANOPY-027 (tab gate)** — a panel-scoped poller is silenced while its tab is
+          inactive, so it costs no renderer slot at all. Server-side ``dash.no_update`` gating
+          does NOT achieve this: the round-trip and the slot are already spent by then.
+
+        Clientside is required, not merely preferred — a server-side gate would itself consume
+        one of the 12 slots this exists to conserve, and would react a full round-trip late.
+
+        KNOWN LIMITATION (accepted for Stage 1, tracked in the design doc §6.1). The five
+        panel-owned intervals live inside ``visualization-tabs``, which ``suppress_cascade_tabs``
+        rebuilds once on model-class hydration. That rebuild resets their ``disabled`` prop to
+        its declared default. The default is ``False`` (enabled) — i.e. it fails SAFE, to exactly
+        today's behaviour — and the next ``active_tab`` change re-arms the gate. The redundant
+        rebuild is separately suppressed in ``hydrate_model_class`` below, so on the common
+        "live" path it does not happen at all. The four dashboard-owned ``tabpoll-*`` lanes are
+        declared outside the tabs container and are immune.
+        """
+        tab_for_interval = [tab for _interval_id, tab in _GATED_POLL_INTERVALS]
+
+        self.app.clientside_callback(
+            f"""
+            function(inFlight, activeTab) {{
+                // CAN-000: the apply clamp silences everything, tab-gated or not.
+                var clamped = Boolean(inFlight);
+                var tabs = {json.dumps(tab_for_interval)};
+                return tabs.map(function (tab) {{
+                    // tab === null -> shared lane with global consumers; never tab-gated.
+                    return clamped || (tab !== null && tab !== activeTab);
+                }});
+            }}
+            """,
+            [Output(interval_id, "disabled") for interval_id, _tab in _GATED_POLL_INTERVALS],
+            [
+                Input("apply-in-flight", "data"),
+                Input("visualization-tabs", "active_tab"),
+            ],
+            prevent_initial_call=False,
+        )
+
+        # F-CANOPY-068: the strand watchdog that stood here is GONE, with the ``running=``
+        # guard it repaired. It sampled ``metrics-store-interval.disabled`` every 5 s and
+        # re-enabled the lane after 30 s of samples that all found it disabled (a sample
+        # that found it enabled, or the Apply clamp held, reset its clock). It fired 13 and
+        # 15 times in two 25-minute runs on canopy ``main``, each time mid-fetch, with the
+        # lane enabled for 11-15 s of the 30 s before each fire, and 7 of those fires
+        # evicted a response. That its 5 s samples kept phase with the feeder's ~4.9 s
+        # cycle is the ledger's inference from a replay, not a measurement (juniper-ml
+        # ``notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md``, Phase 11).
+        # The request/ack pacers (``_setup_poll_pacers``) bound a lost request by its own
+        # age instead, so nothing is left for a watchdog to unstick.
+
+    def _setup_poll_pacers(self):
+        """F-CANOPY-055/058/068: one clientside request/ack pacer per paced poll.
+
+        See ``poll_pacer_js`` and the comment above ``_METRICS_STORE_REQUEST`` for the design.
+        Each pacer rides its poll's existing Interval, so it adds no poller (the F-CANOPY-027
+        rule), and the tab/apply gate still silences that Interval during an Apply.
+
+        * The metrics store (F-CANOPY-058, F-CANOPY-068) is paced on its own
+          ``metrics-store-interval`` and on ``metrics-panel-display-mode-store``, its second
+          Input until now. A mid-flight change of that Input creates a same-identity request
+          and evicts the fetch: reproduced in a synthetic app with this wiring, and not
+          observed in mid-request on canopy itself.
+        * The top status bar (F-CANOPY-055) is paced on ``fast-update-interval``. Its feeder
+          rode that 1 s lane directly. Its wire latency had a median of 1.16 s (0.21-3.08 s),
+          plus the renderer's queue, so each response was still unprocessed when the next
+          tick's request arrived: 0 of 36 applied, and the bar held its layout defaults for
+          the life of the page.
+        """
+        stale_ms = DashboardConstants.POLL_PACER_STALE_MS
+        # Each pacer's lane comes from ``_PACED_POLLS``, the registry the F-027 poller census
+        # counts, so the census cannot drift from what is wired here.
+        lane_of = dict(_PACED_POLLS)
+        self.app.clientside_callback(
+            poll_pacer_js(_METRICS_STORE_REQUEST, stale_ms, extra_input=True),
+            Output(_METRICS_STORE_REQUEST, "data"),
+            [
+                Input(lane_of[_METRICS_STORE_REQUEST], "n_intervals"),
+                Input("metrics-panel-display-mode-store", "data"),
+            ],
+            [
+                State(_METRICS_STORE_REQUEST, "data"),
+                State(_METRICS_STORE_ACK, "data"),
+            ],
+            prevent_initial_call=True,
+        )
+        self.app.clientside_callback(
+            poll_pacer_js(_STATUS_BAR_REQUEST, stale_ms, extra_input=False),
+            Output(_STATUS_BAR_REQUEST, "data"),
+            Input(lane_of[_STATUS_BAR_REQUEST], "n_intervals"),
+            [
+                State(_STATUS_BAR_REQUEST, "data"),
+                State(_STATUS_BAR_ACK, "data"),
+            ],
+            prevent_initial_call=True,
+        )
+
+    def _all_visualization_tabs(self):
+        """Return the full ordered list of right-panel ``dbc.Tab``s (A1-iii-b1).
+
+        Extracted from ``get_layout`` so the model-class suppression callback
+        (``_setup_model_class_callbacks``) can rebuild the tab bar with the 5 cascade-only
+        tabs (candidates / topology / evolution / boundaries / workers) filtered out when a
+        one-shot model is active.
+        """
+        # NOTE: one ``dbc.Tab`` per call with ``label=`` and ``tab_id=`` on SEPARATE lines
+        # (trailing comma keeps Black from collapsing them at line-length 512). The UI test
+        # ``test_sidebar_width._parse_tab_labels`` greps this source for the
+        # ``label="X",\n  tab_id="y"`` pattern, so the multi-line shape is load-bearing.
+        return [
+            dbc.Tab(
+                self.metrics_panel.get_layout(),
+                label="Training Metrics",
+                tab_id="metrics",
+            ),
+            dbc.Tab(
+                self.candidate_metrics_panel.get_layout(),
+                label="Candidate Metrics",
+                tab_id="candidates",
+            ),
+            dbc.Tab(
+                self.network_visualizer.get_layout(),
+                label="Network Topology",
+                tab_id="topology",
+            ),
+            dbc.Tab(
+                self.network_evolution.get_layout(),
+                label="Network Evolution",
+                tab_id="evolution",
+            ),
+            dbc.Tab(
+                self.decision_boundary.get_layout(),
+                label="Decision Boundary",
+                tab_id="boundaries",
+            ),
+            dbc.Tab(
+                self.dataset_plotter.get_layout(),
+                label="Dataset View",
+                tab_id="dataset",
+            ),
+            dbc.Tab(
+                self.worker_panel.get_layout(),
+                label="Workers",
+                tab_id="workers",
+            ),
+            dbc.Tab(
+                self.parameters_panel.get_layout(),
+                label="Parameters",
+                tab_id="parameters",
+            ),
+            dbc.Tab(
+                self.hdf5_snapshots_panel.get_layout(),
+                label="Snapshots",
+                tab_id="snapshots",
+            ),
+            dbc.Tab(
+                self.replay_player_panel.get_layout(),
+                label="Replay",
+                tab_id="replay",
+            ),
+            dbc.Tab(
+                self.network_editor_panel.get_layout(),
+                label="Network Editor",
+                tab_id="network-editor",
+            ),
+            dbc.Tab(
+                self.redis_panel.get_layout(),
+                label="Redis",
+                tab_id="redis",
+            ),
+            dbc.Tab(
+                self.cassandra_panel.get_layout(),
+                label="Cassandra",
+                tab_id="cassandra",
+            ),
+            dbc.Tab(
+                self.tutorial_panel.get_layout(),
+                label="Tutorial",
+                tab_id="tutorial",
+            ),
+            dbc.Tab(
+                self.about_panel.get_layout(),
+                label="About",
+                tab_id="about",
+            ),
+        ]
+
+    def _visible_tabs(self, model_class):
+        """Return the right-panel tabs for the model class (A1-iii-b1).
+
+        For a ``"one_shot"`` model the cascade-only tabs are dropped; otherwise the full list
+        is returned unchanged. Pure (no Dash context) so the suppression logic is directly
+        unit-testable. Deliberately does NOT touch ``active_tab`` — the dashboard keeps exactly
+        two ``visualization-tabs.active_tab`` writers (Store-restore + tutorial trigger) to
+        avoid a mount-time restore race, and the default active tab ("metrics") is never a
+        cascade tab, so it survives the filter. (A tab this filter hides is reset by the
+        Store-restore writer, which reads the rendered tab list — Y4 — so the reset adds no
+        writer. The app-wide census is THREE, not two: ``hdf5_snapshots_panel``'s replay
+        hand-off also writes ``active_tab``; the two named above are this file's.)
+        """
+        tabs = self._all_visualization_tabs()
+        if model_class == "one_shot":
+            tabs = [tab for tab in tabs if tab.tab_id not in _CASCADE_ONLY_TAB_IDS]
+        return tabs
+
     def _setup_callbacks(self):
         """Set up dashboard callbacks."""
         self._setup_theme_callbacks()  # Define theme callbacks
@@ -1559,6 +2817,12 @@ class DashboardManager:
         self._setup_datastore_callbacks()  # Component data store updaters
         self._setup_button_action_callbacks()  # Define button action callbacks
         self._setup_backend_callbacks()  # Define backend callbacks
+        self._setup_experimental_functions_callbacks()  # P2-4 (Issue #3)
+        self._setup_live_dataset_switch_callbacks()  # P2-5 (Issue #3)
+        self._setup_restart_orchestration_callbacks()  # N3 (I-6): cold-swap confirm modal + stop→await→start
+        self._setup_dataset_swap_observers_callbacks()  # P2-7 (Issue #3)
+        self._setup_model_class_callbacks()  # A1-iii-b1: cascade-panel suppression for one-shot models
+        self._setup_model_selection_callbacks()  # A1-iv-3a: sidebar model picker -> runtime backend swap
 
     def _setup_sidebar_visibility_callback(self):
         """Set up sidebar contextual visibility based on active tab."""
@@ -1584,15 +2848,1200 @@ class DashboardManager:
             header_text = TAB_HEADER_MAP.get(active_tab, "Meta Parameters")
             return styles + [nn_open, cn_open, header_text]
 
+        # FRONTEND_ISSUES_PLAN_2026-05-09 §6.4 + §6.5 / Issue #6 — per-tab
+        # sidebar width. Wide tabs (3/9) carry Network Parameters; narrow
+        # tabs (2/10) reclaim viewport for content-dense visualisations or
+        # mostly-static content. Widths come from ``frontend.ui_standards``;
+        # the test suite pins both ends.
+        @self.app.callback(
+            [Output("sidebar-col", "width"), Output("visualization-col", "width")],
+            Input("visualization-tabs", "active_tab"),
+            prevent_initial_call=True,
+        )
+        def resize_sidebar_for_tab(active_tab: str):
+            sidebar = ui_standards.TAB_SIDEBAR_WIDTH.get(active_tab, ui_standards.WIDE_SIDEBAR)
+            return sidebar, ui_standards.GRID_COLUMNS - sidebar
+
+    def _setup_model_class_callbacks(self):
+        """A1-iii-b1: hydrate the model-class flag and suppress cascade-only panels for one-shot models.
+
+        ``model-class-store`` is hydrated once from ``GET /api/train/status`` (which carries the
+        active backend's ``execution`` paradigm). When it reads ``"one_shot"`` (a recurrence /
+        LMU fit), the cascade-only viz tabs and the status-bar iteration segment are hidden — an
+        LMU has no growing topology, decision boundary, candidate units, or worker pool.
+        """
+
+        @self.app.callback(
+            Output("model-class-store", "data"),
+            Input("params-init-interval", "n_intervals"),
+            State("model-class-store", "data"),
+            prevent_initial_call=True,
+        )
+        def hydrate_model_class(_n_intervals, current_model_class):
+            """Read the active backend's execution paradigm from /api/train/status (once on mount).
+
+            F-CANOPY-027: returns ``no_update`` when the resolved class already matches the
+            store. On the common "live" path the store is seeded "live" and hydration resolves
+            "live", so the old unconditional write re-triggered ``suppress_cascade_tabs`` and
+            rebuilt the entire 15-tab bar for no change — which also reset the ``disabled`` prop
+            of every panel-owned poller interval inside it. Suppressing the no-op write removes
+            both costs. A genuine live→one_shot (or back) transition still writes and rebuilds.
+            """
+            resolved = self._resolve_model_class()
+            return dash.no_update if resolved == current_model_class else resolved
+
+        @self.app.callback(
+            Output("visualization-tabs", "children"),
+            Input("model-class-store", "data"),
+            prevent_initial_call=True,
+        )
+        def suppress_cascade_tabs(model_class):
+            """Rebuild the tab bar, dropping the cascade-only tabs when the model is one_shot."""
+            return self._visible_tabs(model_class)
+
+        @self.app.callback(
+            Output("status-iteration-segment", "style"),
+            Input("model-class-store", "data"),
+            prevent_initial_call=True,
+        )
+        def toggle_iteration_segment(model_class):
+            """Hide the status-bar Hidden Units segment (cascade-only) for a one_shot model."""
+            base = {"marginRight": "20px"}
+            return {**base, "display": "none"} if model_class == "one_shot" else base
+
+    def _setup_model_selection_callbacks(self):
+        """A1b-1: the dedicated model-selection surface drives the runtime backend swap.
+
+        Selection moved from the sidebar dropdown (A1-iv-3a) to a per-row Select button in the
+        ``model-selection-modal`` table (opened by the sidebar "▸ change" button). The chosen model
+        POSTs its key to ``POST /api/model/select`` (A1-iv-2) — which re-creates the process-global
+        backend — and mirrors the resulting execution paradigm into ``model-class-store``
+        (``allow_duplicate``) so the A1-iii-b1 one-shot cascade-panel suppression follows the swap.
+        The compact sidebar summary reflects the live selection + status; the modal then closes.
+        ``gate_dataset_options`` (A1-iv-3b) and ``resolve_oneshot_start_body`` (A1-iv-3c) are
+        UNCHANGED — they key off the stores, not the input control, so only the input side moved.
+        """
+
+        # A1b-1: the dedicated model-selection modal. The sidebar "▸ change" button opens it
+        # (rebuilding the table against the CURRENT dataset value so its compatibility cells +
+        # disabled Select buttons reflect it on open, §5.3); the Close button closes it. A1b search:
+        # typing in ``model-search-input`` rebuilds the table filtered (§5.2) — folded in here (the
+        # one callback that owns ``model-selection-table-container``) so there is no racy 2nd writer.
+        @self.app.callback(
+            Output("model-selection-modal", "is_open"),
+            Output("model-selection-table-container", "children"),
+            Input("nn-model-change-button", "n_clicks"),
+            Input("model-selection-modal-close", "n_clicks"),
+            Input("model-search-input", "value"),
+            State("nn-dataset-type-dropdown", "value"),
+            State("model-selection-store", "data"),
+            prevent_initial_call=True,
+        )
+        def toggle_model_modal(_open_clicks, _close_clicks, search, dataset_value, selected_model):
+            return self._toggle_model_modal_handler(dash.callback_context.triggered_id, dataset_value, selected_model, search)
+
+        # A1b-1: a model is selected by the per-row Select button in the table (pattern-matching
+        # ``{"type": "model-select-btn", "index": <key>}``), REPLACING the old nn-model-dropdown
+        # Input. The clicked key is resolved from ``ctx.triggered_id`` and applied via the SAME
+        # ``_select_model_handler`` (POST /api/model/select + store mirror, A1-iv-3a); the modal
+        # then closes. Downstream gates are insulated — ``gate_dataset_options`` keys off
+        # ``model-selection-store`` and ``resolve_oneshot_start_body`` off ``model-class-store``,
+        # NOT the input control — so swapping the input side leaves every downstream gate intact.
+        @self.app.callback(
+            Output("model-selection-store", "data"),
+            Output("model-class-store", "data", allow_duplicate=True),
+            Output("nn-model-summary", "children"),
+            Output("model-selection-modal", "is_open", allow_duplicate=True),
+            # N5: the payload behind the key -- ``backend`` / ``swapped`` / ``execution`` /
+            # ``status``. Written HERE, by the store's only writer, so key and payload move together.
+            Output("model-state-store", "data"),
+            Input({"type": "model-select-btn", "index": dash.ALL}, "n_clicks"),
+            # N11: the clear rides in the SAME callback rather than a second one, because both write
+            # ``model-selection-store``. A second writer on a store is the duplicate-writer hazard,
+            # and it would be invisible to anyone reading either handler alone.
+            Input("model-selection-clear", "n_clicks"),
+            # Y3 / §4.10: the mount-time hydration rides here too, for the same reason -- it
+            # writes the same two stores. It is ALSO what runs ``gate_dataset_options`` at first
+            # paint now (see there), so it writes the key store on every mount, failure included.
+            Input("params-init-interval", "n_intervals"),
+            prevent_initial_call=True,
+        )
+        def select_model(n_clicks_list, clear_clicks, _init_intervals):
+            return self._select_model_from_table_handler(n_clicks_list, dash.callback_context.triggered_id, clear_clicks)
+
+        # N7 (I-5): the availability gate must apply at first paint, not only after a model change
+        # -- an unavailable generator (its optional data extra absent) is greyed with a reworded
+        # reason from the start. That first-paint pass used to come from a ``params-init-interval``
+        # Input here. It now comes from ``select_model``'s mount hydration, which writes
+        # ``model-selection-store`` on EVERY mount (the hydrated model, or the seed on failure).
+        #
+        # Why the interval Input went (§4.10): hydration sets the model and the dataset TOGETHER,
+        # and this callback must gate the hydrated dataset against the hydrated model. With both
+        # triggers, every mount ran TWO passes: one at the interval tick, against the seed model
+        # with no hydration yet (``model-state-store`` is still ``None`` when it is dispatched),
+        # and one when the hydrated key lands. The renderer drops an in-flight request when a newer
+        # one for the same callback arrives, so the hydrated pass wins in the end -- but a seed pass
+        # that had already completed would first paint a state gated against the WRONG model (an
+        # option list greyed for CasCor on a Recurrence reload, say). One trigger, one pass, and the
+        # ordering is explicit rather than left to the renderer's dedup.
+        #
+        # The hydrated dataset arrives in ``model-state-store`` (written in the SAME response as
+        # ``model-selection-store``, so it is current when this fires). Only the mount payload
+        # carries a ``dataset`` block; ``/api/model/select`` responses and the clear do not, so
+        # it is honoured exactly once.
+        @self.app.callback(
+            Output("nn-dataset-type-dropdown", "options"),
+            Output("nn-dataset-type-dropdown", "value"),
+            # §4.3: the same callback that MOVES the dataset owns the notice about having moved it.
+            # Only this handler knows the old value and the new one, so only it can name the change.
+            Output("dataset-gate-notice", "children"),
+            Input("model-selection-store", "data"),
+            State("nn-dataset-type-dropdown", "value"),
+            State("model-state-store", "data"),
+            prevent_initial_call=True,
+        )
+        def gate_dataset_options(model_key, current_value, model_state):
+            options, value, notice = self._gate_dataset_options_handler(model_key, current_value, hydrated_value=self._hydrated_dataset_value(model_state))
+            # A blocking or state-change notice outranks the informational one; the unnameable
+            # notice only speaks when the gate had nothing to say.
+            return options, value, notice if notice is not None else self._unnameable_dataset_notice(model_state)
+
+        # N7 (I-7 / U-6): drive the sidebar dataset params from the SELECTED generator's schema.
+        # Fires on dataset change AND once on mount (params-init-interval) so the panel is correct at
+        # first paint. Renames the section per type (U-6), hides the spiral typed-field block for
+        # non-spiral types, and renders schema-derived inputs into nn-dataset-schema-params (read by
+        # apply_dataset into the generic ``params`` staging channel — the typed fields stay spiral-only).
+        @self.app.callback(
+            Output("nn-dataset-section-title", "children"),
+            Output("nn-dataset-typed-fields", "style"),
+            Output("nn-dataset-schema-params", "children"),
+            Input("nn-dataset-type-dropdown", "value"),
+            Input("params-init-interval", "n_intervals"),
+            prevent_initial_call=True,
+        )
+        def render_dataset_params(dataset_value, _init_intervals):
+            return self._render_dataset_params_handler(dataset_value)
+
+        # A1-iv-3c: resolve the one-shot Start dataset-ref body in ONE place from the model-class
+        # flag + the (gated) dataset generator, so both training-button transports forward the
+        # same body. Re-fires on either Input so the store tracks model swaps and every change to the
+        # dataset value: a pick, the gate clearing it to ``⊥`` (OQ-6, canopy#652 -- it used to snap),
+        # or the mount landing on the hydrated one.
+        @self.app.callback(
+            Output("oneshot-start-params-store", "data"),
+            Input("model-class-store", "data"),
+            Input("nn-dataset-type-dropdown", "value"),
+            prevent_initial_call=True,
+        )
+        def resolve_oneshot_start_body(model_class, dataset_generator):
+            return self._resolve_oneshot_start_body_handler(model_class, dataset_generator)
+
+        # A1b-2 (§5.3): the reactive reverse gate. Selecting a dataset annotates the sidebar with
+        # the model constraint it imposes ("3-D models only"), the dataset-side mirror of the
+        # table's per-row ``model_reason`` greying. Fires on every dataset change — a user pick, the
+        # forward gate CLEARING a conflict (``gate_dataset_options``; OQ-6, canopy#652 — it used to
+        # snap), or the mount hydration — so the hint always tracks the dataset.
+        @self.app.callback(
+            Output("nn-model-dataset-hint", "children"),
+            Input("nn-dataset-type-dropdown", "value"),
+            prevent_initial_call=True,
+        )
+        def annotate_model_hint(dataset_value):
+            return self._dataset_model_hint_handler(dataset_value)
+
+        # A1-iv-5 / D8 (§5.7): when the selected model is non-live, show a status reason near the
+        # training controls explaining why Start is disabled. Cleared (hidden) for a live model.
+        # Pairs with the Start force-disable in ``update_button_appearance`` (same model-selection
+        # Input), so the gate and its explanation always move together.
+        @self.app.callback(
+            Output("train-gate-notice", "children"),
+            Input("model-selection-store", "data"),
+            # N5: the same payload the Start gate reads, so the notice and the gate move together.
+            Input("model-state-store", "data"),
+            prevent_initial_call=True,
+        )
+        def annotate_train_gate(model_key, model_state):
+            return self._train_gate_notice_handler(model_key, model_state=model_state)
+
+    @staticmethod
+    def _resolve_oneshot_start_body_handler(model_class: "str | None", dataset_generator: "str | None") -> "dict[str, object] | None":
+        """Build the one-shot Start dataset-ref body (A1-iv-3c), or None for a live model.
+
+        For a one_shot (recurrence) model the Start button MUST forward a dataset reference, else
+        ``RecurrenceBackend.start_training`` bails ("no dataset reference"). The generator is the
+        gated dataset-dropdown value; its juniper-data params come from the registry's seeded
+        ``default_params`` (single source of truth) — the synthetic n_samples/noise sidebar inputs
+        do not apply to a 3-D sequence generator. Returns None for a live (cascor/demo) model so
+        its bare reset-only start POST is unchanged. Stored in ``oneshot-start-params-store`` and
+        read by BOTH training-button transports (server-side REST handler + Phase D clientside JS).
+        """
+        if model_class != "one_shot" or not dataset_generator:
+            return None
+        # X3 / §4.6: this sent the RAW dropdown value as juniper-data's generator name, skipping the
+        # alias both sibling handlers apply (``_apply_dataset_handler``, ``_restage_dataset``). It
+        # was masked only because ``equities_seq`` -- the one dataset a one-shot model could reach
+        # -- is identity-mapped; ``spirals`` is not juniper-data's ``spiral``, so the moment any
+        # aliased dataset becomes one-shot-reachable the request names a generator that does not
+        # exist. Note the ASYMMETRY: the name is translated, the params lookup is NOT. Canopy's
+        # registry is keyed on canopy's values, so ``dataset_default_params`` must keep receiving
+        # the untranslated one -- translating both would silently drop the seeded params.
+        dataset_ref: dict[str, object] = {"generator": generator_name_for_type(dataset_generator)}
+        params = dataset_default_params(dataset_generator)
+        if params:
+            dataset_ref["params"] = params
+        return {"dataset": dataset_ref}
+
+    @staticmethod
+    def _hydrated_dataset_value(model_state):
+        """The dataset the mount pass lands on, or None to leave the ``⊥`` seed (§4.10 / G7, OQ-N2).
+
+        Only mount payloads carry a ``dataset`` block (``GET /api/selection``, or the ``unknown``
+        block ``_hydrate_selection_handler`` writes when that read fails), and ``model-state-store``
+        holds one only until the next model change -- so this is consulted exactly once, by
+        ``gate_dataset_options``'s first-paint pass. By ``source``:
+
+        * ``pending`` / ``loaded`` with a nameable value -- that value. G7.
+        * ``none`` -- ``None``: the backend holds nothing, so ``⊥`` is the honest mount state
+          (OQ-N2's reading, D-N10's condition met).
+        * ``pending`` / ``loaded`` naming something canopy does not offer -- ``None`` as well; the
+          dropdown cannot show it, and ``_unnameable_dataset_notice`` says what the backend holds.
+        * ``unknown`` -- ``DEFAULT_DATASET_TYPE``. **The one place a seeded default survives, and
+          deliberately.** The backend could not say what it holds (a cascor predating
+          juniper-cascor#676 omits ``current_dataset``; or the read failed). Landing on ``⊥`` there
+          would disable Start AND Apply over a backend that may be staged and ready after every
+          reload -- exactly the regression D-N10 forbids -- so it degrades to the pre-OQ-N2
+          behaviour instead, which is right whenever the backend is on its own default.
+        """
+        block = model_state.get("dataset") if isinstance(model_state, dict) else None
+        if not isinstance(block, dict):
+            return None
+        source = block.get("source")
+        if source in ("pending", "loaded"):
+            return block.get("value") or None
+        if source == "unknown":
+            return DEFAULT_DATASET_TYPE
+        return None
+
+    @staticmethod
+    def _unnameable_dataset_notice(model_state):
+        """Why the mount landed on ``⊥`` over a backend that DOES hold a dataset, or None.
+
+        The backend reported a pending or loaded dataset that canopy does not offer: an unseeded
+        generator staged by another client (``generator`` names it), or raw inline data (it names
+        nothing). ``⊥`` is right -- the dropdown cannot show it, and inventing the nearest match
+        would be a selection nobody made -- but a silent ``⊥`` over a busy backend reads as
+        "nothing is loaded", which is false. Informational: nothing here blocks.
+        """
+        block = model_state.get("dataset") if isinstance(model_state, dict) else None
+        if not isinstance(block, dict) or block.get("source") not in ("pending", "loaded") or block.get("value"):
+            return None
+        held = f"{block['generator']}" if block.get("generator") else "a dataset with no generator name"
+        verb = "has staged" if block.get("source") == "pending" else "holds"
+        return dbc.Alert(
+            [
+                html.Strong(f"The backend {verb} {held}, which this dashboard does not offer. "),
+                html.Span("Choose a dataset to stage your own; until then Start and Apply Dataset stay disabled."),
+            ],
+            id="dataset-gate-unnameable-alert",
+            color="info",
+            className="mb-2",
+        )
+
+    def _gate_dataset_options_handler(self, model_key, current_value, *, generators=None, models=MODELS, dataset_types=DATASET_TYPES, hydrated_value=None):
+        """Gate the dataset dropdown against the selected model (A1-iv-3b) AND availability (N7 / I-5).
+
+        Composes the model-compatibility gate (``gated_dataset_options`` — the D5 correctness gate:
+        an incompatible dataset is disabled with a reason suffix) with the deployment-availability
+        gate (``apply_availability_gate`` — a generator whose optional data extra is absent is
+        disabled with a reworded reason). A missing/older availability surface degrades to
+        all-available (flag-absent fallback). If the current selection became disabled, CLEAR it
+        (model-primary conflict policy — OQ-6, ratified 2026-09-22; see the comment at the return
+        for why this was previously mislabelled "dataset-primary" and snapped instead). The
+        mount-time pass runs against
+        the seeded ``model-selection-store`` (``DEFAULT_MODEL_KEY``), so the availability gate
+        applies at first paint.
+
+        **N11 — a cleared model renders UNGATED options.** This used to early-return
+        ``(no_update, no_update)`` on a falsy model key, which was harmless only while the model
+        could not be cleared. The moment it can, that return freezes the dropdown at the OLD model's
+        gate: clearing the model to escape a constraint would leave the constraint in force. That is
+        the mutual-gate trap again, on the model axis, shipped by the very affordance meant to
+        relieve it. ``gated_dataset_options(None)`` already returns every dataset enabled — the
+        registry was right and only this handler was wrong.
+
+        Because the current dataset is then in ``enabled``, the conflict branch below (a CLEAR since
+        OQ-6, canopy#652) leaves it alone: clearing the model KEEPS the dataset. That is §5.6's dataset-primary policy, which was not even
+        expressible while the dropdown was unclearable.
+
+        **§4.10 — ``hydrated_value``, the first-paint pass.** The dataset the backend actually
+        holds, read at mount (``_hydrated_dataset_value``). It is gated exactly like a dataset
+        the operator picked, against the model hydrated in the same response -- so a backend
+        holding a dataset the selected model cannot use clears to ``⊥`` and says so, as any
+        conflict does. The one difference: where the gate would answer "keep it" (``no_update``),
+        keeping a value the dropdown does not yet HOLD means writing it. Without that, the
+        compatible case -- the whole point of hydrating -- would leave the seed on screen.
+        """
+        if hydrated_value:
+            options, value, notice = self._gate_dataset_options_handler(model_key, hydrated_value, generators=generators, models=models, dataset_types=dataset_types)
+            if value is dash.no_update and hydrated_value != current_value:
+                value = hydrated_value
+            return options, value, notice
+        # ``generators`` is injectable so a test can state the deployment's availability instead of
+        # inheriting whatever a live ``/api/dataset/generators`` call returns. Without it the
+        # all-unavailable case (G1d) is unreachable, and — since N11 removed the early return that
+        # used to short-circuit before this line — a no-model gate call would otherwise perform
+        # live HTTP on a path that never did.
+        available = self._fetch_generators() if generators is None else generators
+        # ``models``/``dataset_types`` travel together and default to the production seeds. G1c
+        # needs a synthetic ≥3-component registry, which is unreachable while this closes over the
+        # module globals; A1's audit could not measure G1c at all for exactly that reason.
+        options = apply_availability_gate(gated_dataset_options(model_key, models=models, dataset_types=dataset_types), available)
+        enabled = [option["value"] for option in options if not option.get("disabled")]
+        # §4.7 — ``current_value in enabled`` and ``not enabled`` were one branch, and they are not
+        # the same event. The first is "nothing to do"; the second is "no dataset in this deployment
+        # is both compatible with this model and available", which is a RECOVERY state and was
+        # silently parking the UI on a dataset its own list disables.
+        # N5 — the availability surface may not have been READ. ``None`` (fetch failed) is not
+        # ``[]`` (fetch succeeded, nothing to say); see ``availability_is_known``. The gating is
+        # unchanged and still fail-open, so this only ever ADDS a caveat — it never disables
+        # anything, and it must not pre-empt the two notices that describe a state change the
+        # operator just caused.
+        unknown = not availability_is_known(available)
+        if not enabled:
+            # Blocking, and strictly more informative than the caveat. Note this branch is
+            # unreachable while ``unknown`` — with nothing known, nothing is disabled — so the
+            # two never compete in practice; the ordering is belt-and-braces.
+            return options, None, self._empty_dataset_set_notice(model_key)
+        if not current_value:
+            # ``⊥`` is not a conflict. The clear branch below reads "X is not compatible with
+            # M, so it was cleared" — with no dataset selected there is no X and nothing was
+            # cleared, and ``_dataset_label(None)`` renders the literal string "none", so the
+            # operator was told *"none is not compatible with CasCor … so it was cleared"* on
+            # every gate re-fire while sitting at ``⊥``. Reachable since canopy#652 made ``⊥``
+            # a state the gate CLEARS INTO: any later re-fire (a model change, or the dropdown's
+            # own ✕ at :1408) re-enters with ``current_value=None``. This mirrors the
+            # ``in enabled`` branch — no state change, so only the availability caveat speaks.
+            return options, dash.no_update, self._availability_unknown_notice() if unknown else None
+        if current_value in enabled:
+            return options, dash.no_update, self._availability_unknown_notice() if unknown else None
+        # OQ-6, ratified 2026-09-22: **model-primary, resolved by CLEARING the dataset.**
+        #
+        # D5 (JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md:55) made the
+        # conflict rule a swappable policy and deferred the default to "post-spike"; §5.6 named
+        # the two candidates and BOTH resolve by clearing — *dataset-primary* keeps the dataset
+        # and clears the model, *model-primary* keeps the model and clears the dataset.
+        #
+        # This line used to snap to ``enabled[0]`` and call itself "(dataset-primary conflict
+        # policy, D5)". That was wrong twice over: it kept the MODEL and changed the dataset,
+        # which is model-primary's direction, not dataset-primary's; and it replaced rather
+        # than cleared, which is neither policy. The snap was a workaround, not a choice —
+        # N7 of the selection-reachability design records that under ``clearable=False`` both
+        # §5.6 policies were literally unimplementable, because a null dataset could not be
+        # expressed. Both axes are clearable now, so the design's own resolution is available
+        # and this is it.
+        #
+        # Clearing lands on ``⊥``, where Apply and Start are already disabled
+        # (``selection_axis_unset``) — so the operator picks deliberately from the gated list
+        # instead of inheriting a dataset the gate chose for them. The empty-set branch above
+        # has cleared for the same reason since §4.7; this makes the two agree.
+        return options, None, self._dataset_cleared_notice(current_value, model_key)
+
+    @staticmethod
+    def _model_label(model_key):
+        """Human label for ``model_key``, falling back to the key itself."""
+        spec = get_model_spec(model_key) if model_key else None
+        return spec.label if spec is not None else (model_key or "the selected model")
+
+    @staticmethod
+    def _dataset_label(dataset_value):
+        """Human label for ``dataset_value``, falling back to the raw value."""
+        spec = get_dataset_spec(dataset_value) if dataset_value else None
+        return spec.label if spec is not None else (dataset_value or "none")
+
+    def _empty_dataset_set_notice(self, model_key):
+        """N8 / N12 — the PERSISTENT half. Blocking, resolvable, and never auto-dismissed.
+
+        Fires when compatible ∩ available is empty: the model is fine and the datasets are fine,
+        but no dataset in THIS deployment is both. When this was written that was the container's
+        normal state for the LMU, whose only dataset needed ``yfinance``. It no longer is: since
+        canopy#612, five of the LMU's six datasets are numpy-only synthetics that declare no
+        availability hook upstream, so juniper-data reports them available in every deployment (as
+        of 2026-09-23 only ``equities``, ``equities_seq`` and ``mnist`` declare one). The state is
+        still reached wherever juniper-data reports every compatible generator unavailable. The
+        old code returned ``no_update`` here, leaving the
+        dropdown showing a dataset its own list disables; the value is now cleared to ``⊥``, which
+        also disables Start and Apply through the gates that already exist.
+
+        No ``duration``: "persistent until resolved" applies to this event and only this one.
+        """
+        return dbc.Alert(
+            [
+                html.Strong(f"No dataset is available for {self._model_label(model_key)}. "),
+                html.Span("Every dataset compatible with this model is unavailable in this deployment — usually a missing optional data extra in juniper-data. "),
+                html.Span("Install it, or choose a different model."),
+            ],
+            color="warning",
+            className="mb-2",
+            id="dataset-gate-empty-alert",
+        )
+
+    def _availability_unknown_notice(self):
+        """N5 — canopy could not read the availability surface, and says so.
+
+        Persistent (no ``duration``), like the empty-set notice and unlike the cleared one: the
+        condition lasts as long as juniper-data is unreachable, so an auto-dismiss would hide a
+        live caveat rather than retire a finished event.
+
+        Deliberately does NOT claim anything is unavailable. Everything is still selectable —
+        the gating is fail-open by design — so the honest statement is that the greying may be
+        wrong in EITHER direction, and where the authoritative answer comes from instead.
+        """
+        return dbc.Alert(
+            [
+                html.Strong("Dataset availability is unknown. "),
+                html.Span("canopy could not reach juniper-data, so the list below is not filtered by what this deployment can actually generate. "),
+                html.Span("Datasets needing an optional data extra will not be greyed out; a missing one surfaces when you Apply."),
+            ],
+            color="secondary",
+            className="mb-2",
+            id="dataset-gate-availability-unknown-alert",
+        )
+
+    def _dataset_cleared_notice(self, previous, model_key):
+        """D5's notice under the ratified policy, and N12's TRANSIENT half — auto-dismisses.
+
+        The previously-selected dataset is not compatible with the newly-selected model, so it
+        is CLEARED rather than replaced. Names what was dropped and why: "the dataset changed"
+        without saying from what is not a notice, it is an alarm.
+
+        OQ-6 was ratified 2026-09-22 as **model-primary with a clear** — §5.6's own wording,
+        which this handler could not implement before both axes became clearable. See the
+        conflict-resolution comment in ``_gate_dataset_options_handler``.
+        """
+        return dbc.Alert(
+            [
+                html.Strong("Dataset cleared. "),
+                html.Span(f"{self._dataset_label(previous)} is not compatible with {self._model_label(model_key)}, so it was cleared. Choose a dataset from the gated list."),
+            ],
+            color="info",
+            className="mb-2",
+            dismissable=True,
+            duration=8000,
+            id="dataset-gate-cleared-alert",
+        )
+
+    # N7 (I-7 / U-6 / I-5): schema-driven dataset-panel plumbing. The generator list (name /
+    # available / schema dicts) is fetched from canopy's own /api/dataset/generators proxy and
+    # TTL-cached so the render + gate callbacks don't each pay a round-trip.
+    _GENERATORS_CACHE_TTL_S: float = 30.0
+
+    def _fetch_generators(self):
+        """Return the /api/dataset/generators list, or ``None`` when the fetch did not succeed.
+
+        Reuses canopy's own proxy route (which fetches juniper-data's /v1/generators via httpx and
+        falls back to a built-in list when the service is down).
+
+        **``None`` is not the same as ``[]``, and it used to be.** This returned ``[]`` for an
+        exception, for a non-ok response, and for a 200 with an empty payload — three outcomes
+        with one value. The availability helpers then read every generator as available (the
+        flag-absent fallback), so the panel was identical whether juniper-data had answered
+        "everything is fine" or had not answered at all. An operator could not tell, and neither
+        could a caller.
+
+        The GATING is unchanged and still fail-open: ``availability_map(None)`` is empty and
+        ``is_generator_available`` defaults absent names to ``True``, which is the ratified
+        two-tier posture (D5) — a transient blip must not strand a dataset, and the backend
+        still refuses with a 501 install hint if the extra is genuinely missing. What ``None``
+        buys is that ``availability_is_known`` can now say so, and the panel can carry a notice
+        instead of a confident answer it does not have.
+
+        The failure is cached for the same TTL as a success, deliberately: the alternative is a
+        request per gate callback while the service is down, which is when canopy can least
+        afford them.
+        """
+        now = time.monotonic()
+        cached = getattr(self, "_generators_cache", None)
+        if cached is not None and (now - cached[0]) < self._GENERATORS_CACHE_TTL_S:
+            return cached[1]
+        generators = None
+        try:
+            resp = requests.get(self._api_url("/api/dataset/generators"), timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT, headers=internal_api_headers())
+            if resp.ok:
+                payload = resp.json()
+                if isinstance(payload, dict) and payload.get("upstream_unavailable"):
+                    # A-N5 / canopy#653. HTTP 200 carrying the route's built-in fallback: the
+                    # route reached us, juniper-data did not reach IT, and the four built-ins
+                    # carry no ``available`` flag. Availability is therefore UNREAD, which is
+                    # ``None`` (unknown) and not ``[]`` (read, nothing to say). Without this the
+                    # ``unknown`` state was unreachable from the outage it was built for, and
+                    # ``is_generator_available`` fail-open reported every gated generator
+                    # selectable against a down service.
+                    generators = None
+                else:
+                    generators = payload.get("generators", []) if isinstance(payload, dict) else []
+            else:
+                # A non-ok answer is not an empty answer. Y5 (canopy#609) was exactly this:
+                # a keyed deployment 401'd, the route ignored the status, and every dataset's
+                # params panel read "No adjustable parameters" as though the schema were empty.
+                self.logger.debug("Dataset generators fetch returned HTTP %s", resp.status_code)
+        except Exception as exc:  # noqa: BLE001 — a generator-fetch failure must never break the panel; it degrades to "unknown".
+            self.logger.debug("Failed to fetch dataset generators: %s", exc)
+        self._generators_cache = (now, generators)
+        return self._generators_cache[1]
+
+    @staticmethod
+    def _generator_schema(gen_name, generators):
+        """Return the JSON schema dict for generator ``gen_name`` from a /v1/generators list, or {}."""
+        for entry in generators or ():
+            if isinstance(entry, dict) and entry.get("name") == gen_name:
+                schema = entry.get("schema")
+                return schema if isinstance(schema, dict) else {}
+        return {}
+
+    def _initial_dataset_section_title(self):
+        """Seed text for the U-6 dataset section title at first paint (renamed per type by callback)."""
+        return self._dataset_section_title(DEFAULT_DATASET_TYPE)
+
+    @staticmethod
+    def _dataset_section_title(dataset_value):
+        """'Current Dataset — <Label>' for U-6 (falls back to the raw value, then a bare title)."""
+        spec = get_dataset_spec(dataset_value)
+        label = spec.label if spec is not None else (dataset_value or "")
+        return f"Current Dataset — {label}" if label else "Current Dataset"
+
+    def _render_dataset_params_handler(self, dataset_value, generators=None):
+        """Drive the U-6 title + spiral-block visibility + schema-driven params for the selected type (N7).
+
+        Returns ``(section_title, typed_fields_style, schema_children)``:
+        - spiral -> title, typed block shown, empty schema container (spiral keeps its typed fields);
+        - other  -> title, typed block hidden, schema-derived inputs (pattern-matching ids) that
+          ``apply_dataset`` forwards via the generic ``params`` channel. An unavailable generator
+          still renders a reworded reason note (I-5). ``generators`` is injectable for tests.
+        """
+        if generators is None:
+            generators = self._fetch_generators()
+        title = self._dataset_section_title(dataset_value)
+        gen_name = generator_name_for_type(dataset_value)
+        if gen_name == "spiral":
+            return title, {"display": "block"}, []
+        # The registry seed overlays the schema defaults, so the panel SHOWS what Apply will
+        # SEND. Without it the two disagree for any seeded dataset, and the rendered control
+        # sends the schema default back over the seed on the next Apply.
+        # ``exclude`` is per-generator: beyond the universal split/seed/cache plumbing, a
+        # generator whose rank an operator could flip has that knob WITHHELD, because
+        # DatasetTypeSpec.ndim is a static scalar the form would otherwise let them contradict
+        # (canopy#623; design §12.9). The seeded value still travels -- see _apply_dataset_handler.
+        fields = apply_seeded_defaults(
+            parse_schema_fields(self._generator_schema(gen_name, generators), exclude=form_excluded_fields(gen_name)),
+            dataset_default_params(dataset_value),
+        )
+        available = is_generator_available(dataset_value, generators)
+        return title, {"display": "none"}, self._build_schema_param_inputs(dataset_value, fields, available, generators=generators)
+
+    @staticmethod
+    def _build_schema_param_inputs(dataset_value, fields, available, generators=None):
+        """Build the schema-driven param inputs (+ unavailable/empty note) for a non-spiral type (N7).
+
+        Each field becomes a labelled control with a pattern-matching id
+        ``{"type": "nn-gen-param", "name": <field>}`` carrying its schema-derived label/bounds/default,
+        so ``apply_dataset`` reads them via ``State({"type": "nn-gen-param", "name": ALL}, ...)`` into
+        the generic ``params`` payload. number -> dbc.Input(type=number); boolean -> dbc.Checkbox;
+        enum -> dcc.Dropdown; string -> dbc.Input(type=text).
+        """
+        children: list = []
+        if not available:
+            # The panel has room the dropdown option does not, so it carries the producer's OWN
+            # install hint verbatim when there is one (juniper-data W-4). Saying a dataset is
+            # unavailable and nothing about what would fix it is the gap that field exists to
+            # close; re-wording it here would put canopy back in the business of maintaining a
+            # string it does not own.
+            note = f"This dataset is {unavailable_reason(dataset_value, generators)} — it cannot be staged until the deployment provides it."
+            hint = unavailable_hint(dataset_value, generators)
+            children.append(dbc.Alert([html.Span(note), html.Br(), html.Strong(hint)] if hint else note, color="warning", className="py-1 px-2 small mb-2"))
+        if not fields:
+            children.append(html.P("No adjustable parameters — sensible generator defaults are used.", className="mb-1 small text-muted fst-italic"))
+            return children
+        for gen_field in fields:
+            field_id = {"type": "nn-gen-param", "name": gen_field.name}
+            children.append(html.P(f"{gen_field.label}:", className="mb-1 ms-1 small"))
+            if gen_field.input_type == "checkbox":
+                children.append(dbc.Checkbox(id=field_id, value=bool(gen_field.default), className="mb-2 ms-1"))
+            elif gen_field.input_type == "select":
+                children.append(dcc.Dropdown(id=field_id, options=[{"label": choice, "value": choice} for choice in gen_field.options], value=gen_field.default, clearable=False, className="mb-2 ms-1", style={"width": "calc(100% - 0.5rem)"}))
+            elif gen_field.input_type == "number":
+                number_kwargs: dict = {}
+                if gen_field.minimum is not None:
+                    number_kwargs["min"] = gen_field.minimum
+                if gen_field.maximum is not None:
+                    number_kwargs["max"] = gen_field.maximum
+                if gen_field.step is not None:
+                    number_kwargs["step"] = gen_field.step
+                children.append(dbc.Input(id=field_id, type="number", value=gen_field.default, debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS, className="mb-2 ms-1", style={"width": "calc(100% - 0.5rem)"}, **number_kwargs))
+            else:
+                children.append(dbc.Input(id=field_id, type="text", value=(gen_field.default if gen_field.default is not None else ""), debounce=True, className="mb-2 ms-1", style={"width": "calc(100% - 0.5rem)"}))
+            if gen_field.description:
+                children.append(html.P(gen_field.description, className="mb-2 ms-1 text-muted", style={"fontSize": "0.7rem"}))
+        return children
+
+    @staticmethod
+    def _collect_generator_params(gen_values, gen_ids, exclude=frozenset()):
+        """Zip pattern-matching (id, value) pairs into a ``{name: value}`` params dict, dropping blanks.
+
+        ``None`` (a cleared Optional field) and ``""`` (a blank text field) are dropped so the
+        generator falls back to its own schema default rather than being sent an empty value.
+
+        ``exclude`` drops fields the form must not FORWARD. ``FORM_EXCLUDED_FIELDS``'s own
+        comment states the contract as "neither render nor forward", but only the render half was
+        enforced (canopy#625): the forward half held only as a CONSEQUENCE of the control not
+        existing, which is true of a freshly-rendered page and of nothing else. A tab rendered
+        before the deploy still carries the withheld checkbox, and its value arrives here.
+
+        ``False`` is the case that matters and the reason the blank-drop above does not already
+        cover this: ``False is None`` and ``False == ""`` are both false, so an unticked
+        ``flatten`` survives and overrides the seed -- flipping mnist to rank-3 and reproducing
+        canopy#623 exactly, from a client the server cannot see.
+        """
+        params: dict = {}
+        for gen_id, value in zip(gen_ids or [], gen_values or [], strict=False):
+            if not isinstance(gen_id, dict):
+                continue
+            name = gen_id.get("name")
+            if not name or name in exclude or value is None or value == "":
+                continue
+            params[name] = value
+        return params
+
+    def _apply_dataset_handler(self, n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values=None, gen_ids=None, nn_model=None):
+        """POST /api/stage_dataset with the current dataset-form values (N7 schema-aware).
+
+        ``dataset_type`` is ALWAYS sent — cascor's ``_reload_dataset`` hard-requires it. For the
+        spiral generator the typed convenience fields (elements/noise/rotations/number) are forwarded
+        as before (the force-blur clientside callback commits the numeric inputs first, so they arrive
+        as numbers, not Dash/React ``null`` — Issue #4). For any other generator the typed fields are
+        omitted and the schema-driven inputs are collected into the generic ``nn_dataset_params``
+        channel, which the adapter maps to cascor's ``StageDatasetRequest.params`` (cascor #396 merges
+        typed + generic before ``create_dataset``) — so the staging dialect is preserved and non-spiral
+        generators pass schema-true params without widening the typed fields.
+        """
+        if not n_clicks:
+            return dash.no_update, dash.no_update
+        # X4 / §4.2 -- and it is DESTRUCTIVE, not merely vacuous. At ``⊥`` this POSTed
+        # ``{"nn_dataset_type": None}``; ``main.py``'s ``model_dump(exclude_none=True)`` strips it
+        # to ``{}``, and cascor documents an empty body as "clears any prior staging" -- so the
+        # click silently discarded a dataset change the operator had already staged, while the
+        # banner opened to report success. The button is disabled at ``⊥``
+        # (``_update_button_appearance_handler``); this is the second line of defence, because a
+        # disabled button is a UI affordance and this is the wire.
+        if selection_axis_unset(dataset_type):
+            return False, dbc.Alert(
+                [html.Strong("No dataset selected. "), html.Span("Choose a dataset before applying — sending an empty change would clear whatever is currently staged.")],
+                color="warning",
+                dismissable=True,
+                duration=8000,
+            )
+        payload = self._dataset_stage_payload(dataset_type, n_samples=n_samples, noise=noise, rotations=rotations, n_spirals=n_spirals, gen_values=gen_values, gen_ids=gen_ids, nn_model=nn_model)
+        try:
+            resp = requests.post(
+                self._api_url("/api/stage_dataset"),
+                json=payload,
+                timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
+                headers=internal_api_headers(),
+            )
+            if resp.status_code == 200:
+                self.logger.info("Dataset staged: %s", payload)
+                return True, None  # open banner; clear any prior staging error
+            detail = resp.text[:300] if resp.text else f"HTTP {resp.status_code}"
+            self.logger.warning("Stage dataset failed: %s %s", resp.status_code, detail)
+            return dash.no_update, dbc.Alert(f"Could not stage the dataset change: {detail}", color="danger", duration=8000, dismissable=True)
+        except requests.RequestException as exc:
+            self.logger.warning("Stage dataset exception: %s", exc)
+            return dash.no_update, dbc.Alert(f"Backend unreachable while staging the dataset: {exc}", color="danger", duration=8000, dismissable=True)
+
+    @staticmethod
+    def _dataset_stage_payload(dataset_type, *, n_samples=None, noise=None, rotations=None, n_spirals=None, gen_values=None, gen_ids=None, nn_model=None):
+        """The body every path that stages the SIDEBAR form sends, whichever route it posts to.
+
+        Apply Dataset (``/api/stage_dataset``) and the live swap (``/api/live_dataset_swap``) read
+        the same form and post to routes that validate the same ``StageDatasetRequest``, so they
+        build one body, here. They used to build two. The live swap sent the four typed spiral
+        fields for EVERY generator and never ``nn_dataset_params``, so swapping to ``equities``
+        dropped its ``symbols`` and swapping to ``mnist`` dropped its ``flatten`` -- the defect
+        canopy#668 fixed on the restart modal, on the third path that stages a dataset.
+
+        ``dataset_type`` must already be known to be set; each caller refuses ``⊥`` itself, because
+        what refusing looks like differs per surface.
+        """
+        payload: dict = {"nn_dataset_type": dataset_type}
+        if generator_name_for_type(dataset_type) == "spiral":
+            for _key, _value in (
+                ("nn_dataset_elements", n_samples),
+                ("nn_dataset_noise", noise),
+                ("nn_spiral_rotations", rotations),
+                ("nn_spiral_number", n_spirals),
+            ):
+                if _value is not None:
+                    payload[_key] = _value
+        else:
+            # The registry seed FIRST, the rendered form over it. Before this, the cascor staging
+            # payload was built from the form alone, which made ``default_params`` a
+            # recurrence-only channel despite its docstring calling the registry "the single
+            # source of truth": its only consumers were ``_resolve_oneshot_start_body_handler``
+            # (gated on ``model_class == "one_shot"``) and ``dataset_ref_from_staged``. A
+            # rank-2 seed that needs params therefore could not exist — ``equities`` needs three,
+            # one of which (``symbols``) is an ARRAY that ``_field_from_property`` deliberately
+            # does not render, so the form can never carry it and every Apply 422'd.
+            #
+            # Order matters and is the same order the recurrence path already uses: seed, then
+            # let what the operator can actually see and edit win. The rendered controls are
+            # themselves initialised from the seed (``apply_seeded_defaults``), so a key that is
+            # both seeded and rendered round-trips unchanged unless the operator edits it — and a
+            # seeded key that is NOT rendered rides along instead of being silently dropped.
+            #
+            # This is a no-op for every cascor-compatible seed shipped today: all seven carry
+            # ``default_params={}``. Only ``equities`` (added here) and the rank-3 ``equities_seq``
+            # (which never reaches cascor) seed anything at all.
+            #
+            # The form's contribution is filtered by the SAME per-generator exclusion the
+            # renderer uses, so "neither render nor forward" is enforced on both halves rather
+            # than on one and inferred on the other. The seed is applied BEFORE the filter and is
+            # untouched by it -- an excluded-but-seeded key (mnist's ``flatten: True``, equities'
+            # unrendered ``symbols`` array) still travels, which is the whole point of the
+            # ordering above.
+            params = dict(dataset_default_params(dataset_type))
+            params.update(DashboardManager._collect_generator_params(gen_values, gen_ids, exclude=form_excluded_fields(generator_name_for_type(dataset_type))))
+            if params:
+                payload["nn_dataset_params"] = params
+        # FR9 / canopy#368: mirror this tab's model onto the request. Omitted, not sent as None,
+        # when no model is selected -- the server then behaves exactly as before the mirror.
+        if nn_model:
+            payload["nn_model"] = nn_model
+        return payload
+
+    def _select_model_handler(self, model_key):
+        """Apply a model selection via ``POST /api/model/select`` and mirror the result.
+
+        Returns ``(model_selection_store, model_class_store, summary_text, model_state_store)``;
+        on any failure all four are ``dash.no_update`` so a transient error leaves the UI on its
+        prior model. The fourth is the response payload itself (N5): the summary reads provider
+        agreement off it here, and the Start gate reads the same agreement off the store, so the
+        label and the control cannot answer "is this model active" differently.
+        """
+        if not model_key:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        try:
+            resp = requests.post(
+                self._api_url("/api/model/select"),
+                json={"nn_model": model_key},
+                timeout=DashboardConstants.API_TIMEOUT_SECONDS + 5,
+                headers=internal_api_headers(),
+            )
+            if resp.ok:
+                data = resp.json()
+                return data.get("nn_model", model_key), data.get("execution", "live"), self._model_summary_text(data), data
+            self.logger.warning("Model select failed (%s): %s", resp.status_code, resp.text[:200])
+        except Exception as exc:
+            self.logger.debug("Model select request failed: %s", exc)
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+    def _toggle_model_modal_handler(self, triggered_id, dataset_value, selected_model, search=""):
+        """Open/close the model-selection modal + live-filter the table (A1b-1 / A1b search).
+
+        Opening (``nn-model-change-button``) rebuilds the table against the CURRENT dataset value
+        (a ``State``) and the current search term so the per-row compatibility cells + disabled
+        Select buttons reflect both on open (§5.3). Typing in the search box (``model-search-input``)
+        rebuilds the table filtered (§5.2) while the modal stays open. Closing
+        (``model-selection-modal-close``) leaves the table as-is. Returns ``(is_open, table_children)``.
+        """
+        if triggered_id == "model-selection-modal-close":
+            return False, dash.no_update
+        # change-button -> open + build; search-input -> keep open + rebuild filtered.
+        is_open = True if triggered_id == "nn-model-change-button" else dash.no_update
+        return is_open, self._build_model_selection_table(dataset_value, selected_model, search=search or "")
+
+    def _select_model_from_table_handler(self, n_clicks_list, triggered_id, clear_clicks=None):
+        """Apply the model whose table Select button was clicked, then close the modal (A1b-1).
+
+        The pattern-matching ``model-select-btn`` callback also fires once when the table is first
+        inserted into the modal (every ``n_clicks`` is ``None``) — that no-click fire is guarded to
+        a four-way ``no_update``. On a real click the model key is read from ``triggered_id["index"]``
+        and applied via the shared ``_select_model_handler`` (POST /api/model/select + store mirror);
+        the modal closes only when the selection actually applied (the handler no-ops on failure, so
+        a transient error leaves the modal open on the prior model). Returns
+        ``(model_selection_store, model_class_store, summary, modal_is_open, model_state_store)``
+        -- the fifth is the ``/api/model/select`` payload the Start gate reads (N5).
+
+        **N11 — the clear branch.** ``model-selection-clear`` writes ``None`` to the store, which
+        re-fires ``gate_dataset_options`` and ungates the dataset list. It deliberately does NOT
+        POST: clearing is a statement about the UI's filter, not a request to change the live
+        backend, and there is no "no model" for ``/api/model/select`` to select. The backend
+        therefore keeps running whatever it was running — which is exactly why Start is disabled at
+        a cleared model (``_update_button_appearance_handler``), and why the summary says so rather
+        than going blank. ``model-class-store`` is left untouched for the same reason: the execution
+        paradigm of the still-live backend has not changed, and nothing can be started to observe a
+        stale one.
+
+        **Y3 / §4.10 — the mount branch** (``params-init-interval``) hydrates the selection from
+        ``GET /api/selection``; see :meth:`_hydrate_selection_handler`.
+        """
+        if triggered_id == "params-init-interval":
+            return self._hydrate_selection_handler()
+        if triggered_id == "model-selection-clear":
+            if not clear_clicks:
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            # The payload store goes ``None`` with the key: no selection has round-tripped, and
+            # unknown is not disagreement (Start is disabled here by the axis check regardless).
+            return None, dash.no_update, self.CLEARED_MODEL_SUMMARY, False, None
+        if not isinstance(triggered_id, dict) or not any(n_clicks_list or []):
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        store, model_class, summary, state = self._select_model_handler(triggered_id.get("index"))
+        is_open = False if store is not dash.no_update else dash.no_update
+        return store, model_class, summary, is_open, state
+
+    def _hydrate_selection_handler(self):
+        """Seed the selection from the server once, at mount (Y3 + §4.10).
+
+        ``model-selection-store`` is memory-scoped and seeded with ``DEFAULT_MODEL_KEY``, and
+        ``current_nn_model`` lives in the server process -- so before this, every reload showed
+        the seed over whatever backend was running. With Recurrence selected over a cascor backend
+        the sidebar read *"Active: CasCor"* and left Start enabled against a selection the server
+        refuses (Y3). ``GET /api/selection`` returns the ``/api/model/select`` payload shape plus
+        the backend's dataset, so the summary, the Start gate and the train-gate notice read the
+        hydrated state through the stores they already read.
+
+        Returns the ``select_model`` 5-tuple. ``model-class-store`` is left to
+        ``hydrate_model_class``, its mount owner: writing it here too would rebuild the tab bar
+        for no change (F-CANOPY-027). The modal is untouched.
+
+        **The key store is written even on failure** (with the seed): that write is what runs
+        ``gate_dataset_options``'s first-paint pass, so skipping it would lose N7's
+        availability gate whenever the read fails. The payload store gets an ``unknown`` dataset
+        block and no model fields -- unknown, not disagreement, on both axes -- so the first-paint
+        pass can tell a failed read (fall back to the default, D-N10) from a backend that holds
+        nothing (stay at ``⊥``, OQ-N2).
+
+        **X11 — the summary is written on failure too**, with the seed's unknown-liveness text
+        ("Selected: … · backend status unknown"). It used to be left at whatever it showed, which
+        was "Active: CasCor" from the seed: a claim that the backend serves the selection, made
+        by the one path that has just failed to ask. Writing it also keeps the summary on the
+        model the key store falls back to, rather than on whatever the summary last showed.
+        """
+        try:
+            resp = requests.get(self._api_url("/api/selection"), timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT, headers=internal_api_headers())
+            if resp.ok:
+                data = resp.json()
+                model_key = data.get("nn_model") if isinstance(data, dict) else None
+                if model_key:
+                    return model_key, dash.no_update, self._model_summary_text(data), dash.no_update, data
+            self.logger.warning("Selection hydration read failed (%s); keeping the seeded selection", getattr(resp, "status_code", "?"))
+        except Exception as exc:
+            self.logger.warning("Selection hydration read failed (%s); keeping the seeded selection", exc)
+        return DEFAULT_MODEL_KEY, dash.no_update, self._initial_model_summary(), dash.no_update, {"dataset": {"value": None, "source": "unknown", "generator": None}}
+
+    #: ``backend.backend_type`` as reported by ``/api/model/select`` when the recurrence service
+    #: backend is the live one. The other values ("service", "demo") both serve cascor-family
+    #: models. Owned by the registry since N5 (``model_registry.RECURRENCE_BACKEND_TYPE``) so the
+    #: summary, the Start gate and the server's start refusals share one value; aliased here.
+    RECURRENCE_BACKEND_TYPE: str = RECURRENCE_BACKEND_TYPE
+
+    #: Sidebar summary at a cleared model (``⊥`` on the model axis). It says what the state IS and
+    #: what it costs, rather than going blank: a blank summary over a live backend is the X1 class,
+    #: and this state is not runnable (Start is disabled until a model is chosen).
+    CLEARED_MODEL_SUMMARY: str = "No model selected — all datasets shown; choose one to train"
+
+    #: What to do about a selection the live backend does not serve (N5). The same sentence the
+    #: server puts in its 409, so the notice and the refusal read alike.
+    INACTIVE_SELECTION_REMEDY: str = "Select the model again once its service is configured (Recurrence: JUNIPER_CANOPY_RECURRENCE_SERVICE_URL), or select the model the running backend serves."
+
+    #: Sidebar summary suffix when it is unknown whether the live backend serves the selection
+    #: (``_selection_is_live`` is ``None``): the first-paint seed, and a mount whose read failed.
+    #: The wording is the owner's ruling on X11 (2026-09-24).
+    UNKNOWN_LIVENESS_NOTE: str = "backend status unknown"
+
+    @staticmethod
+    def _selection_is_live(data):
+        """Whether the live backend actually serves the selected model (X1 / design N5).
+
+        ``POST /api/model/select`` answers 200 even when it changed nothing: ``_swap_backend``
+        (``main.py:3891``) no-ops whenever the selection routes to the backend type already
+        running, and with ``recurrence_service_url`` unset a ``recurrence`` selection routes to
+        the default cascor/demo backend. The response records that faithfully -- ``backend`` and
+        ``swapped`` are both in the payload (``main.py:3860-3871``) -- but this summary read
+        neither, so the sidebar claimed *"Active: Recurrence (LMU)"* while cascor trained,
+        silently misattributing every benchmark produced in that state.
+
+        ``swapped`` is the WRONG predicate here, though it is the obvious one: it is *also*
+        ``False`` on the ordinary correct path where the user re-selects the model already live,
+        so gating on it alone would report a running CasCor as inactive. The honest test is
+        provider agreement -- a recurrence-provider model is live iff the recurrence backend is.
+
+        Returns ``None`` when the payload carries no ``backend`` (the first-paint seed, which has
+        never round-tripped): unknown is not disagreement, and reporting it as one would trade a
+        silent lie for a loud one. Seeding that value honestly is model/dataset hydration, which
+        the design sequences separately (§4.10).
+
+        The predicate itself is ``model_registry.selection_is_live`` (N5), shared with the Start
+        gate and with the server's start refusals, so a future edit cannot fix the label and leave
+        the run -- which is how canopy#592 shipped.
+        """
+        data = data or {}
+        return selection_is_live(data.get("nn_model"), data.get("backend"))
+
+    @staticmethod
+    def _model_summary_text(data):
+        """Compact summary line for the sidebar model picker (A1-iv-3a; X1 truth-up).
+
+        Reads ``"Active: <label>"`` only when the live backend actually serves the selection
+        (``_selection_is_live`` is ``True``). When it does not, the line leads with ``"Selected:"``
+        and names the backend that is really running, because a model whose displayed identity
+        differs from the live backend is a defect rather than a display lag (design N5) -- and on
+        a benchmarking platform a wrong attribution is worse than a blocked control.
+
+        **X11: unknown is not "Active" either.** When liveness is unknown (``None``: a payload
+        that has never round-tripped, so it carries no ``backend``), the line leads with
+        ``"Selected:"`` and says the backend's status is unknown. "Active" is a claim about the
+        backend, and nothing has asked it. The unknown state is not the ``False`` one: it names no
+        backend, and neither the Start gate nor the train-gate notice treats it as disagreement.
+
+        **W1.7 / F-C8: the Active line names the version the model's service reports** (the
+        payload's optional ``version``), so ``Active: Recurrence (LMU) · version 0.5.0`` is the
+        running service's own word, never a seed. Only the Active line: a version describes the
+        service a live backend talks to, and the other two lines describe no live service.
+        """
+        spec = get_model_spec(data.get("nn_model", ""))
+        label = spec.label if spec is not None else data.get("nn_model", "?")
+        status = data.get("status", "live")
+        note = "" if status == "live" else f" · {status.replace('_', ' ')}"
+        live = DashboardManager._selection_is_live(data)
+        if live is False:
+            return f"Selected: {label}{note} · NOT ACTIVE — the {data.get('backend')} backend is running"
+        if live is None:
+            return f"Selected: {label}{note} · {DashboardManager.UNKNOWN_LIVENESS_NOTE}"
+        version = data.get("version")
+        version_note = f" · version {' '.join(version.split())}" if isinstance(version, str) and version.strip() else ""
+        return f"Active: {label}{version_note}{note}"
+
+    def _initial_model_summary(self):
+        """Seed text for the sidebar model summary at first paint (A1b-1).
+
+        Resolves the default model's status from the registry so the summary reads honestly before
+        any selection callback fires — the dropdown that previously showed the current value is gone,
+        so the summary is now the only at-rest indicator of the active model.
+
+        Nothing has asked the backend at first paint, so the seed reads "Selected: … · backend
+        status unknown" (X11), never "Active". The mount hydration replaces it, and a failed
+        hydration read writes this same text (``_hydrate_selection_handler``).
+        """
+        spec = get_model_spec(DEFAULT_MODEL_KEY)
+        status = spec.status if spec is not None else "live"
+        return self._model_summary_text({"nn_model": DEFAULT_MODEL_KEY, "status": status})
+
+    def _initial_dataset_model_hint(self):
+        """Seed text for the sidebar reverse-gate hint at first paint (A1b-2; §5.3).
+
+        Empty: the dataset dropdown mounts at ``⊥`` (OQ-N2), and a dataset that is not selected
+        imposes no model constraint. The hint follows the hydrated value once it lands, through
+        ``annotate_model_hint``.
+        """
+        return ""
+
+    @staticmethod
+    def _dataset_model_hint_handler(dataset_value):
+        """Sidebar reverse-gate annotation for the current dataset (A1b-2; §5.3).
+
+        Returns the model-constraint phrase for ``dataset_value`` (e.g. "3-D Δt-aware models only"),
+        or "" when no dataset is selected so the annotation clears rather than rendering "None".
+        """
+        return dataset_model_hint(dataset_value) or ""
+
+    @staticmethod
+    def _train_gate_notice_handler(model_key, model_state=None):
+        """D8 Train-gate status notice for a non-live selected model (A1-iv-5; §5.7).
+
+        Returns a warning ``dbc.Alert`` explaining why Start is disabled when the selected model is
+        non-live (``coming_soon`` / ``experimental`` / ``deprecated`` / ``broken``), or ``None``
+        (hidden) for a live / trainable model — the visible companion to the Start force-disable in
+        ``_update_button_appearance_handler`` (both key off ``model_is_trainable``).
+
+        **N5 — the second reason Start can be disabled.** ``model_state`` is the last
+        ``/api/model/select`` payload (``model-state-store``). When the live backend does not serve
+        the selected model (``_selection_is_live`` is ``False``) the notice names the model, the
+        backend that is really running and the consequence -- the run would execute on that backend
+        and be filed under this model -- because a disabled control with no stated reason is the
+        design's N4 class. Hidden while the two agree, and at first paint, when agreement is unknown.
+        """
+        if not model_is_trainable(model_key):
+            spec = get_model_spec(model_key)
+            label = spec.label if spec is not None else (model_key or "This model")
+            status = spec.status.replace("_", " ") if spec is not None else "unavailable"
+            return dbc.Alert(
+                [
+                    html.Strong(f"{label} is {status}. "),
+                    html.Span("This model can be selected for inspection but is not trainable yet — Start is disabled."),
+                ],
+                color="warning",
+                className="mb-0",
+            )
+        state = model_state or {}
+        if DashboardManager._selection_is_live(state) is False:
+            backend_type = state.get("backend")
+            spec = get_model_spec(state.get("nn_model", ""))
+            label = spec.label if spec is not None else (state.get("nn_model") or model_key or "This model")
+            return dbc.Alert(
+                [
+                    html.Strong(f"{label} is selected but the {backend_type} backend is running. "),
+                    html.Span(f"Start and Apply Dataset are disabled — the run would execute on {backend_type} and be filed under {label}. {DashboardManager.INACTIVE_SELECTION_REMEDY}"),
+                ],
+                color="warning",
+                className="mb-0",
+            )
+        return None
+
+    @staticmethod
+    def _status_badge(status):
+        """Lifecycle-status badge for the model table (D8) — distinct from incompatibility greying."""
+        color = {
+            "live": "success",
+            "coming_soon": "info",
+            "experimental": "warning",
+            "deprecated": "secondary",
+            "broken": "danger",
+        }.get(status, "secondary")
+        return dbc.Badge(status.replace("_", " "), color=color, className="text-uppercase")
+
+    @staticmethod
+    def _model_compat_cell_id(model_key):
+        """DOM id of a model row's Compatibility cell, which describes the row's Select button (Y7).
+
+        Derived from the model key, so it is deterministic, and escaped so it is a valid HTML id
+        for ANY key: ``[A-Za-z0-9-]`` pass through and every other character becomes
+        ``_<hex codepoint>_``. ``_`` is never passed through, so every ``_`` delimits an escape and
+        two distinct keys cannot share an id. The escape also keeps whitespace out — it would split
+        the ``aria-describedby`` IDREF list — along with the ``.`` and ``{`` Dash refuses in a
+        string id.
+        """
+        safe = "".join(ch if (ch.isascii() and ch.isalnum()) or ch == "-" else f"_{ord(ch):x}_" for ch in str(model_key))
+        return f"model-compat-{safe}"
+
+    @staticmethod
+    def _build_model_selection_table(dataset_value, selected_model, *, models=MODELS, dataset_types=DATASET_TYPES, search=""):
+        """Build the custom ``dbc.Table`` of models for the selection modal (A1b; design §5.2).
+
+        Rows = every model matching the optional ``search`` filter (label + family + category +
+        tags, §5.2). Columns: Model / Category / Status / Compatibility / Select. Compatibility is
+        ``compatible()`` against the currently-selected dataset (``dataset_value``); an
+        incompatible model shows ``model_reason``'s wording in its compatibility cell and its
+        Select button is disabled. Every row's Select button is described (``aria-describedby``)
+        by that row's compatibility cell (Y7). Per ratified option (a) a non-live model stays
+        selectable here — ONLY *incompatible* models are disabled (non-live models are Train-gated
+        at the controls, not in the table — A1-iv-5). The currently-active row is highlighted. A
+        ``dash_table.DataTable`` is deliberately NOT used (OQ-4): the cells are rich components (a
+        badge, a reason cell, a per-row disabled button) and there is no virtualization payoff at
+        this row count.
+
+        Degenerate states: a non-empty ``search`` that matches nothing renders a "no matches"
+        message (§5.2); when a dataset is selected but **no** visible model can train it, a recovery
+        message is rendered above the (all-greyed) table (the empty-compatible-set state, §5.8).
+        ``models`` is injectable so both states are testable with the real seeds.
+        """
+        # ``dataset_types`` must be injectable alongside ``models``: resolving a synthetic dataset
+        # value against the production seeds returns None, which reads as ``⊥`` and would enable
+        # every Select — scoring a graph that is not the one under test.
+        dataset = get_dataset_spec(dataset_value, dataset_types=dataset_types) if dataset_value else None
+        visible = [model for model in models if model_matches_search(model, search or "")]
+        # A1b search (§5.2): a non-empty query that matches nothing -> a clear "no matches" message,
+        # distinct from the §5.8 empty-compatible-set state below (which is about the dataset).
+        if not visible:
+            return dbc.Alert(
+                [html.Strong("No models match your search. "), html.Span("Clear the search box to see all models.")],
+                color="secondary",
+                className="mb-0",
+                id="model-search-empty-alert",
+            )
+        header = html.Thead(html.Tr([html.Th(col) for col in ("Model", "Category", "Status", "Compatibility", "")]))
+        rows = []
+        compatible_count = 0
+        for model in visible:
+            # Y8: selectability is ``compatible()``'s verdict, read directly — not inferred from
+            # whether ``model_reason`` happened to return a string. ``⊥`` is compatible with every
+            # model — that is what makes it the cut vertex — so every Select stays ENABLED there and
+            # the traversal out of ``⊥`` keeps working.
+            is_compatible = dataset is None or compatible(dataset, model)
+            compatible_count += int(is_compatible)
+            is_active = model.key == selected_model
+            model_cell = [html.Strong(model.label)]
+            if model.description:
+                model_cell.extend([html.Br(), html.Span(model.description, className="text-muted small")])
+            # Y7: the compatibility cell describes the row's Select button, so it carries an id in
+            # every branch.
+            compat_id = DashboardManager._model_compat_cell_id(model.key)
+            if dataset is None:
+                # Y9: rendering "✓ compatible" here was a positive falsehood — it asserted agreement
+                # with a dataset that does not exist, for every model in the table. State the
+                # requirement instead, so the row says what it WOULD need. Selectability is
+                # unaffected (``is_compatible`` stays True); only the claim changes.
+                compat_cell = html.Span(model_requirement(model), id=compat_id, className="text-muted small")
+            elif is_compatible:
+                compat_cell = html.Span("✓ compatible", id=compat_id, className="text-success small")
+            else:
+                compat_cell = html.Span(model_reason(model, dataset), id=compat_id, className="text-muted small fst-italic")
+            # Y7: ``html.Button``, not ``dbc.Button`` — dbc 2.0.4's Button declares no ``aria-*``
+            # wildcard and raises TypeError on ``aria-describedby``. ``className`` is the class
+            # string dbc rendered for the old color/outline/size props, so the control looks the
+            # same. The reason is NOT also put in ``title=``: on a disabled button that tooltip can
+            # never show (Bootstrap gives ``.btn:disabled`` ``pointer-events: none``), the
+            # accessible description now comes from the rendered cell, and design N4 rules
+            # ``title=`` out as the channel for a consequence. Enabled buttons keep their hover hint.
+            described = {"aria-describedby": compat_id}
+            if is_compatible:
+                described["title"] = "Currently active" if is_active else "Select this model"
+            select_button = html.Button(
+                "Selected" if is_active else "Select",
+                id={"type": "model-select-btn", "index": model.key},
+                className=f"btn btn-{'success' if is_active else 'outline-primary'} btn-sm",
+                disabled=not is_compatible,
+                **described,
+            )
+            rows.append(
+                html.Tr(
+                    [
+                        html.Td(model_cell),
+                        html.Td(model.category.replace("_", " ")),
+                        html.Td(DashboardManager._status_badge(model.status)),
+                        html.Td(compat_cell),
+                        html.Td(select_button),
+                    ],
+                    className="table-active" if is_active else "",
+                )
+            )
+        table = dbc.Table([header, html.Tbody(rows)], hover=True, responsive=True, className="align-middle mb-0")
+        # Degenerate state (§5.8): a dataset is selected but NO model can train it — show a clear
+        # recovery message above the (all-greyed) table rather than a silently-unusable list.
+        if dataset is not None and compatible_count == 0:
+            recovery = dbc.Alert(
+                [
+                    html.Strong("No compatible model. "),
+                    html.Span("No model can train the selected dataset yet — switch the dataset in the sidebar, or choose a model that supports it once one is available."),
+                ],
+                color="warning",
+                className="mb-3",
+                id="model-selection-empty-alert",
+            )
+            return html.Div([recovery, table])
+        return table
+
     # Define theme callbacks
     def _setup_theme_callbacks(self):
         """Set up dashboard theme callbacks."""
 
+        # F-CANOPY-001: the toggle writes only the STORE. It used to also own
+        # ``dark-mode-toggle.children``, but this callback is prevent_initial_call=True,
+        # so the glyph was written only on a click and a reload left it at the layout
+        # default 🌙 under a correctly-restored dark theme. The glyph is now derived
+        # from the store below. Deliberately NOT a second ``allow_duplicate`` writer:
+        # ``dark-mode-toggle.children`` keeps exactly one, per the F-CANOPY-018 /
+        # F-CANOPY-027 two-writer class this arc has been removing.
         @self.app.callback(
-            [
-                Output("dark-mode-store", "data"),
-                Output("dark-mode-toggle", "children"),
-            ],
+            Output("dark-mode-store", "data"),
             Input("dark-mode-toggle", "n_clicks"),
             State("dark-mode-store", "data"),
             prevent_initial_call=True,
@@ -1604,14 +4053,19 @@ class DashboardManager:
         # PERF-CN-01: prevent_initial_call=False — must propagate the initial
         # dark-mode-store value to theme-state on mount so theme-aware components
         # render with the correct theme on first paint.
+        # F-CANOPY-001: the toggle glyph rides the same mount-capable path, so it is
+        # correct on first paint after a reload as well as on every click.
         @self.app.callback(
-            Output("theme-state", "data"),
+            [
+                Output("theme-state", "data"),
+                Output("dark-mode-toggle", "children"),
+            ],
             Input("dark-mode-store", "data"),
             prevent_initial_call=False,
         )
         def update_theme_state(is_dark):
-            """Update theme state based on dark mode store."""
-            return self._update_theme_state_handler(is_dark=is_dark)
+            """Update theme state and the toggle glyph from the dark mode store."""
+            return self._update_theme_state_handler(is_dark=is_dark), self._dark_mode_icon(is_dark)
 
         self.app.clientside_callback(
             """
@@ -1657,36 +4111,112 @@ class DashboardManager:
             prevent_initial_call=True,
         )
 
-        # ── Layout persistence: save active tab to localStorage ──
+        # ── FRONTEND_ISSUES_PLAN_2026-05-09 §2.5 C / Issue #2 + Issue #4 ──
+        # Force-blur the focused input on Apply-Parameters OR Apply-Dataset
+        # click so any pending debounced numeric value commits BEFORE the
+        # server-side State() reads. Closes the "type into a numeric input,
+        # click Apply with the mouse without ever leaving the field, get the
+        # OLD value POSTed" race. For Apply-Parameters this was the
+        # most-reported facet of Issue #2; for Apply-Dataset the same race
+        # dropped n_samples / noise (committed as null) so only the dataset_type
+        # dropdown survived (Issue #4 — the modified-dataset-never-trains
+        # repro). Pairs with §2.5 B (the debounce=350 sweep) which moves the
+        # commit from "blur only" to "blur OR ~350 ms after last keystroke".
         self.app.clientside_callback(
             """
-            function(active_tab) {
-                if (active_tab) {
-                    localStorage.setItem('juniper_canopy_active_tab', active_tab);
+            function(params_clicks, dataset_clicks) {
+                // Either Apply button blurs the focused element, committing a
+                // pending numeric value before the server State() snapshot.
+                // prevent_initial_call means we only run on a real click, so no
+                // n_clicks guard is needed.
+                if (document.activeElement
+                        && typeof document.activeElement.blur === 'function') {
+                    document.activeElement.blur();
                 }
-                return window.dash_clientside.no_update;
+                return null;
             }
             """,
-            Output("visualization-tabs", "active_tab", allow_duplicate=True),
-            Input("visualization-tabs", "active_tab"),
+            Output("apply-blur-sink", "data"),
+            [
+                Input("apply-params-button", "n_clicks"),
+                Input("apply-dataset-button", "n_clicks"),
+            ],
             prevent_initial_call=True,
         )
 
-        # ── Layout persistence: restore active tab from localStorage on load ──
+        # ── FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C2.2 ──
+        # Candidate-pool (S, T, R, P) triple fast-feedback validator. Mirrors
+        # the truth table from cascor's _validate_candidate_pool_triple so the
+        # user sees violations on input-change instead of on Apply-click.
+        # Returns ("invalid_S", "invalid_T", "invalid_R", "feedback text").
+        # Server stays authoritative; this is purely UX.
         self.app.clientside_callback(
             """
-            function(n) {
-                var saved = localStorage.getItem('juniper_canopy_active_tab');
-                if (saved) {
-                    return saved;
+            function(s_raw, t_raw, r_raw, p_raw) {
+                var s = (s_raw === null || s_raw === undefined || s_raw === '') ? null : Number(s_raw);
+                var t = (t_raw === null || t_raw === undefined || t_raw === '') ? null : Number(t_raw);
+                var r = (r_raw === null || r_raw === undefined || r_raw === '') ? null : Number(r_raw);
+                var p = (p_raw === null || p_raw === undefined || p_raw === '') ? null : Number(p_raw);
+                if (s === null || t === null || r === null || p === null
+                    || isNaN(s) || isNaN(t) || isNaN(r) || isNaN(p)) {
+                    return [false, false, false, ''];
                 }
-                return window.dash_clientside.no_update;
+                if (!(s >= 1 && s <= p)) {
+                    return [true, false, false,
+                        'selected_candidates ' + s + ' not in [1, candidate_pool_size=' + p + ']'];
+                }
+                if (t < 0 || r < 0) {
+                    return [false, t < 0, r < 0,
+                        'top_candidates and random_candidates must be >= 0 (got T=' + t + ', R=' + r + ')'];
+                }
+                if (t > s || r > s) {
+                    return [false, t > s, r > s,
+                        'each component must be <= selected_candidates (S=' + s + ', T=' + t + ', R=' + r + ')'];
+                }
+                if (t === 0 && r === 0) {
+                    return [false, true, true,
+                        'top_candidates and random_candidates cannot both be 0'];
+                }
+                if (t === 0 && r !== s) {
+                    return [false, false, true,
+                        'with top_candidates=0, random_candidates must equal S=' + s + ' (got R=' + r + ')'];
+                }
+                if (r === 0 && t !== s) {
+                    return [false, true, false,
+                        'with random_candidates=0, top_candidates must equal S=' + s + ' (got T=' + t + ')'];
+                }
+                if (t > 0 && r > 0 && (t + r) !== s) {
+                    return [false, true, true,
+                        'top_candidates+random_candidates must equal S=' + s
+                        + ' (got ' + t + '+' + r + '=' + (t + r) + ')'];
+                }
+                return [false, false, false, ''];
             }
             """,
-            Output("visualization-tabs", "active_tab", allow_duplicate=True),
-            Input("params-init-interval", "n_intervals"),
+            [
+                Output("cn-selected-candidates-input", "invalid", allow_duplicate=True),
+                Output("cn-top-candidates-input", "invalid", allow_duplicate=True),
+                Output("cn-random-candidates-input", "invalid", allow_duplicate=True),
+                Output("cn-pool-triple-feedback", "children", allow_duplicate=True),
+            ],
+            [
+                Input("cn-selected-candidates-input", "value"),
+                Input("cn-top-candidates-input", "value"),
+                Input("cn-random-candidates-input", "value"),
+                Input("cn-pool-size-input", "value"),
+            ],
             prevent_initial_call=True,
         )
+
+        # ── Layout persistence (active tab) ──
+        # Persisted solely via the `layout-state-store` dcc.Store
+        # (storage_type="local") and its equality-guarded read (CAN-016a
+        # restore) / write (CAN-016a stamp) clientside callbacks defined in the
+        # visualization-callback setup. The earlier hand-rolled
+        # `localStorage['juniper_canopy_active_tab']` pair was removed in the #1
+        # tab-feedback-loop fix: a redundant second persistence system whose
+        # mount restore raced the Store, plus an Input→Output self-edge on
+        # `active_tab`, drove the tab-toggle loop.
 
     # Define Status Bar callbacks
     def _setup_status_bar_callbacks(self):
@@ -1694,6 +4224,26 @@ class DashboardManager:
         # PERF-CN-01: prevent_initial_call=False — must populate the unified
         # status bar (connection, latency, phase, epoch, hidden units) on mount
         # before the first interval tick.
+        #
+        # Stage 2 (design §13 row 1): this callback ALSO owns ``training-status-store``.
+        # The store's old dedicated poller (``update_training_status_store``) fetched
+        # ``/api/status`` on the same fast tick this callback already fetches it —
+        # one renderer slot and one HTTP round-trip per second spent re-reading the
+        # same payload. The store output is suppressed to ``no_update`` while
+        # ``{is_running, phase}`` is unchanged, so its consumers only re-run on real
+        # transitions.
+        #
+        # F-CANOPY-025: this callback ALSO owns ``live-dataset-switch-button.disabled``.
+        # The old standalone gate (``gate_live_switch_button``, Input on this very
+        # store) was starved of promotion whenever THIS callback was in flight —
+        # dash-renderer will not promote a callback while any of its Inputs is an
+        # output claimed by a pending callback, and this feeder runs every fast tick
+        # with round-trips that cover the tick under run congestion. The gate is
+        # only USEFUL during a run (its allow arm needs ``is_running``), which is
+        # exactly when it could never execute: measured live post-Stage-2, the gate
+        # fired at idle mount and ZERO times across 80 s of training. Computing the
+        # gate IN the feeder removes the race atomically; the experimental flag
+        # rides as State, so a flag flip lands within one fast tick.
         @self.app.callback(
             [
                 Output("status-indicator", "style"),
@@ -1705,27 +4255,70 @@ class DashboardManager:
                 Output("top-phase-display", "style"),
                 Output("top-epoch-display", "children"),
                 Output("top-hidden-units-display", "children"),
+                Output("training-status-store", "data"),
+                Output("live-dataset-switch-button", "disabled"),
+                Output(_STATUS_BAR_ACK, "data"),
             ],
-            Input("fast-update-interval", "n_intervals"),
+            # F-CANOPY-055: paced by request/ack, not by ``fast-update-interval`` directly.
+            # On that 1 s lane (wire latency median 1.16 s, plus the renderer's queue) every
+            # response was evicted by the next tick's request before it was processed, so the
+            # bar NEVER applied (0 of 36 on the census).
+            # The pacer in ``_setup_poll_pacers`` writes the next request only once this
+            # callback's ack has echoed the last one.
+            Input(_STATUS_BAR_REQUEST, "data"),
+            dash.dependencies.State("training-status-store", "data"),
+            dash.dependencies.State("experimental-flags-store", "data"),
+            dash.dependencies.State("live-dataset-switch-button", "disabled"),
             prevent_initial_call=False,
         )
-        def update_unified_status_bar(n_intervals):
-            """Update unified status bar with all state info."""
-            return self._update_unified_status_bar_handler(n_intervals=n_intervals)
+        def update_unified_status_bar(request, prev_training_status, experimental_flags, prev_switch_disabled):
+            """Update unified status bar (+ the training-status store and the Live Switch gate)."""
+            seq = request.get("seq") if isinstance(request, dict) else None
+            try:
+                outputs = tuple(
+                    self._update_unified_status_bar_handler(
+                        n_intervals=seq,
+                        prev_training_status=prev_training_status,
+                        experimental_flags=experimental_flags,
+                        prev_switch_disabled=prev_switch_disabled,
+                    )
+                )
+                if len(outputs) != 11:
+                    raise ValueError(f"status bar handler returned {len(outputs)} outputs, expected 11")
+            except Exception as exc:  # the ack must land, or the pacer waits out its stale bound
+                self.logger.warning("status bar poll failed: %s", exc)
+                outputs = (dash.no_update,) * 11
+            return (*outputs, {"seq": seq})
 
     # Define Network callbacks
     def _setup_network_callbacks(self):
 
-        # PERF-CN-01: prevent_initial_call=False — must populate the network
-        # info panel from the API on mount before the first interval tick.
+        # PERF-CN-01: must populate the network info panel from the API on mount
+        # before the first interval tick (``initial_duplicate`` keeps that mount
+        # fire while permitting the banner's duplicate output).
+        #
+        # Stage 2 (design §13 row 2): ONE slow-lane slot for the four global
+        # system surfaces that previously each held their own —
+        # ``update_network_info`` + ``update_network_info_details`` +
+        # ``update_stream_health`` + ``reconcile_pending_dataset_banner``.
+        # Network-info and the banner both read ``/api/status`` (one fetch now
+        # serves both), details reads ``/api/network/stats``, stream health is an
+        # in-memory snapshot. Four slow-lane slots and four HTTP round-trips per
+        # tick become one slot and three (the banner's ``/api/status`` was the
+        # dashboard's FOURTH poller of that endpoint).
         @self.app.callback(
-            Output("network-info-panel", "children"),
+            [
+                Output("network-info-panel", "children"),
+                Output("network-info-details-panel", "children"),
+                Output("stream-health-store", "data"),
+                Output("pending-dataset-banner", "is_open", allow_duplicate=True),
+            ],
             Input("slow-update-interval", "n_intervals"),
-            prevent_initial_call=False,
+            prevent_initial_call="initial_duplicate",
         )
-        def update_network_info(n):
-            """Update network information panel from API."""
-            return self._update_network_info_handler(n=n)
+        def update_system_panels(n):
+            """One slow-lane poll for network info, details, stream health and the pending banner."""
+            return self._update_system_panels_handler(n=n)
 
         @self.app.callback(
             Output("network-info-collapse", "is_open"),
@@ -1752,38 +4345,47 @@ class DashboardManager:
             icon = "▼" if new_state else "▶"
             return new_state, icon
 
-        # PERF-CN-01: prevent_initial_call=False — must populate the network
-        # info details panel from the API on mount before the first interval tick.
-        @self.app.callback(
-            Output("network-info-details-panel", "children"),
-            Input("slow-update-interval", "n_intervals"),
-            prevent_initial_call=False,
-        )
-        def update_network_info_details(n):
-            """Update detailed network information panel from API."""
-            return self._update_network_info_details_handler(n=n)
+        # (Stage 2, design §13 row 2: the dedicated ``update_network_info_details``
+        # slow-lane poller merged into ``update_system_panels`` above.)
 
     # Component data store updaters
     def _setup_datastore_callbacks(self):
 
         # CAN-000: pause periodic update intervals while Apply Parameters is in
-        # flight. The user-visible behavior fix is that the dashboard stops
-        # firing REST polls and ws-buffer drains the moment Apply is clicked
-        # and resumes the next time `applied-params-store` updates (the
-        # apply_parameters server callback always writes that store, on both
-        # success and failure paths, so resume is reliable).
+        # flight. The dashboard stops firing REST polls and ws-buffer drains
+        # the moment Apply is clicked and resumes when the clamp is released.
         #
-        # Three small clientside callbacks:
-        #   1. apply-button click -> apply-in-flight = True
-        #   2. applied-params-store update -> apply-in-flight = False
+        # E-3 (training-runtime defects plan §9): the original release relied
+        # SOLELY on `applied-params-store` updating — but every failure path of
+        # `_apply_parameters_handler` (non-200, 429-exhausted, retries-
+        # exhausted) returned `dash.no_update` for that store, so one failed
+        # Apply left the clamp stuck true and BOTH intervals disabled until a
+        # page refresh: the pre-refresh total freeze of I-1 root cause 4
+        # (the evening-502 pattern froze every interval-driven surface,
+        # header included). The release is now triple-redundant:
+        #   a. the apply_parameters server callback writes apply-in-flight =
+        #      False directly on EVERY return path (see
+        #      `_apply_in_flight_release`);
+        #   b. the applied-params-store clientside release below still fires
+        #      on the success path;
+        #   c. a clientside watchdog force-clears a clamp older than
+        #      APPLY_IN_FLIGHT_MAX_MS — covering the one class no server
+        #      response can fix (the callback POST itself failing at the
+        #      network level) plus any future stuck path.
+        #
+        # Clientside callbacks:
+        #   1. apply-button click -> apply-in-flight = {in_flight, since}
+        #   2. applied-params-store update -> apply-in-flight = false
         #   3. apply-in-flight -> {fast,slow}-update-interval.disabled
+        #   4. watchdog tick -> force-clear an over-age in-flight clamp
         # The third callback fires on layout mount (prevent_initial_call=False)
         # so the intervals start in their default enabled state.
         self.app.clientside_callback(
             """
             function(nClicks) {
                 if (!nClicks) return window.dash_clientside.no_update;
-                return true;
+                // E-3: stamp the click time so the watchdog can age the clamp.
+                return {in_flight: true, since: Date.now()};
             }
             """,
             Output("apply-in-flight", "data"),
@@ -1793,9 +4395,9 @@ class DashboardManager:
         self.app.clientside_callback(
             """
             function(appliedData) {
-                // applied-params-store is written by apply_parameters() on
-                // every click, success or failure. Whenever it updates,
-                // the in-flight clamp can come off.
+                // applied-params-store updates on the success path; the
+                // server callback additionally releases the clamp directly
+                // on every path (E-3), so this is belt-and-braces.
                 return false;
             }
             """,
@@ -1803,19 +4405,26 @@ class DashboardManager:
             Input("applied-params-store", "data"),
             prevent_initial_call=True,
         )
+        self._setup_poll_gating()
+        self._setup_poll_pacers()
+        # E-3: clientside watchdog — force-release a stuck clamp. Runs on its
+        # own always-enabled interval (the clamp disables the fast/slow
+        # intervals, so neither can host its own rescue).
         self.app.clientside_callback(
-            """
-            function(inFlight) {
-                var disabled = Boolean(inFlight);
-                return [disabled, disabled];
-            }
+            f"""
+            function(n, inFlight) {{
+                if (!inFlight || !inFlight.since) return window.dash_clientside.no_update;
+                if (Date.now() - inFlight.since > {DashboardConstants.APPLY_IN_FLIGHT_MAX_MS}) {{
+                    console.warn("apply-in-flight clamp exceeded {DashboardConstants.APPLY_IN_FLIGHT_MAX_MS}ms; watchdog force-released it (E-3)");
+                    return false;
+                }}
+                return window.dash_clientside.no_update;
+            }}
             """,
-            [
-                Output("fast-update-interval", "disabled"),
-                Output("slow-update-interval", "disabled"),
-            ],
-            Input("apply-in-flight", "data"),
-            prevent_initial_call=False,
+            Output("apply-in-flight", "data", allow_duplicate=True),
+            Input("apply-watchdog-interval", "n_intervals"),
+            dash.dependencies.State("apply-in-flight", "data"),
+            prevent_initial_call=True,
         )
 
         # CAN-018: hand the CONTROL_TOOLTIPS dict to the
@@ -1858,15 +4467,47 @@ class DashboardManager:
         # `layout-state-store` is `storage_type="local"`, so on a fresh
         # session it carries the layout default; on a returning session
         # it carries whatever was stamped at the last tab change.
+        #
+        # Y4: `suppress_cascade_tabs` rebuilds the tab bar without the
+        # cascade-only tabs for a one-shot model, so the saved tab — or the
+        # tab on screen — can name a tab that is no longer rendered; dbc then
+        # highlights nothing and shows an empty pane. A tab that is not
+        # rendered is never restored, and if the tab on screen is not rendered
+        # either this falls back to the first rendered tab ("metrics" in both
+        # tab lists: the tab the layout mounts on, and the one dbc picks for an
+        # unset active_tab). The rendered tabs are an INPUT, not State: the
+        # one-shot rebuild lands AFTER this mount-time restore (the model class
+        # is hydrated by `hydrate_model_class` on `params-init-interval`), and a
+        # runtime model swap changes nothing else this callback reads.
+        # Resetting here adds no `active_tab` writer (see `_visible_tabs` for
+        # the census). If the tab list cannot be read at all, the rule below is
+        # exactly the pre-Y4 one.
         self.app.clientside_callback(
             """
-            function(state) {
+            function(state, tabs, currentTab) {
+                var rendered = [];
+                [].concat(tabs || []).forEach(function(tab, index) {
+                    if (tab && tab.props) rendered.push(tab.props.tab_id || "tab-" + index);
+                });
+                var saved = state && state.active_tab;
+                if (rendered.length && rendered.indexOf(saved) === -1) {
+                    var target = rendered.indexOf(currentTab) !== -1 ? currentTab : rendered[0];
+                    return target === currentTab ? window.dash_clientside.no_update : target;
+                }
                 if (!state || !state.active_tab) return window.dash_clientside.no_update;
+                // Equality guard (#1 tab-feedback-loop fix): only restore when
+                // the persisted tab differs from the tab already shown. Without
+                // it, every Writer-A store stamp echoes back through here and
+                // re-asserts active_tab, re-triggering every Input(active_tab)
+                // callback and feeding the tab-toggle race.
+                if (state.active_tab === currentTab) return window.dash_clientside.no_update;
                 return state.active_tab;
             }
             """,
             Output("visualization-tabs", "active_tab", allow_duplicate=True),
             Input("layout-state-store", "data"),
+            Input("visualization-tabs", "children"),
+            State("visualization-tabs", "active_tab"),
             prevent_initial_call="initial_duplicate",
         )
 
@@ -1983,14 +4624,17 @@ class DashboardManager:
             prevent_initial_call=True,
         )
 
-        # Drain state buffer → ws-state-buffer store
+        # N8: re-attach the ws-state-buffer drain (N1 removed it as write-only dead
+        # machinery). Latest-only, mirroring the topology drain: hand the freshest
+        # training-state frame to fetch_training_state, which prefers it over the REST
+        # /api/state poll while the state stream is live.
         self.app.clientside_callback(
             """
             function(n) {
                 if (!window._juniperWsDrain) return window.dash_clientside.no_update;
-                var state = window._juniperWsDrain.drainState();
-                if (!state) return window.dash_clientside.no_update;
-                return state;
+                var s = window._juniperWsDrain.drainState();
+                if (!s) return window.dash_clientside.no_update;
+                return s;
             }
             """,
             Output("ws-state-buffer", "data"),
@@ -2014,18 +4658,25 @@ class DashboardManager:
             prevent_initial_call=True,
         )
 
-        # Drain candidate_progress buffer → ws-candidate-progress-buffer store
+        # N1: the ws-candidate-progress-buffer drain callback was removed — the
+        # store had no Input consumer (same dead-end class as ws-state-buffer).
+        # The JS ring buffer (drainCandidateProgress) stays for N8 (wave 4).
+
+        # P2-7 follow-up: drain dataset_swap buffer → ws-dataset-swap-buffer store.
+        # The server-side merger in _setup_dataset_swap_observers_callbacks
+        # then folds these into dataset-swap-events-store with dedupe so
+        # WS-push and slow-poll converge to the same authoritative list.
         self.app.clientside_callback(
             """
             function(n) {
                 if (!window._juniperWsDrain) return window.dash_clientside.no_update;
-                var events = window._juniperWsDrain.drainCandidateProgress();
+                var events = window._juniperWsDrain.drainDatasetSwaps();
                 if (!events || events.length === 0) return window.dash_clientside.no_update;
                 window._juniperWsDrain._gen++;
                 return {events: events, gen: window._juniperWsDrain._gen, last_drain_ms: Date.now()};
             }
             """,
-            Output("ws-candidate-progress-buffer", "data"),
+            Output("ws-dataset-swap-buffer", "data"),
             Input("fast-update-interval", "n_intervals"),
             prevent_initial_call=True,
         )
@@ -2043,12 +4694,47 @@ class DashboardManager:
             prevent_initial_call=True,
         )
 
-        # Phase B: Connection indicator badge (4-state: connected/reconnecting/offline/demo)
+        # N8: WS-data liveness → ws-liveness-store. Each fast tick, compare the
+        # bridge's per-class frame-arrival age (peekLiveness) against
+        # WS_LIVENESS_WINDOW_MS and emit BOOLEANS ONLY, so the store value changes
+        # only on a live↔stale transition (a fresh age of, say, 120 ms one tick and
+        # 340 ms the next must not churn the store and re-trigger every downstream
+        # poll). A null age (no frame of that class ever seen) reads stale, so a fresh
+        # tab polls REST until the WS actually delivers — the anti-starvation posture.
+        # This deliberately consults ONLY the ageing clocks, never the sticky
+        # metricsReceived/topologyReceived flags that caused the N1 starvation.
+        self.app.clientside_callback(
+            f"""
+            function(n) {{
+                if (!window._juniperWsDrain || !window._juniperWsDrain.peekLiveness) {{
+                    return window.dash_clientside.no_update;
+                }}
+                var live = window._juniperWsDrain.peekLiveness();
+                var W = {DashboardConstants.WS_LIVENESS_WINDOW_MS};
+                return {{
+                    metrics_live: (live.metrics_age_ms !== null && live.metrics_age_ms <= W),
+                    state_live: (live.state_age_ms !== null && live.state_age_ms <= W)
+                }};
+            }}
+            """,
+            Output("ws-liveness-store", "data"),
+            Input("fast-update-interval", "n_intervals"),
+            prevent_initial_call=True,
+        )
+
+        # N2: stream health rides the consolidated ``update_system_panels``
+        # slow-lane callback (Stage 2, design §13 row 2). It stays server-side
+        # (not a clientside peek) because the truth lives in the backend
+        # relay/supervisor liveness state, not in the browser bridge.
+
+        # Phase B: Connection indicator badge (4-state: connected/reconnecting/offline/demo,
+        # N2: + upstream stream-health dimension — degraded/reconnecting downgrade a green badge)
         self.app.clientside_callback(
             CONNECTION_INDICATOR_JS,
             Output("ws-connection-indicator", "children"),
             Output("ws-connection-indicator", "style"),
             Input("ws-connection-status", "data"),
+            Input("stream-health-store", "data"),
         )
 
         # Network Evolution: capture a snapshot whenever a ``cascade_add`` event
@@ -2166,38 +4852,133 @@ class DashboardManager:
         # PERF-CN-01: prevent_initial_call=False — must hit /api/metrics/history
         # on mount to populate the metrics store before the first interval tick
         # (also drives the metrics panel's plots and stats).
+        # N8 (training-runtime defects plan §4 I-1, posture O1 / Q6): the O1 half —
+        # a liveness-gated REST poll. It fires on EVERY fast tick (the interval Input
+        # is the sole trigger, so it can never be starved) and reads the liveness
+        # signal as STATE: while the metrics stream is fresh (metrics_live) in the
+        # real-time window view it returns ``no_update`` (the WS-primary append
+        # callback below owns the store), and the instant the stream goes stale it
+        # re-engages the N1 REST poll on the next tick — the anti-sticky reset.
+        #
+        # CRITICAL (Dash execution model): ws-metrics-buffer is deliberately NOT an
+        # Input here. Its clientside producer returns ``no_update`` whenever the WS is
+        # quiet, and a chained Input whose producer no_updates makes Dash SKIP this
+        # interval-only callback for that tick — which silently re-creates the I-1
+        # starvation (the poll would fire only on WS pushes). The WS buffer is instead
+        # consumed by a separate ``allow_duplicate`` append callback triggered ONLY by
+        # ws-metrics-buffer. ws-liveness-store rides as State (never as an Input) for
+        # the same reason.
+        # F-CANOPY-035: this poll rides its OWN Interval and stops that Interval for the
+        # duration of each fetch. Both halves are load-bearing and neither works alone.
+        #
+        # dash-renderer discards a response whose callback has left ``watched``
+        # (dash_renderer.dev.js:2698 — ``if (currentCb)`` … else return), and evicts a
+        # ``watched`` entry the instant the same callback identity appears in
+        # ``requested`` (:3027 — ``concat(watched, requested)`` grouped by
+        # ``getUniqueIdentifier``, each group sliced ``[0:-1]``, so the newcomer wins).
+        # ``getUniqueIdentifier`` hashes THIS callback's own inputs/outputs/state, so
+        # only its own re-request can evict it — never a sibling on the same lane.
+        #
+        # Consequence: while this rode ``fast-update-interval`` its ~1.5 s round trip was
+        # re-requested every 1.0 s, so every response was evicted before it could be
+        # applied and the store NEVER advanced. Measured on the live leg: 55 responses,
+        # all HTTP 200, all carrying the full payload, store length 0 throughout — and
+        # the store filled within ~3 s of the tick stopping, twice.
+        #
+        # canopy#613 stopped this Interval for the duration of each fetch with a
+        # ``running=`` guard. That guard is GONE (F-CANOPY-058): the renderer released it
+        # from ``completeJob()`` for an evicted request's late completion too, so any
+        # mid-fetch re-enable could start a chain of evictions, and its strand watchdog
+        # re-enabled it mid-fetch ~31-36 times an hour on its own (F-CANOPY-068). The
+        # feeder is now paced by request/ack (``_setup_poll_pacers``): its ONLY Input is
+        # the request store, which the pacer writes only once the ack below has echoed
+        # the last request, or once that request is past its stale bound. The paths that
+        # can still re-request it (the stale re-issue, and the renderer's initial call
+        # after a tab-container rebuild) are listed above ``_METRICS_STORE_REQUEST``; each
+        # costs at most one response.
+        #
+        # The display mode, its second Input until now, is State here and an Input of the
+        # pacer. A mid-flight mode change creates a same-identity request and evicts the
+        # fetch (``getUniqueIdentifier`` ignores the trigger; reproduced in a synthetic
+        # app, not observed in mid-request on canopy); now the pacer issues a
+        # ``reason="extra"`` request once the fetch in flight is acknowledged.
+        #
+        # The ack is written on EVERY return path, including a raised handler: without it
+        # the pacer waits out its stale bound (``poll_pacer_js``) before it asks again.
         @self.app.callback(
             Output("metrics-panel-metrics-store", "data"),
-            Input("fast-update-interval", "n_intervals"),
+            Output(_METRICS_STORE_ACK, "data"),
+            Input(_METRICS_STORE_REQUEST, "data"),
             dash.dependencies.State("metrics-panel-display-mode-store", "data"),
-            dash.dependencies.State("ws-connection-status", "data"),
+            dash.dependencies.State("ws-liveness-store", "data"),
+            dash.dependencies.State("metrics-panel-metrics-store", "data"),
             prevent_initial_call=False,
         )
-        def update_metrics_store(n, display_mode_state, ws_status):
-            """Fetch metrics history from API and update metrics panel store.
+        def update_metrics_store(request, display_mode_state, ws_liveness, current_metrics):
+            """Liveness-gated REST poll for the metrics store (N8 O1 half), paced by request/ack."""
+            request = request if isinstance(request, dict) else {}
+            seq = request.get("seq")
+            try:
+                ws_live = bool(isinstance(ws_liveness, dict) and ws_liveness.get("metrics_live"))
+                data = self._update_metrics_store_handler(
+                    n=seq,
+                    display_mode_state=display_mode_state,
+                    current_metrics=current_metrics,
+                    trigger=self._metrics_store_trigger(request),
+                    ws_live=ws_live,
+                )
+            except Exception as exc:  # the ack must land, or the pacer waits out its stale bound
+                self.logger.warning("metrics store poll failed: %s", exc)
+                data = dash.no_update
+            return data, {"seq": seq}
 
-            Phase B polling toggle: when WS bridge is connected, skip REST poll.
-            Falls back to 1 Hz REST (D-05) when WS disconnected.
-            """
-            return self._update_metrics_store_handler(n=n, display_mode_state=display_mode_state, ws_status=ws_status)
+        # N8 (posture O3 half): WS-PRIMARY append. Triggered ONLY by a ws-metrics-buffer
+        # change — which the clientside drain emits only when it actually drained events
+        # (a WS frame arrived). So this callback fires exactly on WS pushes and is the
+        # sole path that writes WS data into the store; when the WS is quiet it simply
+        # does not fire (and the poll above carries the store). ``allow_duplicate`` lets
+        # it co-own the store's Output with the poll; ``prevent_initial_call=True`` is
+        # required for duplicate outputs. History-analysis modes (full/hidden_units)
+        # opt out (Q6: they are non-real-time and want the complete REST history).
+        @self.app.callback(
+            Output("metrics-panel-metrics-store", "data", allow_duplicate=True),
+            Input("ws-metrics-buffer", "data"),
+            dash.dependencies.State("metrics-panel-display-mode-store", "data"),
+            dash.dependencies.State("metrics-panel-metrics-store", "data"),
+            prevent_initial_call=True,
+        )
+        def append_ws_metrics_store(ws_metrics_buffer, display_mode_state, current_metrics):
+            """Accumulate drained WS metrics onto the store (N8 O3 half)."""
+            return self._append_ws_metrics_store_handler(ws_metrics_buffer=ws_metrics_buffer, display_mode_state=display_mode_state, current_metrics=current_metrics)
 
         # PERF-CN-01: prevent_initial_call=False — must hit /api/network/topology
         # on mount (when the topology tab is active) so the network visualizer
         # has data before the first interval tick.
         @self.app.callback(
             Output("network-visualizer-topology-store", "data"),
-            Input("slow-update-interval", "n_intervals"),
+            Input("tabpoll-topology", "n_intervals"),  # F-CANOPY-027: was slow-update-interval
             Input("ws-topology-buffer", "data"),
             Input("visualization-tabs", "active_tab"),
-            dash.dependencies.State("ws-connection-status", "data"),
+            # F-CANOPY-039: State (never an Input) — this is the callback's own
+            # Output. It exists only so the handler can compare what it fetched
+            # against what the store already holds and suppress an identical
+            # rewrite. As an Input it would self-trigger; the CRITICAL note on
+            # ``update_metrics_store`` above governs the rest of the shape.
+            dash.dependencies.State("network-visualizer-topology-store", "data"),
             prevent_initial_call=False,
         )
-        def update_topology_store(n, ws_topology, active_tab, ws_status):
+        def update_topology_store(n, ws_topology, active_tab, current_topology):
             """Fetch topology from API or accept WebSocket push.
 
             OI-2: WebSocket topology pushes (from cascade_add events) take
             priority over REST polling for near-real-time updates.
-            Phase B: skip REST poll when WS connected (D-54: REST paths preserved).
+            N1 (training-runtime defects plan §4 I-2, posture O2): the REST
+            fallback is no longer gated on WS connection state — the sticky
+            ``topologyReceived`` gate starved long-lived tabs when ``cascade_add``
+            frames stopped arriving. The poll stays tab-gated on the slow
+            interval (see _update_topology_store_handler); the ``active_tab``
+            Input refetches on tab switch. This is the correctness bridge until
+            the WS-primary target lands (Q6/C6/N8).
             """
             ctx = dash.callback_context
             trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
@@ -2206,32 +4987,59 @@ class DashboardManager:
             if "ws-topology-buffer" in trigger and ws_topology:
                 from backend.cascor_service_adapter import CascorServiceAdapter
 
+                # Defense against pre-fix cascor servers that broadcast a
+                # count-only stub on cascade_add (``hidden_units`` as int).
+                # Passing such a payload to ``_transform_topology`` collapses
+                # the topology to inputs+outputs and zero hidden nodes (the
+                # transform's ``isinstance(int, list) is False`` path drops
+                # every hidden node and every cascade connection). When we
+                # detect a stub, fall through to REST so we get a
+                # structurally complete payload from /api/topology.
+                if not CascorServiceAdapter._is_complete_topology(ws_topology):
+                    return self._update_topology_store_handler(n=n, active_tab=active_tab, current=current_topology)
+                # Deliberately NOT identity-suppressed: a ``cascade_add`` frame is by
+                # construction a topology CHANGE, so an identical payload here would be
+                # a cascor-side defect rather than the 5 s REST re-fetch this guard
+                # targets. Suppressing it would also risk swallowing a real growth
+                # event if canonicalisation were ever imperfect.
                 return CascorServiceAdapter._transform_topology(ws_topology)
 
-            # Phase B: skip REST poll when WS bridge is connected.
-            # GAP-WS-25: also require topologyReceived so we don't blank the
-            # network view in the window between socket-open and the first
-            # topology frame. Cascor only broadcasts `topology` on cascade_add
-            # (grow events) — a fresh tab opened mid-training could otherwise
-            # wait minutes for one, leaving the visualizer empty.
-            settings = get_settings()
-            if settings.ws_bridge_enabled and ws_status and ws_status.get("connected") and ws_status.get("topologyReceived"):
-                return dash.no_update
-
-            # REST fallback — only poll when topology tab is active
-            return self._update_topology_store_handler(n=n, active_tab=active_tab)
+            # REST fallback — only poll when topology tab is active. Deliberately
+            # NOT WS-gated (N1): the former sticky topologyReceived gate meant
+            # neither push nor poll updated the store once cascade_add frames
+            # stopped arriving. cascade_add push above remains the fast path.
+            return self._update_topology_store_handler(n=n, active_tab=active_tab, current=current_topology)
 
         # PERF-CN-01: prevent_initial_call=False — must hit the raw-topology API
         # on mount when the topology tab is active and weight-matrix view is
         # selected, so the heatmap renders before the first interval tick.
         @self.app.callback(
             Output("network-visualizer-raw-topology-store", "data"),
-            Input("slow-update-interval", "n_intervals"),
+            Input("tabpoll-topology", "n_intervals"),  # F-CANOPY-027: was slow-update-interval
             Input("visualization-tabs", "active_tab"),
-            State("network-visualizer-view-mode", "value"),
+            # F-CANOPY-040: was ``network-visualizer-view-mode`` — the 2D/3D toggle,
+            # whose values are "2d" and "3d". The handler gates on
+            # ``!= "weight_matrix"``, so that comparison was ALWAYS true, the poll
+            # returned ``dash.no_update`` on every tick, the raw-topology store was
+            # never populated, and the Weight Matrix heatmap could never render for
+            # anyone. The Node Graph / Weight Matrix selector is ``-display-mode``.
+            #
+            # F-CANOPY-040 RESIDUAL: it must be an ``Input``, not a ``State``. #557
+            # corrected WHICH control is read but left it as State, so selecting
+            # Weight Matrix did not TRIGGER the fetch — the store filled only on the
+            # next ``tabpoll-topology`` tick, up to 5 s later. A reader that arrives
+            # before that tick sees an empty store and an unpainted heatmap, which is
+            # exactly M-TOPOLOGY-03's observed run-to-run variance (41 zero-height
+            # traces in one run, ZERO traces in the next). Reading the right control
+            # is not the same as reacting to it.
+            Input("network-visualizer-display-mode", "value"),
+            # F-CANOPY-043: the store's own previous value, for identity suppression
+            # below. Mirrors the ``current`` thread that canopy#542 added to
+            # ``-topology-store`` for F-CANOPY-039.
+            State("network-visualizer-raw-topology-store", "data"),
             prevent_initial_call=False,
         )
-        def update_raw_topology_store(n, active_tab, view_mode):
+        def update_raw_topology_store(n, active_tab, display_mode, current_raw):
             """Fetch raw weight-oriented topology for heatmap view (OF-1).
 
             Only polls when topology tab is active AND weight matrix view is selected.
@@ -2243,14 +5051,14 @@ class DashboardManager:
             the socket is up. Per-tab + per-view-mode gating already restricts
             polling to the heatmap surface.
             """
-            return self._update_raw_topology_store_handler(n=n, active_tab=active_tab, view_mode=view_mode)
+            return self._update_raw_topology_store_handler(n=n, active_tab=active_tab, display_mode=display_mode, current=current_raw)
 
         # PERF-CN-01: prevent_initial_call=False — must hit /api/dataset on
         # mount when the dataset tab is active so the plotter has data before
         # the first interval tick.
         @self.app.callback(
             Output("dataset-plotter-dataset-store", "data"),
-            Input("slow-update-interval", "n_intervals"),
+            Input("tabpoll-dataset", "n_intervals"),  # F-CANOPY-027: was slow-update-interval
             Input("visualization-tabs", "active_tab"),
             prevent_initial_call=False,
         )
@@ -2258,33 +5066,51 @@ class DashboardManager:
             """Fetch dataset from API and update dataset plotter store."""
             return self._update_dataset_store_handler(n=n, active_tab=active_tab)
 
+        # PERF-CN-01: prevent_initial_call=False — must hit the workers API on
+        # mount (when the Workers tab is active) so the roster renders before the
+        # first interval tick.
+        # N10 (training-runtime defects plan §4-U U-5): the Workers tab polls on
+        # the shared slow interval and is tab-gated to "workers" (the topology-tab
+        # N1 posture), replacing the panel's former always-on 5 s self-interval.
+        @self.app.callback(
+            Output("worker-panel-workers-store", "data"),
+            Input("tabpoll-workers", "n_intervals"),  # F-CANOPY-027: was slow-update-interval
+            Input("visualization-tabs", "active_tab"),
+            prevent_initial_call=False,
+        )
+        def update_workers_store(n, active_tab):
+            """Fetch worker roster + aggregate stats and update the worker store."""
+            return self._update_workers_store_handler(n=n, active_tab=active_tab)
+
         # PERF-CN-01: prevent_initial_call=False — must hit /api/decision-boundary
         # on mount when the decision-boundary tab is active so the plot has data
         # before the first interval tick.
         @self.app.callback(
             Output("decision-boundary-boundary-data", "data"),
-            Input("fast-update-interval", "n_intervals"),
+            Input("tabpoll-boundaries", "n_intervals"),  # F-CANOPY-027: was fast-update-interval; Stage 2: SLOW cadence (§13 row 5)
             Input("visualization-tabs", "active_tab"),
             Input("decision-boundary-refresh-btn", "n_clicks"),
             Input("decision-boundary-resolution-slider", "value"),
+            State("decision-boundary-boundary-data", "data"),
             prevent_initial_call=False,
         )
-        def update_boundary_store(n, active_tab, refresh_clicks, resolution):
+        def update_boundary_store(n, active_tab, refresh_clicks, resolution, current_data):
             """Fetch decision boundary from API and update decision boundary store."""
-            return self._update_boundary_store_handler(n=n, active_tab=active_tab, resolution=resolution)
+            return self._update_boundary_store_handler(n=n, active_tab=active_tab, resolution=resolution, current_data=current_data)
 
         # PERF-CN-01: prevent_initial_call=False — must populate the decision-
         # boundary's dataset on mount when the tab is active so the plot has
         # the underlying scatter data before the first interval tick.
         @self.app.callback(
             Output("decision-boundary-dataset-data", "data"),
-            Input("fast-update-interval", "n_intervals"),
+            Input("tabpoll-boundaries", "n_intervals"),  # F-CANOPY-027: was fast-update-interval; Stage 2: SLOW cadence (§13 row 5)
             Input("visualization-tabs", "active_tab"),
+            State("decision-boundary-dataset-data", "data"),
             prevent_initial_call=False,
         )
-        def update_boundary_dataset_store(n, active_tab):
+        def update_boundary_dataset_store(n, active_tab, current_data):
             """Sync dataset data to decision boundary component."""
-            return self._update_boundary_dataset_store_handler(n=n, active_tab=active_tab)
+            return self._update_boundary_dataset_store_handler(n=n, active_tab=active_tab, current_data=current_data)
 
         # ── Dataset generation modal callbacks ──
 
@@ -2303,7 +5129,12 @@ class DashboardManager:
         )
         def toggle_generate_modal(open_clicks, cancel_clicks, confirm_clicks, import_file_clicks, import_url_clicks, is_open):
             ctx = get_callback_context()
-            trigger = ctx.triggered_id
+            # F-CANOPY-029: this is a CallbackContextAdapter (frontend/callback_context.py),
+            # NOT dash.callback_context -- it exposes get_triggered_id(), and reading the
+            # raw-dash ``.triggered_id`` attribute on it raised AttributeError on every
+            # click, so Dash returned 500 and this modal could never open. The adapter
+            # swallows the underlying dash lookup's errors internally and returns None.
+            trigger = ctx.get_triggered_id()
             if trigger == "dataset-plotter-generate-btn":
                 return True
             return False
@@ -2324,6 +5155,18 @@ class DashboardManager:
         )
         def generate_dataset(n_clicks, n_samples, n_spirals, n_rotations, noise):
             return self._generate_dataset_handler(n_samples, n_spirals, n_rotations, noise)
+
+        @self.app.callback(
+            [
+                Output("dataset-plotter-load-status", "children"),
+                Output("dataset-plotter-dataset-store", "data", allow_duplicate=True),
+            ],
+            Input("dataset-plotter-load-selected-btn", "n_clicks"),
+            dash.dependencies.State("dataset-plotter-dataset-selector", "value"),
+            prevent_initial_call=True,
+        )
+        def load_selected_dataset(n_clicks, generator):
+            return self._load_selected_dataset_handler(n_clicks, generator)
 
         # CAN-016b: enable the "Import File" button only after a file has been
         # selected (dcc.Upload populates `contents` + `filename`). Show the
@@ -2379,19 +5222,26 @@ class DashboardManager:
         # every checkbox's value + id without enumerating per-key
         # dependencies. The store is the source of truth for both the
         # Parameters tab table re-render and the sidebar mirror below.
+        # F-CANOPY-018 / F-CANOPY-028: this writer collects the state of EVERY pin
+        # checkbox and replaces the store wholesale, so it asserts "not pinned" for
+        # every key whose checkbox it cannot see. The rendered set is not always the
+        # full set: the Parameters tables are rebuilt on every params-store change,
+        # and any render that happens while the store is empty or stale (mount before
+        # ``storage_type="local"`` hydration, a tab whose tables are not in the DOM)
+        # produces a values/ids pair that under-reports the real pin set — and the
+        # next toggle then persists that under-report, silently discarding pins made
+        # before a reload. It now writes only what it can actually observe and
+        # preserves the rest.
         @self.app.callback(
             Output("pinned-params-store", "data"),
             Input({"type": "param-pin", "key": dash.ALL}, "value"),
             dash.dependencies.State({"type": "param-pin", "key": dash.ALL}, "id"),
+            dash.dependencies.State("pinned-params-store", "data"),
             prevent_initial_call=True,
         )
-        def update_pinned_params_store(values, ids):
-            """Build the pinned-keys list from current checkbox state."""
-            pinned = []
-            for v, id_dict in zip(values or [], ids or [], strict=False):
-                if v:
-                    pinned.append(id_dict.get("key"))
-            return [k for k in pinned if k]
+        def update_pinned_params_store(values, ids, current):
+            """Merge the rendered checkboxes' state into the persisted pin list."""
+            return self._merge_pinned_params(values, ids, current)
 
         # CAN-005: render the sidebar's "Pinned Parameters" mirror.
         # When the pinned list is empty, hide the entire card so the
@@ -2452,12 +5302,40 @@ class DashboardManager:
                 "n_rotations": float(n_rotations or 1.5),
                 "noise": float(noise or 0.1),
             }
-            response = requests.post(url, json=payload, timeout=DashboardConstants.API_TIMEOUT_SECONDS + 5)
+            response = requests.post(url, json=payload, timeout=DashboardConstants.API_TIMEOUT_SECONDS + 5, headers=internal_api_headers())
             if response.ok:
                 return "✅ Dataset generated", response.json()
             return f"❌ {response.json().get('error', 'Failed')}", dash.no_update
         except Exception as e:
             self.logger.warning(f"Dataset generation failed: {e}")
+            return f"❌ Error: {e}", dash.no_update
+
+    def _load_selected_dataset_handler(self, n_clicks, generator):
+        """Load the dataset-plotter selector's chosen generator into the active dataset.
+
+        Spiral is produced locally by the demo backend; every other generator is
+        proxied to JuniperData by POST /api/dataset/generate (which returns 503 when
+        the service is unavailable). The selector's value reaches the app here as a
+        callback State (the wiring the L1 control-graph lint requires).
+        """
+        if not n_clicks or not generator:
+            return dash.no_update, dash.no_update
+        try:
+            response = requests.post(
+                self._api_url("/api/dataset/generate"),
+                json={"generator": generator},
+                timeout=DashboardConstants.API_TIMEOUT_SECONDS + 5,
+                headers=internal_api_headers(),
+            )
+            if response.ok:
+                return f"✅ Loaded '{generator}'", response.json()
+            try:
+                err = response.json().get("error", f"HTTP {response.status_code}")
+            except Exception:
+                err = f"HTTP {response.status_code}"
+            return f"❌ {err}", dash.no_update
+        except Exception as e:
+            self.logger.warning(f"Load selected dataset failed: {e}")
             return f"❌ Error: {e}", dash.no_update
 
     def _import_dataset_file_handler(self, contents, filename):
@@ -2483,7 +5361,7 @@ class DashboardManager:
 
             url = self._api_url("/api/dataset/import-file")
             files = {"file": (filename or "upload.csv", file_bytes, "text/csv")}
-            response = requests.post(url, files=files, timeout=DashboardConstants.API_TIMEOUT_SECONDS + 10)
+            response = requests.post(url, files=files, timeout=DashboardConstants.API_TIMEOUT_SECONDS + 10, headers=internal_api_headers())
             if response.ok:
                 return f"✅ Imported {filename or 'file'}", response.json()
             try:
@@ -2507,7 +5385,7 @@ class DashboardManager:
             return "❌ Enter a URL", dash.no_update
         try:
             url = self._api_url("/api/dataset/import-url")
-            response = requests.post(url, json={"url": url_value.strip()}, timeout=DashboardConstants.API_TIMEOUT_SECONDS + 15)
+            response = requests.post(url, json={"url": url_value.strip()}, timeout=DashboardConstants.API_TIMEOUT_SECONDS + 15, headers=internal_api_headers())
             if response.ok:
                 return f"✅ Imported from {url_value.strip()}", response.json()
             try:
@@ -2526,8 +5404,11 @@ class DashboardManager:
         # buttons route through ``window.cascorControlWS.send()`` via a Dash
         # clientside callback. The browser decides WS-vs-REST per click with
         # automatic REST fallback if the send() promise rejects. When the flag
-        # is off (default), the pre-Phase-D server-side handler is registered
-        # instead and keeps the existing behavior plus test fixtures untouched.
+        # is off (it has defaulted to True since the D-49 flag flip -- see
+        # settings.enable_ws_control_buttons; the E2E ledger's D-5 corrected
+        # this comment's stale "off (default)" wording), the pre-Phase-D
+        # server-side handler is registered instead and keeps the existing
+        # behavior plus test fixtures untouched.
         if getattr(self._settings, "enable_ws_control_buttons", False):
             self.app.clientside_callback(
                 PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS,
@@ -2545,6 +5426,10 @@ class DashboardManager:
                 [
                     dash.dependencies.State("last-button-click", "data"),
                     dash.dependencies.State("button-states", "data"),
+                    # A1-iv-3c: the resolved one-shot Start dataset-ref body (or None); the
+                    # clientside JS reads it as its 8th positional arg, the server-side handler
+                    # as ``oneshot_start_body``. Appended last so existing arg positions hold.
+                    dash.dependencies.State("oneshot-start-params-store", "data"),
                 ],
                 prevent_initial_call=True,
             )
@@ -2566,10 +5451,14 @@ class DashboardManager:
                 [
                     dash.dependencies.State("last-button-click", "data"),
                     dash.dependencies.State("button-states", "data"),
+                    # A1-iv-3c: the resolved one-shot Start dataset-ref body (or None); the
+                    # clientside JS reads it as its 8th positional arg, the server-side handler
+                    # as ``oneshot_start_body``. Appended last so existing arg positions hold.
+                    dash.dependencies.State("oneshot-start-params-store", "data"),
                 ],
                 prevent_initial_call=True,
             )
-            def handle_training_buttons(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, last_click, button_states, **kwargs):
+            def handle_training_buttons(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, last_click, button_states, oneshot_start_body=None, **kwargs):
                 """Handle training control button clicks with debouncing and optimistic UI."""
                 return self._handle_training_buttons_handler(
                     start_clicks=start_clicks,
@@ -2579,6 +5468,7 @@ class DashboardManager:
                     reset_clicks=reset_clicks,
                     last_click=last_click,
                     button_states=button_states,
+                    oneshot_start_body=oneshot_start_body,
                     **kwargs,
                 )
 
@@ -2593,6 +5483,61 @@ class DashboardManager:
         def update_last_click(action):
             """Update last button click timestamp for debouncing."""
             return self._update_last_click_handler(action=action)
+
+        # Surface a rejected training-control command as a dismissable danger
+        # alert. Registered unconditionally (outside the WS-vs-REST flag branch)
+        # because BOTH transports write the outcome into training-control-action:
+        # the server-side handler directly, the Phase D clientside JS via
+        # set_props once the async WS/REST command resolves. See
+        # notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md.
+        @self.app.callback(
+            Output("training-control-outcome-alert", "children"),
+            Input("training-control-action", "data"),
+            prevent_initial_call=True,
+        )
+        def surface_training_control_outcome(action):
+            """Render the danger alert on failure; clear it on success."""
+            return self._surface_training_control_outcome_handler(action=action)
+
+        # Partial-data contract -- open the three-way prompt on a shortfall-refused Start.
+        # Registered unconditionally, beside the outcome alert, because both transports write
+        # the outcome into ``training-control-action``. A separate callback rather than an
+        # extra Output on the alert's, so the alert's pinned shape is untouched.
+        @self.app.callback(
+            Output("dataset-shortfall-modal", "is_open"),
+            Output("dataset-shortfall-modal-body", "children"),
+            Output("dataset-shortfall-context", "data"),
+            Input("training-control-action", "data"),
+            prevent_initial_call=True,
+        )
+        def open_dataset_shortfall_prompt(action):
+            """Open the accept / drop / fail prompt when a Start was refused for a partial dataset."""
+            return self._open_dataset_shortfall_prompt_handler(action=action)
+
+        # The operator's answer. Accept / drop re-stage the held config with the opt-in and Start
+        # again, writing the outcome into ``training-control-action`` so the existing alert (and,
+        # on a further shortfall, this prompt) render it; fail cancels the staged change and
+        # clears the dataset selection. The dropdown value and the pending banner are owned
+        # elsewhere, hence ``allow_duplicate``.
+        @self.app.callback(
+            Output("dataset-shortfall-modal", "is_open", allow_duplicate=True),
+            Output("dataset-shortfall-outcome-alert", "children"),
+            Output("training-control-action", "data", allow_duplicate=True),
+            Output("nn-dataset-type-dropdown", "value", allow_duplicate=True),
+            Output("pending-dataset-banner", "is_open", allow_duplicate=True),
+            Input("dataset-shortfall-accept-button", "n_clicks"),
+            Input("dataset-shortfall-drop-button", "n_clicks"),
+            Input("dataset-shortfall-fail-button", "n_clicks"),
+            dash.dependencies.State("dataset-shortfall-context", "data"),
+            prevent_initial_call=True,
+        )
+        def resolve_dataset_shortfall(accept_clicks, drop_clicks, fail_clicks, context):
+            """Apply the operator's choice: re-stage with the opt-in and start, or cancel and deselect."""
+            return self._resolve_dataset_shortfall_handler(
+                triggered_id=dash.callback_context.triggered_id,
+                clicks=(accept_clicks, drop_clicks, fail_clicks),
+                context=context,
+            )
 
         # PERF-CN-01: prevent_initial_call=False — must apply the initial
         # button-states (disabled/loading flags and labels) on mount so the
@@ -2609,13 +5554,33 @@ class DashboardManager:
                 Output("resume-button", "children"),
                 Output("reset-button", "disabled"),
                 Output("reset-button", "children"),
+                # N9 / §4.2: this callback is the sole writer of ``apply-dataset-button.disabled``.
+                Output("apply-dataset-button", "disabled"),
             ],
-            Input("button-states", "data"),
+            [
+                Input("button-states", "data"),
+                # A1-iv-5 / D8: re-evaluate the Start gate when the selected model changes — a
+                # non-live model is shown + selectable but NOT trainable (§5.7), so Start is
+                # force-disabled for it. Reading it in the SAME callback that owns
+                # ``start-button.disabled`` combines the training-state and model-status factors in
+                # one place — no racy second writer.
+                Input("model-selection-store", "data"),
+                # N5: the last ``/api/model/select`` payload, written by the same callback as the
+                # key above. An Input for the same reason as the dataset below: Start must go
+                # disabled the moment a selection is recorded over a backend that does not serve it.
+                Input("model-state-store", "data"),
+                # X5 / §4.8: the dataset rides as an **Input**, not a State. State does not
+                # trigger, so clearing the dataset would leave Start enabled until some unrelated
+                # callback happened to fire — the gate would be real in the handler and absent in
+                # the UI. This callback is not interval-driven, so the ``no_update``-chaining
+                # hazard on interval-shared inputs does not apply here.
+                Input("nn-dataset-type-dropdown", "value"),
+            ],
             prevent_initial_call=False,
         )
-        def update_button_appearance(button_states):
-            """Update button states (disabled/loading) with visual feedback."""
-            return self._update_button_appearance_handler(button_states=button_states)
+        def update_button_appearance(button_states, model_key, model_state, dataset_value):
+            """Update button states (disabled/loading) with visual feedback + the D8 Train-gate."""
+            return self._update_button_appearance_handler(button_states=button_states, model_key=model_key, dataset_value=dataset_value, model_state=model_state)
 
         @self.app.callback(
             Output("button-states", "data", allow_duplicate=True),
@@ -2627,7 +5592,7 @@ class DashboardManager:
             prevent_initial_call=True,
         )
         def handle_button_timeout_and_acks(action, n_intervals, button_states):
-            """Re-enable buttons after timeout (5s) or on control acknowledgment."""
+            """Re-enable a button on its success ack, or after DASHBOARD_TIMEOUT_THRESHOLD (F-CANOPY-003)."""
             return self._handle_button_timeout_and_acks_handler(action=action, n_intervals=n_intervals, button_states=button_states)
 
     # Define backend callbacks
@@ -2794,6 +5759,11 @@ class DashboardManager:
                 Input("nn-optimizer-type-dropdown", "value"),
                 # Phase 6E A-3: activation_function_name (hidden-unit activation)
                 Input("nn-activation-function-dropdown", "value"),
+                # D-2 (E2E ledger, C2.6-05 / C2.9-04): init_output_weights travelled
+                # on the apply gather as a State but sat outside this dirty set, so
+                # changing it alone never enabled Apply while its value still
+                # applied on the next unrelated Apply.
+                Input("nn-init-output-weights-dropdown", "value"),
                 # Store
                 Input("applied-params-store", "data"),
             ],
@@ -2830,6 +5800,7 @@ class DashboardManager:
             nn_output_epochs,
             nn_optimizer_type,
             nn_activation_function,
+            nn_init_output_weights,
             applied,
         ):
             """Enable Apply button when parameters differ from applied values."""
@@ -2862,6 +5833,7 @@ class DashboardManager:
                 nn_optimizer_type,
                 nn_activation_function,
                 applied,
+                nn_init_output_weights=nn_init_output_weights,
             )
 
         # ── Handle Apply button click ──
@@ -2870,6 +5842,11 @@ class DashboardManager:
             [
                 Output("applied-params-store", "data"),
                 Output("params-status", "children", allow_duplicate=True),
+                # E-3: release the apply-in-flight clamp on EVERY return path.
+                # applied-params-store stays no_update on failure (it must only
+                # record genuinely-applied params), so it cannot double as the
+                # release signal — that reliance is what froze the dashboard.
+                Output("apply-in-flight", "data", allow_duplicate=True),
             ],
             Input("apply-params-button", "n_clicks"),
             [
@@ -2905,6 +5882,12 @@ class DashboardManager:
                 dash.dependencies.State("nn-optimizer-type-dropdown", "value"),
                 # Phase 6E A-3: activation_function_name (hidden-unit activation)
                 dash.dependencies.State("nn-activation-function-dropdown", "value"),
+                # init_output_weights (output-layer weight init: zero|random)
+                dash.dependencies.State("nn-init-output-weights-dropdown", "value"),
+                # FR9 / canopy#368: the model this tab believes is selected, mirrored onto the
+                # request so the server can refuse a stale tab. State, not Input: it must never
+                # trigger an apply by itself.
+                dash.dependencies.State("model-selection-store", "data"),
             ],
             prevent_initial_call=True,
         )
@@ -2937,38 +5920,47 @@ class DashboardManager:
             nn_output_epochs,
             nn_optimizer_type,
             nn_activation_function,
+            nn_init_output_weights,
+            model_key,
         ):
-            """Apply parameters to backend and update applied store."""
-            return self._apply_parameters_handler(
-                n_clicks,
-                nn_max_iter,
-                nn_max_epochs,
-                nn_lr,
-                nn_max_hu,
-                nn_multi_node,
-                nn_growth_trigger,
-                nn_growth_epochs,
-                nn_growth_conv_thresh,
-                nn_patience,
-                nn_spiral_rot,
-                nn_spiral_num,
-                nn_dataset_elem,
-                nn_dataset_noise,
-                cn_pool_size,
-                cn_corr_thresh,
-                cn_selected,
-                cn_training_complete,
-                cn_training_iter,
-                cn_training_conv_thresh,
-                cn_patience,
-                cn_multi_cand,
-                cn_cand_selection,
-                cn_top_cands,
-                cn_random_cands,
-                nn_output_epochs,
-                nn_optimizer_type,
-                nn_activation_function,
-            )
+            """Apply parameters to backend, update applied store, and ALWAYS release the in-flight clamp (E-3)."""
+            try:
+                store_value, status_msg = self._apply_parameters_handler(
+                    n_clicks,
+                    nn_max_iter,
+                    nn_max_epochs,
+                    nn_lr,
+                    nn_max_hu,
+                    nn_multi_node,
+                    nn_growth_trigger,
+                    nn_growth_epochs,
+                    nn_growth_conv_thresh,
+                    nn_patience,
+                    nn_spiral_rot,
+                    nn_spiral_num,
+                    nn_dataset_elem,
+                    nn_dataset_noise,
+                    cn_pool_size,
+                    cn_corr_thresh,
+                    cn_selected,
+                    cn_training_complete,
+                    cn_training_iter,
+                    cn_training_conv_thresh,
+                    cn_patience,
+                    cn_multi_cand,
+                    cn_cand_selection,
+                    cn_top_cands,
+                    cn_random_cands,
+                    nn_output_epochs,
+                    nn_optimizer_type,
+                    nn_activation_function,
+                    nn_init_output_weights,
+                    nn_model=model_key,
+                )
+            except Exception as e:  # E-3: a raising handler must not leave the clamp stuck
+                self.logger.error(f"apply_parameters handler raised: {e}", exc_info=True)
+                store_value, status_msg = dash.no_update, f"Error: {str(e)[:40]}"
+            return store_value, status_msg, self._apply_in_flight_release(n_clicks)
 
         # ── Initialize from backend on first load ──
 
@@ -3006,7 +5998,10 @@ class DashboardManager:
                 Output("nn-optimizer-type-dropdown", "value"),
                 # Phase 6E A-3: activation_function_name (hidden-unit activation)
                 Output("nn-activation-function-dropdown", "value"),
-                # Store
+                # D-2: hydrate the init-output-weights dropdown too, so the form and
+                # the applied store agree on mount now that the field is dirty-tracked.
+                Output("nn-init-output-weights-dropdown", "value"),
+                # Store (kept LAST so ``result[-1]`` stays the applied dict)
                 Output("applied-params-store", "data", allow_duplicate=True),
             ],
             Input("params-init-interval", "n_intervals"),
@@ -3017,22 +6012,1442 @@ class DashboardManager:
             """Initialize input values and applied params from backend on first load."""
             return self._init_params_from_backend_handler(n, current_applied)
 
+        # ── FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 + §3.5.2 P1 — Issue #3 Phase 1 ──
+        # Apply Dataset / Cancel pending dataset change / banner visibility.
+
+        @self.app.callback(
+            [
+                Output("pending-dataset-banner", "is_open", allow_duplicate=True),
+                # N3 (T4): staging failures were silent (return dash.no_update);
+                # surface them instead of leaving the operator guessing.
+                Output("dataset-stage-outcome-alert", "children"),
+            ],
+            Input("apply-dataset-button", "n_clicks"),
+            [
+                dash.dependencies.State("nn-dataset-type-dropdown", "value"),
+                dash.dependencies.State("nn-dataset-elements-input", "value"),
+                dash.dependencies.State("nn-dataset-noise-input", "value"),
+                dash.dependencies.State("nn-spiral-rotations-input", "value"),
+                dash.dependencies.State("nn-spiral-number-input", "value"),
+                # N7 (I-7): the schema-driven inputs for a non-spiral generator (read directly, so
+                # there is no store-race with the Apply click). Empty for spiral / no-param types.
+                dash.dependencies.State({"type": "nn-gen-param", "name": dash.ALL}, "value"),
+                dash.dependencies.State({"type": "nn-gen-param", "name": dash.ALL}, "id"),
+                # FR9 / canopy#368: the model this tab believes is selected -- the server refuses a
+                # stale tab (409) and a dataset that model cannot use (422) before staging anything.
+                dash.dependencies.State("model-selection-store", "data"),
+            ],
+            prevent_initial_call=True,
+        )
+        def apply_dataset(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values, gen_ids, model_key):
+            return self._apply_dataset_handler(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values, gen_ids, nn_model=model_key)
+
+        @self.app.callback(
+            Output("pending-dataset-banner", "is_open", allow_duplicate=True),
+            Input("cancel-pending-dataset-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def cancel_pending_dataset(n_clicks):
+            """DELETE /api/cancel_pending_dataset; close the banner on success."""
+            if not n_clicks:
+                return dash.no_update
+            try:
+                resp = requests.delete(
+                    self._api_url("/api/cancel_pending_dataset"),
+                    timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
+                    headers=internal_api_headers(),
+                )
+                if resp.status_code == 200:
+                    self.logger.info("Pending dataset change discarded")
+                    return False  # close banner
+                self.logger.warning("Cancel pending dataset failed: %s %s", resp.status_code, resp.text[:200])
+                return dash.no_update
+            except requests.RequestException as exc:
+                self.logger.warning("Cancel pending dataset exception: %s", exc)
+                return dash.no_update
+
+        # N3 (I-6): the "Stop & Restart with new dataset" button
+        # (``restart-with-new-dataset-button``) is now wired in
+        # ``_setup_restart_orchestration_callbacks`` — it opens the confirm modal
+        # (Q3/Q4) instead of firing the pre-N3 feedback-free
+        # ``POST /api/train/start?reset=true``. The confirm flow runs the promised
+        # stop → await stopped → start(staged) sequence and surfaces every step's
+        # outcome. ``reconcile_pending_dataset_banner`` (below) still closes the
+        # banner once cascor clears ``pending_dataset`` after a successful restart.
+
+        # Stage 2 (design §13 row 2): the banner's dedicated slow-lane
+        # ``/api/status`` poller (``reconcile_pending_dataset_banner``) merged
+        # into ``update_system_panels`` — the same reconciliation now rides the
+        # network-info fetch of the same endpoint. Semantics preserved: the
+        # banner still reflects cascor-side ``pending_dataset`` each slow tick,
+        # catching a staged config cleared by a successful ``start_training``
+        # (cold-swap completed) or by another tab.
+
+    def _setup_experimental_functions_callbacks(self):
+        """Phase 2 P2-4 (Issue #3): Experimental Functions gate UI <-> cascor.
+
+        Two callbacks:
+
+        1. **Load reconciliation** (fires once on mount via ``params-init-interval``):
+           GETs canopy's ``/api/admin/experimental_functions`` proxy and writes
+           the cascor-authoritative state into the Switch + Store. F2.10 — the
+           Switch's last-session persistence is overridden if cascor's gate is
+           closed (e.g., env-var lockdown).
+
+        2. **User-toggle handler** (fires on Switch change):
+           POSTs the new value to canopy's proxy. If cascor's response
+           ``enabled`` differs from the requested value, the Switch is
+           reverted to the authoritative state and a warning ``dbc.Alert``
+           explains the override. On network / 502 errors the Switch
+           reverts to its last-stored value and a danger alert surfaces.
+        """
+
+        @self.app.callback(
+            [
+                Output("experimental-functions-toggle", "value", allow_duplicate=True),
+                Output("experimental-flags-store", "data", allow_duplicate=True),
+                Output("experimental-functions-alert", "children", allow_duplicate=True),
+            ],
+            Input("params-init-interval", "n_intervals"),
+            State("experimental-functions-toggle", "value"),
+            prevent_initial_call="initial_duplicate",
+        )
+        def load_reconcile_experimental_functions(n_intervals, current_toggle):
+            """Page-load sync against cascor's authoritative gate state.
+
+            ``params-init-interval`` is the canonical one-shot-on-mount
+            trigger used elsewhere in the dashboard (e.g., params load).
+            Fires once per session; ``max_intervals=1`` on the Interval
+            component caps additional fires.
+
+            F-CANOPY-025 (echo clobber): an UNCHANGED toggle write here still
+            fires ``handle_experimental_functions_toggle`` (an unchanged write
+            fires every consumer — the Stage-2 lesson), which then POSTs the
+            mount-time value back to cascor — so every page load re-wrote the
+            server-side gate, racing and reverting any operator change made
+            since that page's mount. The toggle write is now suppressed when
+            the authoritative value already matches (the handler additionally
+            carries its own echo guard).
+            """
+            try:
+                resp = requests.get(
+                    self._api_url("/api/admin/experimental_functions"),
+                    timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
+                    headers=internal_api_headers(),
+                )
+                if resp.status_code != 200:
+                    # Defensive default — if cascor is unreachable on load,
+                    # show the toggle as OFF (F2.10 safe default) and surface
+                    # a soft warning so the user knows the toggle is local-only.
+                    self.logger.warning("Experimental functions load failed: %s %s", resp.status_code, resp.text[:200])
+                    return (dash.no_update if not current_toggle else False), {"experimental_functions": False}, dbc.Alert("Could not reach backend; experimental functions disabled.", color="warning", duration=5000, dismissable=True)
+                authoritative = bool(resp.json().get("data", {}).get("enabled", False))
+                toggle_out = dash.no_update if authoritative == bool(current_toggle) else authoritative
+                return toggle_out, {"experimental_functions": authoritative}, None
+            except requests.RequestException as exc:
+                self.logger.warning("Experimental functions load exception: %s", exc)
+                return (dash.no_update if not current_toggle else False), {"experimental_functions": False}, dbc.Alert("Backend unreachable; experimental functions disabled.", color="warning", duration=5000, dismissable=True)
+
+        @self.app.callback(
+            [
+                Output("experimental-functions-toggle", "value", allow_duplicate=True),
+                Output("experimental-flags-store", "data", allow_duplicate=True),
+                Output("experimental-functions-alert", "children", allow_duplicate=True),
+            ],
+            Input("experimental-functions-toggle", "value"),
+            State("experimental-flags-store", "data"),
+            prevent_initial_call=True,
+        )
+        def handle_experimental_functions_toggle(switch_value, store_data):
+            """POST the new toggle value to cascor and reconcile UI state.
+
+            F-CANOPY-025 (echo guard): fire the POST only when the value
+            actually DIFFERS from the store's last-known state. Without this,
+            any programmatic write of the toggle (the load reconciliation, a
+            revert) re-POSTed the same value to cascor — and a mount-time echo
+            of a stale read could clobber an operator change made since.
+            A real user flip always differs from the store (the store is only
+            written alongside a completed reconcile/POST), so it always POSTs.
+
+            F2.10 server-authoritative: the response's ``enabled`` value is
+            what the UI must reflect, even if it differs from the request.
+            """
+            requested = bool(switch_value)
+            if requested == bool((store_data or {}).get("experimental_functions", False)):
+                # Echo, not a user flip — the store already reflects this value.
+                return dash.no_update, dash.no_update, dash.no_update
+            try:
+                resp = requests.post(
+                    self._api_url("/api/admin/experimental_functions"),
+                    json={"enabled": requested},
+                    timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
+                    headers=internal_api_headers(),
+                )
+                if resp.status_code != 200:
+                    # Revert to last-known-good (from the store) and surface
+                    # a danger alert with cascor's error detail.
+                    last_known = bool((store_data or {}).get("experimental_functions", False))
+                    detail = resp.text[:200] if resp.text else f"HTTP {resp.status_code}"
+                    self.logger.warning("Experimental functions toggle rejected: %s", detail)
+                    return (
+                        last_known,
+                        {"experimental_functions": last_known},
+                        dbc.Alert(f"Backend rejected toggle: {detail}", color="danger", duration=5000, dismissable=True),
+                    )
+                authoritative = bool(resp.json().get("data", {}).get("enabled", False))
+                alert = None
+                if authoritative != requested:
+                    alert = dbc.Alert(
+                        f"Server returned {authoritative!r}; the gate is server-authoritative (F2.10).",
+                        color="warning",
+                        duration=5000,
+                        dismissable=True,
+                    )
+                return authoritative, {"experimental_functions": authoritative}, alert
+            except requests.RequestException as exc:
+                last_known = bool((store_data or {}).get("experimental_functions", False))
+                self.logger.warning("Experimental functions toggle exception: %s", exc)
+                return (
+                    last_known,
+                    {"experimental_functions": last_known},
+                    dbc.Alert(f"Backend unreachable: {exc}", color="danger", duration=5000, dismissable=True),
+                )
+
+    def _setup_live_dataset_switch_callbacks(self):
+        """Phase 2 P2-5 (Issue #3): Live Dataset Switch flow.
+
+        Seven callbacks, each a thin wrapper around a class-level
+        ``_*_handler`` method (P2-6 refactor — handlers are unit-tested
+        in ``tests/unit/frontend/test_live_dataset_switch_handlers.py``):
+
+        1. Training status mirror — refresh ``training-status-store``
+           from ``/api/status`` each ``fast-update-interval`` tick.
+        2. Gate — disable Live Switch button unless experimental flag
+           AND training is running.
+        3. Open warning modal + populate dataset summary.
+        3b. Stop & Restart fallback closes modal (minimal interpretation).
+        4. Accept → POST /api/live_dataset_swap → outcome alert.
+        4b. Open progress alert immediately on Accept (split so spinner
+            shows before the 5–30 s POST returns).
+        5. Cancel during swap → DELETE /api/live_dataset_swap.
+
+        Full design rationale lives in the §4.2 / §4.3 spec sections
+        and the P2-5 PR (#275).
+        """
+
+        # Stage 2 (design §13 row 1): ``training-status-store``'s dedicated
+        # fast-lane poller merged into ``update_unified_status_bar`` — one
+        # ``/api/status`` fetch per tick now feeds the bar AND the store, and the
+        # store write is suppressed while ``{is_running, phase}`` is unchanged.
+        # ``_update_training_status_store_handler`` remains as the directly
+        # invocable single-store form (unit-test surface / parity reference).
+
+        # F-CANOPY-025: the standalone gate callback that used to live here
+        # (``gate_live_switch_button``, Inputs experimental-flags-store +
+        # training-status-store) could NEVER execute during a run — its
+        # training-status Input is an output the unified-status-bar feeder
+        # claims while in flight on every fast tick, so the gate lost the
+        # promotion race exactly when its allow arm was reachable. The gate is
+        # now computed inside ``update_unified_status_bar`` from the same
+        # payload (``_gate_live_switch_button_handler`` still holds the truth
+        # table and stays directly invocable for tests).
+
+        @self.app.callback(
+            [
+                Output("live-switch-modal", "is_open", allow_duplicate=True),
+                Output("live-switch-dataset-summary", "children"),
+            ],
+            Input("live-dataset-switch-button", "n_clicks"),
+            State("nn-dataset-type-dropdown", "value"),
+            State("nn-dataset-elements-input", "value"),
+            State("nn-dataset-noise-input", "value"),
+            State("nn-spiral-number-input", "value"),
+            State("nn-spiral-rotations-input", "value"),
+            prevent_initial_call=True,
+        )
+        def open_live_switch_modal(n_clicks, dataset_type, n_samples, noise, n_spirals, rotations):
+            return self._open_live_switch_modal_handler(n_clicks=n_clicks, dataset_type=dataset_type, n_samples=n_samples, noise=noise, n_spirals=n_spirals, rotations=rotations)
+
+        @self.app.callback(
+            Output("live-switch-modal", "is_open", allow_duplicate=True),
+            Input("live-switch-fallback-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def close_live_switch_modal_on_fallback(n_clicks):
+            return self._close_live_switch_modal_on_fallback_handler(n_clicks=n_clicks)
+
+        # P2-5 follow-up A+B: when the user dismisses the Live Switch
+        # modal with "Return to Stop & Restart", scroll the Apply
+        # Dataset button into view (A) and briefly pulse it (B) so the
+        # cold-swap affordance is visually surfaced. Pure client-side —
+        # DOM mutation + setTimeout, no server round-trip. Removing
+        # then re-adding the class restarts the CSS animation, so a
+        # second cancel-click within the animation window re-triggers
+        # the pulse cleanly.
+        self.app.clientside_callback(
+            """
+            function(n_clicks) {
+                if (!n_clicks) return window.dash_clientside.no_update;
+                var btn = document.getElementById('apply-dataset-button');
+                if (!btn) return window.dash_clientside.no_update;
+                btn.classList.remove('attention-pulse');
+                // Force a reflow so the class re-add restarts the animation
+                // even if the user clicks cancel twice in quick succession.
+                void btn.offsetWidth;
+                btn.scrollIntoView({behavior: 'smooth', block: 'center'});
+                btn.classList.add('attention-pulse');
+                setTimeout(function() {
+                    btn.classList.remove('attention-pulse');
+                }, 1100);
+                return window.dash_clientside.no_update;
+            }
+            """,
+            Output("live-switch-fallback-sink", "data"),
+            Input("live-switch-fallback-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+
+        @self.app.callback(
+            [
+                Output("live-switch-modal", "is_open", allow_duplicate=True),
+                Output("live-switch-progress-alert", "is_open", allow_duplicate=True),
+                Output("live-switch-outcome-alert", "children"),
+                Output("live-swap-in-flight-store", "data", allow_duplicate=True),
+            ],
+            Input("live-switch-accept-button", "n_clicks"),
+            State("nn-dataset-type-dropdown", "value"),
+            State("nn-dataset-elements-input", "value"),
+            State("nn-dataset-noise-input", "value"),
+            State("nn-spiral-number-input", "value"),
+            State("nn-spiral-rotations-input", "value"),
+            # The schema-driven fields and the model, as ``apply_dataset`` reads them: the swap
+            # sends the same body Apply Dataset does (``_dataset_stage_payload``), mirror included.
+            State({"type": "nn-gen-param", "name": dash.ALL}, "value"),
+            State({"type": "nn-gen-param", "name": dash.ALL}, "id"),
+            State("model-selection-store", "data"),
+            prevent_initial_call=True,
+        )
+        def accept_live_switch(n_clicks, dataset_type, n_samples, noise, n_spirals, rotations, gen_values, gen_ids, model_key):
+            return self._accept_live_switch_handler(n_clicks=n_clicks, dataset_type=dataset_type, n_samples=n_samples, noise=noise, n_spirals=n_spirals, rotations=rotations, gen_values=gen_values, gen_ids=gen_ids, nn_model=model_key)
+
+        @self.app.callback(
+            [
+                Output("live-switch-progress-alert", "is_open", allow_duplicate=True),
+                Output("live-swap-in-flight-store", "data", allow_duplicate=True),
+            ],
+            Input("live-switch-accept-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def open_progress_alert_on_accept(n_clicks):
+            return self._open_progress_alert_on_accept_handler(n_clicks=n_clicks)
+
+        @self.app.callback(
+            Output("live-switch-outcome-alert", "children", allow_duplicate=True),
+            Input("live-switch-cancel-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def cancel_live_switch(n_clicks):
+            return self._cancel_live_switch_handler(n_clicks=n_clicks)
+
+    def _setup_restart_orchestration_callbacks(self):
+        """N3 (canopy training-runtime defects plan, I-6): the cold-swap restart
+        confirm modal (Q3/Q4) + the stop → await stopped → start(staged)
+        orchestration that replaces the pre-N3 feedback-free callback.
+
+        Five thin callbacks, each delegating to a class-level ``_*_handler`` so the
+        branch logic is unit-testable by direct invocation:
+
+        1. Open the confirm modal on the banner's "Stop & Restart" button; populate
+           the read-only dataset summary + granular verify section and reset the
+           start-fresh toggle to its default OFF (Q4) and the verify section closed.
+        2. Toggle the expandable granular verify section (Q3).
+        3. Cancel — close the modal.
+        4. Open the progress spinner the instant Confirm is clicked (split so the
+           spinner shows before the bounded stop→await→start POST returns).
+        5. Execute — POST /api/train/restart {start_fresh, reset}; render every
+           step's outcome (success incl. instant-convergence, or per-step failure
+           with the upstream detail); close the modal + progress; keep the pending
+           banner open on failure, close it on success.
+        """
+
+        @self.app.callback(
+            [
+                Output("restart-confirm-modal", "is_open", allow_duplicate=True),
+                Output("restart-confirm-summary", "children", allow_duplicate=True),
+                Output("restart-start-fresh-toggle", "value", allow_duplicate=True),
+                Output("restart-granular-collapse", "is_open", allow_duplicate=True),
+                Output("restart-granular-context", "children"),
+                # N3b: editable staged-dataset field values (defaults on open).
+                # X2: ``options`` had NO writer anywhere in the repo — the list was seeded once at
+                # layout time from the cascor gate and never re-gated. Harmless only while the
+                # deadlock made a non-cascor model unreachable; the moment the ✕ ships, this modal
+                # would offer the five 2-D datasets ENABLED and equities_seq DISABLED to a
+                # recurrence user, seeded with a value its own list disables — and
+                # ``execute_restart`` forwards it. Regated on every open, from the same composition
+                # the sidebar uses.
+                Output("restart-ds-type", "options"),
+                Output("restart-ds-type", "value"),
+                Output("restart-ds-samples", "value"),
+                Output("restart-ds-noise", "value"),
+                Output("restart-ds-rotations", "value"),
+                Output("restart-ds-spirals", "value"),
+                # N3b: editable training-param field values (backend-seeded, clamped).
+                Output("restart-p-nn-learning-rate", "value"),
+                Output("restart-p-nn-max-hidden-units", "value"),
+                Output("restart-p-nn-patience", "value"),
+                Output("restart-p-cn-pool-size", "value"),
+                Output("restart-p-cn-selected", "value"),
+                Output("restart-p-cn-corr-thresh", "value"),
+                # N3b: the baseline captured on open for the Confirm-time diff.
+                Output("restart-modal-baseline", "data"),
+            ],
+            Input("restart-with-new-dataset-button", "n_clicks"),
+            [
+                dash.dependencies.State("nn-dataset-type-dropdown", "value"),
+                dash.dependencies.State("nn-dataset-elements-input", "value"),
+                dash.dependencies.State("nn-dataset-noise-input", "value"),
+                dash.dependencies.State("nn-spiral-rotations-input", "value"),
+                dash.dependencies.State("nn-spiral-number-input", "value"),
+                # X2: the model the gate must be composed against.
+                dash.dependencies.State("model-selection-store", "data"),
+            ],
+            prevent_initial_call=True,
+        )
+        def open_restart_confirm_modal(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, model_key):
+            return self._open_restart_confirm_modal_handler(n_clicks=n_clicks, dataset_type=dataset_type, n_samples=n_samples, noise=noise, rotations=rotations, n_spirals=n_spirals, model_key=model_key)
+
+        @self.app.callback(
+            Output("restart-granular-collapse", "is_open", allow_duplicate=True),
+            Input("restart-granular-toggle", "n_clicks"),
+            dash.dependencies.State("restart-granular-collapse", "is_open"),
+            prevent_initial_call=True,
+        )
+        def toggle_restart_granular(n_clicks, is_open):
+            if not n_clicks:
+                return dash.no_update
+            return not is_open
+
+        # N3b: keep the "Restart plan" summary in sync with the operator's in-place
+        # edits — any change to a dataset or param field re-renders the summary so
+        # every modification is reflected before Confirm (plan §4 I-6 item 4). The
+        # baseline (captured on open) is read as State so the summary shows param
+        # deltas, not just current values.
+        @self.app.callback(
+            Output("restart-confirm-summary", "children", allow_duplicate=True),
+            [
+                Input("restart-ds-type", "value"),
+                Input("restart-ds-samples", "value"),
+                Input("restart-ds-noise", "value"),
+                Input("restart-ds-rotations", "value"),
+                Input("restart-ds-spirals", "value"),
+                Input("restart-p-nn-learning-rate", "value"),
+                Input("restart-p-nn-max-hidden-units", "value"),
+                Input("restart-p-nn-patience", "value"),
+                Input("restart-p-cn-pool-size", "value"),
+                Input("restart-p-cn-selected", "value"),
+                Input("restart-p-cn-corr-thresh", "value"),
+            ],
+            dash.dependencies.State("restart-modal-baseline", "data"),
+            prevent_initial_call=True,
+        )
+        def refresh_restart_summary(ds_type, ds_samples, ds_noise, ds_rot, ds_spirals, p_lr, p_hu, p_pat, p_pool, p_sel, p_corr, baseline):
+            dataset_vals = {"dataset_type": ds_type, "n_samples": ds_samples, "noise": ds_noise, "rotations": ds_rot, "n_spirals": ds_spirals}
+            param_vals = {"nn_learning_rate": p_lr, "nn_max_hidden_units": p_hu, "nn_patience": p_pat, "cn_pool_size": p_pool, "cn_selected_candidates": p_sel, "cn_correlation_threshold": p_corr}
+            return self._build_restart_summary(dataset_vals, param_vals, baseline)
+
+        @self.app.callback(
+            Output("restart-confirm-modal", "is_open", allow_duplicate=True),
+            Input("restart-cancel-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def cancel_restart_confirm(n_clicks):
+            if not n_clicks:
+                return dash.no_update
+            return False
+
+        @self.app.callback(
+            Output("restart-progress-alert", "is_open", allow_duplicate=True),
+            Input("restart-confirm-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def open_restart_progress(n_clicks):
+            if not n_clicks:
+                return dash.no_update
+            return True
+
+        @self.app.callback(
+            [
+                Output("restart-confirm-modal", "is_open", allow_duplicate=True),
+                Output("restart-progress-alert", "is_open", allow_duplicate=True),
+                Output("restart-outcome-alert", "children"),
+                Output("pending-dataset-banner", "is_open", allow_duplicate=True),
+            ],
+            Input("restart-confirm-button", "n_clicks"),
+            [
+                dash.dependencies.State("restart-start-fresh-toggle", "value"),
+                # N3b: the operator's in-place edits + the open-time baseline.
+                dash.dependencies.State("restart-ds-type", "value"),
+                dash.dependencies.State("restart-ds-samples", "value"),
+                dash.dependencies.State("restart-ds-noise", "value"),
+                dash.dependencies.State("restart-ds-rotations", "value"),
+                dash.dependencies.State("restart-ds-spirals", "value"),
+                dash.dependencies.State("restart-p-nn-learning-rate", "value"),
+                dash.dependencies.State("restart-p-nn-max-hidden-units", "value"),
+                dash.dependencies.State("restart-p-nn-patience", "value"),
+                dash.dependencies.State("restart-p-cn-pool-size", "value"),
+                dash.dependencies.State("restart-p-cn-selected", "value"),
+                dash.dependencies.State("restart-p-cn-corr-thresh", "value"),
+                dash.dependencies.State("restart-modal-baseline", "data"),
+                # FR9: the modal's re-stage and parameter apply carry this tab's model, as the
+                # sidebar's do, so a stale tab is refused (409) before the restart runs.
+                dash.dependencies.State("model-selection-store", "data"),
+            ],
+            prevent_initial_call=True,
+        )
+        def execute_restart(n_clicks, start_fresh, ds_type, ds_samples, ds_noise, ds_rot, ds_spirals, p_lr, p_hu, p_pat, p_pool, p_sel, p_corr, baseline, model_key):
+            dataset_vals = {"dataset_type": ds_type, "n_samples": ds_samples, "noise": ds_noise, "rotations": ds_rot, "n_spirals": ds_spirals}
+            param_vals = {"nn_learning_rate": p_lr, "nn_max_hidden_units": p_hu, "nn_patience": p_pat, "cn_pool_size": p_pool, "cn_selected_candidates": p_sel, "cn_correlation_threshold": p_corr}
+            return self._execute_restart_handler(n_clicks=n_clicks, start_fresh=start_fresh, dataset_vals=dataset_vals, param_vals=param_vals, baseline=baseline, nn_model=model_key)
+
+    # ------------------------------------------------------------------
+    # N3 (I-6) restart-orchestration handlers — extracted from the
+    # ``_setup_restart_orchestration_callbacks`` closures so each branch is
+    # unit-testable via direct invocation (mirrors the P2-5/P2-6 live-switch
+    # handler pattern). See tests/unit/frontend/test_restart_orchestration_handlers.py.
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # N3b (I-6 / Q3) restart-modal granular-MODIFY builders + helpers.
+    # The N3 granular section was read-only VERIFY; N3b makes the staged
+    # dataset config and a focused set of restart-relevant training params
+    # editable in place. Layout builders are static (fields exist in the
+    # tree at registration time; values are populated on open); the diff /
+    # re-stage / apply logic is factored into unit-testable helpers.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_restart_dataset_fields():
+        """Editable staged-dataset config (the ``StageDatasetRequest`` fields).
+
+        Distinct ids from the sidebar's ``nn-dataset-*`` inputs (Dash ids are
+        global). Populated on open from the currently staged / current values; an
+        edit re-stages via the existing ``/api/stage_dataset`` route on Confirm.
+        """
+
+        def _num(label, _id, step, minimum=None):
+            return html.Div(
+                [
+                    dbc.Label(label, html_for=_id, size="sm", className="mb-0"),
+                    dbc.Input(id=_id, type="number", step=step, min=minimum, size="sm", debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS, className="mb-2"),
+                ]
+            )
+
+        return html.Div(
+            [
+                dbc.Label("Type", html_for="restart-ds-type", size="sm", className="mb-0"),
+                # No seeded dataset here either (OQ-N2): the modal is populated from the sidebar on
+                # every open (``open_restart_confirm_modal``), so this seed was never shown -- but a
+                # seeded default is exactly what the arc removed, and a reader grepping for one
+                # should not find it.
+                dcc.Dropdown(id="restart-ds-type", options=gated_dataset_options(DEFAULT_MODEL_KEY), value=None, clearable=False, className="mb-2"),
+                _num("Samples", "restart-ds-samples", 1, 1),
+                _num("Noise", "restart-ds-noise", "any", 0),
+                _num("Spiral rotations", "restart-ds-rotations", "any", 0),
+                _num("Spirals", "restart-ds-spirals", 1, 1),
+            ]
+        )
+
+    @staticmethod
+    def _build_restart_param_fields():
+        """Editable, restart-relevant training params (all CascorPatchBounds-governed).
+
+        Grouped Network / Candidate. Values are backend-seeded (clamped) on open;
+        an edit is clamped + applied through N5's ``/api/set_params`` machinery
+        before the stop→await→start orchestration.
+        """
+
+        def _num(label, _id, step, minimum=None):
+            return html.Div(
+                [
+                    dbc.Label(label, html_for=_id, size="sm", className="mb-0"),
+                    dbc.Input(id=_id, type="number", step=step, min=minimum, size="sm", debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS, className="mb-2"),
+                ]
+            )
+
+        return html.Div(
+            [
+                html.Div("Network", className="fw-semibold small text-muted mb-1"),
+                _num("Learning rate", "restart-p-nn-learning-rate", "any", 0),
+                _num("Max hidden units", "restart-p-nn-max-hidden-units", 1, 1),
+                _num("Patience", "restart-p-nn-patience", 1, 1),
+                html.Div("Candidate", className="fw-semibold small text-muted mb-1 mt-2"),
+                _num("Candidate pool size", "restart-p-cn-pool-size", 1, 1),
+                _num("Selected candidates", "restart-p-cn-selected", 1, 1),
+                _num("Correlation threshold", "restart-p-cn-corr-thresh", "any", 0),
+            ]
+        )
+
+    def _open_restart_confirm_modal_handler(self, n_clicks=None, dataset_type=None, n_samples=None, noise=None, rotations=None, n_spirals=None, model_key=None):
+        """Open the confirm modal + seed the editable dataset / param fields.
+
+        Returns the 18-tuple wired in ``_setup_restart_orchestration_callbacks``:
+        ``(modal_open, summary_rows, start_fresh_value, granular_open, context,
+        ds_options, ds_type, ds_samples, ds_noise, ds_rotations, ds_spirals, p_lr, p_hu,
+        p_patience, p_pool, p_selected, p_corr, baseline)``.
+
+        **X2** — ``ds_options`` is new. The dropdown's list had no writer at all, so it stayed on
+        whatever the cascor gate produced at layout time. It is now composed on every open exactly
+        as the sidebar composes it (model-compatibility gate ∘ availability gate), against the
+        model actually selected.
+
+        The start-fresh toggle resets to its ratified default OFF (Q4) and the
+        granular section collapses on every open. The dataset fields default to
+        the sidebar selection (the currently staged / current config); the param
+        fields are seeded from a best-effort ``/api/state`` read, clamped to
+        cascor's PATCH bounds via N5's ``CascorPatchBounds`` (a status hiccup
+        degrades to blank param fields — the modal still opens, and an untouched
+        field is never applied). The baseline captures both so Confirm acts on
+        exactly what the operator changed.
+        """
+        if not n_clicks:
+            return (dash.no_update,) * 18
+        ds_options = apply_availability_gate(gated_dataset_options(model_key or DEFAULT_MODEL_KEY), self._fetch_generators())
+        enabled = [option["value"] for option in ds_options if not option.get("disabled")]
+        # Never seed the field with a value its own list disables: if the sidebar's dataset is not
+        # offered for this model, fall back to the first enabled one. An UNSET sidebar dataset is
+        # left unset rather than snapped to an arbitrary option — inventing a selection the
+        # operator never made is the failure mode this whole arc exists to remove, and the
+        # Confirm-time re-stage guard refuses ``⊥`` rather than sending a destructive empty body.
+        #
+        # **This swap is deliberate, and it differs from the sidebar on purpose.** The sidebar
+        # gate CLEARS a stranded dataset (OQ-6, canopy#652). Whether that model-primary-by-clearing
+        # rule binds this site too was put to the owner, who ruled on 2026-09-22 to KEEP the swap
+        # here. The reason: this is a confirmation dialog, and it shows the operator the swapped
+        # value before Confirm re-stages anything. The ruling is recorded (juniper-ml#2037) as point 4 of §5.6.1 of
+        # juniper-ml's JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md. Do not
+        # "reconcile" the two sites without reading it: the registry's seed ORDER is what decides
+        # this fallback.
+        if not selection_axis_unset(dataset_type) and dataset_type not in enabled:
+            dataset_type = enabled[0] if enabled else None
+        dataset_vals = {"dataset_type": dataset_type, "n_samples": n_samples, "noise": noise, "rotations": rotations, "n_spirals": n_spirals}
+        param_vals, context = self._read_restart_param_seed()
+        baseline = {"dataset": dict(dataset_vals), "params": dict(param_vals)}
+        summary = self._build_restart_summary(dataset_vals, param_vals, baseline)
+        return (
+            True,
+            summary,
+            False,
+            False,
+            context,
+            ds_options,
+            dataset_vals["dataset_type"],
+            dataset_vals["n_samples"],
+            dataset_vals["noise"],
+            dataset_vals["rotations"],
+            dataset_vals["n_spirals"],
+            param_vals.get("nn_learning_rate"),
+            param_vals.get("nn_max_hidden_units"),
+            param_vals.get("nn_patience"),
+            param_vals.get("cn_pool_size"),
+            param_vals.get("cn_selected_candidates"),
+            param_vals.get("cn_correlation_threshold"),
+            baseline,
+        )
+
+    def _read_restart_param_seed(self):
+        """Best-effort backend read for the modal's editable params + context line.
+
+        Returns ``(param_vals, context_component)``. Reads ``/api/state`` (the
+        ``nn_*``/``cn_*`` surface the params panel also seeds from) and clamps each
+        exposed value to cascor's PATCH bounds via N5's ``CascorPatchBounds`` so a
+        backend-echoed out-of-range default seeds an admissible value. Never
+        raises — an unreachable backend yields blank fields (``None``) and an
+        "unavailable" context note; the modal still opens and unchanged fields are
+        not applied on Confirm.
+        """
+        keys = [key for _id, key, _label in RESTART_MODAL_PARAM_FIELDS]
+        try:
+            resp = requests.get(
+                self._api_url("/api/state"),
+                timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
+                headers=internal_api_headers(),
+            )
+            if resp.status_code == 200:
+                state = resp.json() or {}
+                raw = {key: state.get(key) for key in keys if state.get(key) is not None}
+                clamped, _ = CascorPatchBounds.clamp_params(raw)
+                param_vals = {key: clamped.get(key) for key in keys}
+                ctx_items = []
+                for label, key in (("Current epoch", "current_epoch"), ("Hidden units", "hidden_units"), ("Status", "status")):
+                    if state.get(key) is not None:
+                        ctx_items.append(html.Span(f"{label}: {state.get(key)}", className="me-3"))
+                context = html.Div(ctx_items or [html.Em("Current model state read from the backend.")], className="text-muted", style={"fontSize": "0.85em"})
+                return param_vals, context
+        except requests.RequestException:
+            pass
+        context = html.Div(html.Em("Current parameters unavailable (backend not reachable) — fields left blank; unchanged fields are not applied."), className="text-muted", style={"fontSize": "0.85em"})
+        return dict.fromkeys(keys), context
+
+    @staticmethod
+    def _values_differ(a, b):
+        """Tolerant equality for modal edits: numeric-aware (``300`` == ``300.0``),
+        string fallback (``"xor"`` != ``"moons"``), ``None``-aware."""
+        if a is None and b is None:
+            return False
+        if a is None or b is None:
+            return True
+        try:
+            return float(a) != float(b)
+        except (TypeError, ValueError):
+            return str(a) != str(b)
+
+    @classmethod
+    def _restart_dataset_changed(cls, dataset_vals, baseline_dataset):
+        """True iff the operator edited any staged-dataset field vs. the baseline."""
+        dataset_vals = dataset_vals or {}
+        baseline_dataset = baseline_dataset or {}
+        return any(cls._values_differ(dataset_vals.get(key), baseline_dataset.get(key)) for _id, key, _label in RESTART_MODAL_DATASET_FIELDS)
+
+    @classmethod
+    def _restart_param_updates(cls, param_vals, baseline_params):
+        """The ``{canopy_key: value}`` subset the operator actually edited.
+
+        Only fields that differ from the open-time baseline AND are non-``None``
+        are included — so an untouched Confirm applies nothing (the simple-confirm
+        default), and a param the backend could not seed (blank field) is not
+        forced onto cascor.
+        """
+        param_vals = param_vals or {}
+        baseline_params = baseline_params or {}
+        updates = {}
+        for _id, key, _label in RESTART_MODAL_PARAM_FIELDS:
+            new = param_vals.get(key)
+            if new is None:
+                continue
+            if cls._values_differ(new, baseline_params.get(key)):
+                updates[key] = new
+        return updates
+
+    @classmethod
+    def _build_restart_summary(cls, dataset_vals, param_vals, baseline):
+        """Render the "Restart plan" summary — reflects every in-place edit (item 4).
+
+        Lists the dataset config that will be applied plus, when the operator has
+        changed a param field from its open-time baseline, a "Parameter changes"
+        block showing ``old → new``. Returns a list of ``dbc.ListGroupItem`` (the
+        ``restart-confirm-summary`` ListGroup children).
+        """
+        dataset_vals = dataset_vals or {}
+        baseline = baseline if isinstance(baseline, dict) else {}
+        baseline_params = baseline.get("params") or {}
+        rows = []
+        for _id, key, label in RESTART_MODAL_DATASET_FIELDS:
+            value = dataset_vals.get(key)
+            if value is None:
+                continue
+            rows.append(dbc.ListGroupItem([html.Strong(f"{label}: "), html.Span(str(value))]))
+        if not rows:
+            rows = [dbc.ListGroupItem(html.Em("No dataset config selected — the currently staged change will be applied."), color="warning")]
+        changes = []
+        for _id, key, label in RESTART_MODAL_PARAM_FIELDS:
+            new = (param_vals or {}).get(key)
+            if new is None:
+                continue
+            if cls._values_differ(new, baseline_params.get(key)):
+                old = baseline_params.get(key)
+                changes.append(dbc.ListGroupItem([html.Strong(f"{label}: "), html.Span(f"{old} → {new}")], color="info"))
+        if changes:
+            rows.append(dbc.ListGroupItem(html.Em("Parameter changes to apply before restart:"), className="fw-semibold"))
+            rows.extend(changes)
+        return rows
+
+    @staticmethod
+    def _describe_dataset(dataset_vals):
+        """Short human label for a re-staged dataset (outcome-alert note)."""
+        dataset_vals = dataset_vals or {}
+        dtype = dataset_vals.get("dataset_type") or "current"
+        n = dataset_vals.get("n_samples")
+        return f"{dtype} ({n} samples)" if n is not None else str(dtype)
+
+    def _restage_dataset(self, dataset_vals, *, nn_model=None):
+        """Re-stage the (edited) dataset via the existing ``/api/stage_dataset`` route.
+
+        Returns ``(ok, detail)``. Mirrors the ``apply_dataset`` callback's payload
+        contract: ``nn_dataset_type`` is always sent; the optional numeric / spiral
+        fields only when present. N3b uses the ROUTE (not a new staging path) so
+        the cascor-side ``StageDatasetRequest`` stays the single authoritative
+        validator. ``nn_model`` is the FR9 mirror, omitted when no model is selected.
+        """
+        dataset_vals = dataset_vals or {}
+        payload = {}
+        dtype = dataset_vals.get("dataset_type")
+        # X4: §4.2 of the design names THIS as "the correct idiom" for the null guard, but
+        # skipping the key is exactly what produces the destructive empty body -- cascor reads
+        # ``{}`` as "clear any prior staging". Refuse the re-stage instead of sending it.
+        if selection_axis_unset(dtype):
+            return False, "No dataset selected — nothing to re-stage."
+        payload["nn_dataset_type"] = dtype
+        for key, pkey in (("n_samples", "nn_dataset_elements"), ("noise", "nn_dataset_noise"), ("rotations", "nn_spiral_rotations"), ("n_spirals", "nn_spiral_number")):
+            value = dataset_vals.get(key)
+            if value is not None:
+                payload[pkey] = value
+        # The registry seed, exactly as ``_apply_dataset_handler`` sends it: the seed is the single
+        # source of truth for the keys a generator cannot run without. This path used to send the
+        # typed fields alone, so re-staging a seeded generator from the modal dropped the very keys
+        # its seed exists for -- ``equities`` without ``symbols`` (a default deployment refuses the
+        # whole 503-name universe with a 422) and ``mnist`` without ``flatten`` (which makes canopy's
+        # ``ndim=2`` declaration self-enforcing). The modal renders no schema-driven params, so the
+        # seed is all it can send; a custom list applied earlier from the sidebar is not carried --
+        # the modal re-stages what it displays, and it does not display that.
+        seed = dataset_default_params(dtype)
+        if seed:
+            payload["nn_dataset_params"] = dict(seed)
+        if nn_model:
+            payload["nn_model"] = nn_model
+        try:
+            resp = requests.post(
+                self._api_url("/api/stage_dataset"),
+                json=payload,
+                timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
+                headers=internal_api_headers(),
+            )
+            if resp.status_code == 200:
+                self.logger.info("Restart modal re-staged dataset: %s", payload)
+                return True, ""
+            detail = resp.text[:300] if resp.text else f"HTTP {resp.status_code}"
+            self.logger.warning("Restart modal re-stage failed: %s %s", resp.status_code, detail)
+            return False, detail
+        except requests.RequestException as exc:
+            self.logger.warning("Restart modal re-stage exception: %s", exc)
+            return False, f"backend unreachable: {exc}"
+
+    def _execute_restart_handler(self, n_clicks=None, start_fresh=None, dataset_vals=None, param_vals=None, baseline=None, nn_model=None):
+        """Confirm: (re-stage edited dataset) → (apply edited params) → restart.
+
+        Returns ``(modal_open, progress_open, outcome_alert, banner_open)``. N3b
+        sequences the two modify phases BEFORE the N3 stop→await→start
+        orchestration and reports what each did in the outcome:
+
+        1. If the operator edited a dataset field, re-stage via
+           ``/api/stage_dataset``. A staging failure aborts the restart (banner
+           stays open, reason surfaced) — never restart with a stale dataset.
+        2. If the operator edited a param field, clamp + apply through N5's shared
+           apply core (``_apply_params_via_backend`` → ``CascorPatchBounds`` +
+           ``/api/set_params`` + applied/skipped toast). An apply failure aborts
+           the restart, carrying the verbatim rejection detail (T1); any re-stage
+           already done survives.
+        3. ``POST /api/train/restart`` (unchanged N3 orchestration). Success closes
+           the modal + banner; a 409/504/unreachable failure keeps the banner open
+           so the staged change survives and the operator can retry (plan §8).
+
+        An untouched Confirm skips phases 1-2 entirely — the ratified simple-confirm
+        default (assumes all other params/structures unchanged).
+        """
+        if not n_clicks:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        baseline = baseline if isinstance(baseline, dict) else {}
+        dataset_vals = dataset_vals if isinstance(dataset_vals, dict) else {}
+        param_vals = param_vals if isinstance(param_vals, dict) else {}
+        restage_note = None
+        apply_note = None
+
+        # Phase 1 — re-stage the dataset if edited.
+        if self._restart_dataset_changed(dataset_vals, baseline.get("dataset") or {}):
+            ok, detail = self._restage_dataset(dataset_vals, nn_model=nn_model)
+            if not ok:
+                outcome = self._render_restart_outcome({"message": f"Could not re-stage the dataset change: {detail}"}, ok=False)
+                return False, False, outcome, dash.no_update
+            restage_note = self._describe_dataset(dataset_vals)
+
+        # Phase 2 — apply edited params through N5's machinery, before orchestration.
+        param_updates = self._restart_param_updates(param_vals, baseline.get("params") or {})
+        if param_updates:
+            applied, toast = self._apply_params_via_backend(param_updates, nn_model=nn_model)
+            if applied is dash.no_update:
+                msg = f"Re-staged dataset to {restage_note}, but could not apply parameters: {toast}" if restage_note else f"Could not apply parameters: {toast}"
+                outcome = self._render_restart_outcome({"message": msg}, ok=False)
+                return False, False, outcome, dash.no_update
+            apply_note = toast
+
+        # Phase 3 — the N3 stop → await stopped → start(staged) orchestration.
+        payload = {"start_fresh": bool(start_fresh), "reset": True}
+        try:
+            resp = requests.post(
+                self._api_url("/api/train/restart"),
+                json=payload,
+                timeout=DashboardConstants.DASHBOARD_RESTART_POST_TIMEOUT,
+                headers=internal_api_headers(),
+            )
+            data = {}
+            try:
+                data = resp.json() or {}
+            except ValueError:
+                data = {}
+            if resp.status_code == 200 and data.get("success"):
+                self.logger.info("Restart orchestration succeeded: %s", data.get("steps"))
+                return False, False, self._render_restart_outcome(data, ok=True, restage_note=restage_note, apply_note=apply_note), False
+            detail = data.get("message") or (resp.text[:300] if resp.text else f"HTTP {resp.status_code}")
+            self.logger.warning("Restart orchestration failed (%s): %s", resp.status_code, detail)
+            return False, False, self._render_restart_outcome(data if data else {"message": detail}, ok=False, restage_note=restage_note, apply_note=apply_note), dash.no_update
+        except requests.RequestException as exc:
+            self.logger.warning("Restart orchestration exception: %s", exc)
+            return False, False, dbc.Alert([html.Strong("Restart failed. "), html.Span(f"Backend unreachable: {exc}")], color="danger", dismissable=True, duration=10000), dash.no_update
+
+    @staticmethod
+    def _render_restart_outcome(data, ok, restage_note=None, apply_note=None):
+        """Build the restart outcome alert from the route's structured result.
+
+        ``ok`` is the success flag (200 + ``success``). N3b prepends what the modal
+        re-staged / applied (``restage_note`` / ``apply_note``) so the outcome
+        reports the full restart result (item 4). On success the alert enumerates
+        the steps that ran (stop/await/start) and — folded finding 2 — notes an
+        instant-convergence run truthfully instead of letting it read as frozen. On
+        failure the alert carries the upstream ``message`` (the 409 refusal reason,
+        the 504 stop-await timeout, etc.) verbatim (T1), and flags a retriable
+        timeout so the operator knows the staged change survived.
+        """
+        data = data if isinstance(data, dict) else {}
+        prelude = []
+        if restage_note:
+            prelude.append(f"Re-staged dataset to {restage_note}. ")
+        if apply_note:
+            prelude.append(f"{apply_note}. ")
+        prefix = "".join(prelude)
+        if ok:
+            start_fresh = bool(data.get("start_fresh"))
+            was_active = bool(data.get("was_active"))
+            parts = ["Restart complete. "]
+            if was_active:
+                parts.append("Stopped the running model, then ")
+            else:
+                parts.append("Started ")
+            parts.append("a fresh model." if start_fresh else "continued the current model.")
+            if data.get("instant_complete"):
+                parts.append(" The new run converged immediately (epoch 0) — see the metrics panel for its final values.")
+            return dbc.Alert([html.Strong("Restart succeeded. "), html.Span(prefix + "".join(parts))], color="success", dismissable=True, duration=8000)
+        detail = str(data.get("message") or "the backend rejected the restart.").strip()
+        if data.get("retriable"):
+            detail += " The dataset change is still staged — you can retry."
+        return dbc.Alert([html.Strong("Restart failed. "), html.Span(prefix + detail)], color="danger", dismissable=True, duration=10000)
+
+    def _setup_dataset_swap_observers_callbacks(self):
+        """Phase 2 P2-7 (Issue #3): poll ``dataset-swap-events-store``.
+
+        Single polling callback that fires each ``slow-update-interval``
+        tick to hydrate the events store from ``/api/history/dataset_swaps``.
+        The three P2-7 consumer panels (replay timeline marker, History
+        paired-diff, Snapshots tab badges) all read from this store —
+        none re-issue the HTTP call themselves.
+
+        Delegates to ``_poll_dataset_swap_events_handler`` so the branch
+        logic is unit-testable.
+        """
+
+        @self.app.callback(
+            Output("dataset-swap-events-store", "data"),
+            Input("slow-update-interval", "n_intervals"),
+            State("dataset-swap-events-store", "data"),
+            prevent_initial_call=False,
+        )
+        def poll_dataset_swap_events(n_intervals, current_store):
+            return self._poll_dataset_swap_events_handler(n_intervals=n_intervals, current_store=current_store)
+
+        # P2-7 follow-up: hydrate the per-snapshot swap history store on
+        # ``replay-player-session`` changes. We only fetch when the
+        # active snapshot_id transitions — not on every speed/seek tick —
+        # so the snapshot's swap history is held against the loaded
+        # session, not re-fetched on minor session mutations.
+        @self.app.callback(
+            Output("loaded-snapshot-swap-events-store", "data"),
+            Input("replay-player-session", "data"),
+            State("loaded-snapshot-swap-events-store", "data"),
+            prevent_initial_call=False,
+        )
+        def hydrate_loaded_snapshot_swap_events(session, prior):
+            return self._hydrate_loaded_snapshot_swap_events_handler(session=session, prior=prior)
+
+        # P2-7 follow-up: WS-push merger for dataset_swap events.
+        # The slow-poll above is the authoritative source — runs every
+        # slow-update-interval tick and overwrites the store with the
+        # full event list from cascor's REST endpoint. This merger
+        # layered on top is a latency-shortener: when a swap arrives
+        # over WS, the new event lands in the store within one
+        # fast-update-interval tick instead of waiting for the next
+        # slow poll. Dedupe keys off (timestamp, pre_swap_snapshot_id)
+        # so a swap that arrives via both paths is held exactly once.
+        @self.app.callback(
+            Output("dataset-swap-events-store", "data", allow_duplicate=True),
+            Input("ws-dataset-swap-buffer", "data"),
+            State("dataset-swap-events-store", "data"),
+            prevent_initial_call=True,
+        )
+        def merge_ws_dataset_swap_events(ws_buffer, current_store):
+            return self._merge_ws_dataset_swap_events_handler(ws_buffer=ws_buffer, current_store=current_store)
+
+    # ------------------------------------------------------------------
+    # P2-5 (Issue #3) Live Dataset Switch handlers — extracted from
+    # ``_setup_live_dataset_switch_callbacks`` closures in P2-6 so each
+    # branch is unit-testable via direct invocation. Behaviour preserved
+    # bit-for-bit from P2-5 (#275); only the call site changed.
+    # See ``tests/unit/frontend/test_live_dataset_switch_handlers.py``.
+    # ------------------------------------------------------------------
+
+    def _poll_dataset_swap_events_handler(self, n_intervals=None, current_store=None):
+        """Hydrate the ``dataset-swap-events-store`` from the canopy proxy.
+
+        Returns ``{"events": [...]}`` on success — list always present,
+        empty when no swaps yet. ``dash.no_update`` on backend hiccup so
+        the prior store value (typically the same events) stays put.
+
+        Stage 2 (design §13 row 3): also ``dash.no_update`` when the fetched
+        events equal the store's current events — an unchanged write still
+        fires every downstream consumer (three panels re-render on every tab,
+        and ``update_snapshots_table`` re-fetches the whole snapshot list),
+        so the no-op rewrite this made every 5 s was pure fan-out load. All
+        three consumers are value-driven (none keys off the write itself);
+        ``update_snapshots_table``'s freshness rides its own refresh interval.
+        """
+        try:
+            resp = requests.get(
+                self._api_url("/api/history/dataset_swaps"),
+                timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
+                headers=internal_api_headers(),
+            )
+            if resp.status_code != 200:
+                return dash.no_update
+            data = (resp.json() or {}).get("data", {}) or {}
+            events = data.get("events", []) or []
+            if isinstance(current_store, dict) and current_store.get("events") == list(events):
+                return dash.no_update
+            return {"events": list(events)}
+        except requests.RequestException:
+            return dash.no_update
+
+    @staticmethod
+    def _merge_ws_dataset_swap_events_handler(ws_buffer=None, current_store=None):
+        """Merge WS-pushed dataset_swap events into the live store.
+
+        P2-7 follow-up. Dedupe key is
+        ``(timestamp, pre_swap_snapshot_id)`` — together these uniquely
+        identify a swap event:
+
+        * ``timestamp`` is set by cascor at swap time (ISO-8601 UTC,
+          one per `swap_dataset_live` call).
+        * ``pre_swap_snapshot_id`` is the *exact* HDF5 file id captured
+          before the swap; cascor's collision-suffix loop guarantees
+          this is unique per snapshot.
+
+        If both fields are present the pair is the dedupe key. If
+        ``timestamp`` is missing on a pushed event (defensive — should
+        never happen on a well-formed cascor frame), it is appended
+        unconditionally and dedupe falls back to identity.
+
+        Returns ``dash.no_update`` when the buffer is empty / unset —
+        keeps callback cache stable and avoids touching the store on
+        trivial buffer churn.
+        """
+        if not isinstance(ws_buffer, dict):
+            return dash.no_update
+        ws_events = ws_buffer.get("events") or []
+        if not ws_events:
+            return dash.no_update
+
+        existing = []
+        if isinstance(current_store, dict):
+            existing = list(current_store.get("events") or [])
+
+        seen = set()
+        for ev in existing:
+            if not isinstance(ev, dict):
+                continue
+            ts = ev.get("timestamp")
+            pre_id = ev.get("pre_swap_snapshot_id")
+            if ts is not None:
+                seen.add((ts, pre_id))
+
+        merged = list(existing)
+        for ev in ws_events:
+            if not isinstance(ev, dict):
+                continue
+            ts = ev.get("timestamp")
+            pre_id = ev.get("pre_swap_snapshot_id")
+            if ts is None:
+                merged.append(ev)
+                continue
+            key = (ts, pre_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(ev)
+
+        merged.sort(key=lambda e: e.get("timestamp") or "")
+        return {"events": merged}
+
+    def _hydrate_loaded_snapshot_swap_events_handler(self, session=None, prior=None):
+        """Hydrate ``loaded-snapshot-swap-events-store`` (P2-7 follow-up).
+
+        Fires when ``replay-player-session`` changes. We only touch the
+        backend when the active ``snapshot_id`` actually transitions —
+        speed / seek / play-state changes leave the store alone so the
+        same loaded snapshot's history doesn't get re-fetched on every
+        control button click.
+
+        Returns:
+          * ``{"events": [], "snapshot_id": None}`` when no session is
+            active (cleared replay).
+          * ``{"events": [...], "snapshot_id": <id>}`` after a successful
+            fetch.
+          * ``dash.no_update`` when the snapshot_id hasn't changed (keeps
+            the previously-loaded history in place across session ticks).
+          * ``{"events": [], "snapshot_id": <id>}`` on a non-200 / network
+            error so the timeline degrades to live-event-only rendering
+            rather than surfacing a UI error.
+        """
+        prior = prior if isinstance(prior, dict) else {}
+        prior_snapshot_id = prior.get("snapshot_id")
+
+        snapshot_id = None
+        if isinstance(session, dict):
+            snapshot_id = session.get("snapshot_id")
+
+        if snapshot_id is None:
+            if prior_snapshot_id is None:
+                return dash.no_update
+            return {"events": [], "snapshot_id": None}
+
+        if snapshot_id == prior_snapshot_id:
+            return dash.no_update
+
+        try:
+            resp = requests.get(
+                self._api_url(f"/api/snapshots/{snapshot_id}/history/dataset_swaps"),
+                timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
+                headers=internal_api_headers(),
+            )
+            if resp.status_code != 200:
+                return {"events": [], "snapshot_id": snapshot_id}
+            data = (resp.json() or {}).get("data", {}) or {}
+            events = data.get("events", []) or []
+            return {"events": list(events), "snapshot_id": snapshot_id}
+        except requests.RequestException:
+            return {"events": [], "snapshot_id": snapshot_id}
+
+    def _update_training_status_store_handler(self, n_intervals=None):
+        """Populate ``training-status-store`` from ``/api/status``.
+
+        Returns ``{"is_running": bool, "phase": str}`` on success,
+        ``dash.no_update`` on non-200 / network error so a transient
+        backend hiccup doesn't blow away the prior store value.
+        """
+        try:
+            resp = requests.get(
+                self._api_url("/api/status"),
+                timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
+                headers=internal_api_headers(),
+            )
+            if resp.status_code != 200:
+                return dash.no_update
+            payload = resp.json() or {}
+            return {
+                "is_running": bool(payload.get("is_running", False)),
+                "phase": str(payload.get("phase", "idle")),
+            }
+        except requests.RequestException:
+            return dash.no_update
+
+    def _gate_live_switch_button_handler(self, flags=None, status=None):
+        """Gate the Live Dataset Switch button.
+
+        Returns ``disabled=True`` unless BOTH stores agree:
+        ``experimental-flags-store.experimental_functions`` is True AND
+        ``training-status-store.is_running`` is True (F2.3 + F2.5).
+        """
+        flags_ok = bool(flags and flags.get("experimental_functions"))
+        running = bool(status and status.get("is_running"))
+        return not (flags_ok and running)
+
+    def _open_live_switch_modal_handler(self, n_clicks=None, dataset_type=None, n_samples=None, noise=None, n_spirals=None, rotations=None):
+        """Open the warning modal + populate the read-only dataset summary.
+
+        Returns ``(is_open, summary_rows)``. The summary is built from
+        the State values of the sidebar dataset inputs at click time —
+        Q3 hybrid: "here's what we're about to swap to" so the user
+        sees the exact config before confirming.
+        """
+        if not n_clicks:
+            return dash.no_update, dash.no_update
+        rows = []
+        # N4: name the consequence at the locus. A missing dataset type used to be skipped like any
+        # other absent field, so the confirmation listed Samples/Noise and simply had no dataset
+        # row -- the user confirmed a swap without ever seeing that its target was unset. The other
+        # fields keep the skip; the dataset type is the identity of the swap and says so.
+        if selection_axis_unset(dataset_type):
+            rows.append(dbc.ListGroupItem([html.Strong("Dataset type: "), html.Span("none selected — this swap cannot proceed")], color="warning"))
+        else:
+            rows.append(dbc.ListGroupItem([html.Strong("Dataset type: "), html.Span(str(dataset_type))]))
+        for label, value in (
+            ("Samples", n_samples),
+            ("Noise", noise),
+            ("Spirals", n_spirals),
+            ("Spiral rotations", rotations),
+        ):
+            if value is None:
+                continue
+            rows.append(dbc.ListGroupItem([html.Strong(f"{label}: "), html.Span(str(value))]))
+        if not rows:
+            rows = [dbc.ListGroupItem(html.Em("No dataset config selected in the sidebar."), color="warning")]
+        return True, rows
+
+    def _close_live_switch_modal_on_fallback_handler(self, n_clicks=None):
+        """Close the modal on "Return to Stop & Restart" click.
+
+        Minimal interpretation per Q2 — see PHASE_2_P2_5_FOLLOWUPS for
+        the three deferred active-interpretation polish items.
+        """
+        if not n_clicks:
+            return dash.no_update
+        return False
+
+    def _accept_live_switch_handler(self, n_clicks=None, dataset_type=None, n_samples=None, noise=None, n_spirals=None, rotations=None, gen_values=None, gen_ids=None, nn_model=None):  # noqa: C901
+        """POST ``/api/live_dataset_swap`` and reconcile the UI to the response.
+
+        Returns ``(modal_open, progress_open, outcome_alert, in_flight)``.
+
+        The body is ``_dataset_stage_payload``'s, the one Apply Dataset sends for the same form:
+        the registry seed and schema-driven params for a non-spiral generator, the typed fields
+        for spiral, and the ``nn_model`` mirror (FR9), so a stale tab's swap is refused (409)
+        before the route stops anything.
+
+        Three response branches:
+          * 200 + ``status == "cancelled"`` → info alert "swap cancelled"
+          * 200 + other status → success alert with the pre-swap snapshot id
+          * non-200 → danger alert with cascor's error string verbatim
+            (spec §4.3: "failure shows the server error verbatim")
+          * RequestException → danger alert with the exception detail
+
+        On every branch the modal + progress alert close and in_flight=False.
+        """
+        if not n_clicks:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        # X4, third commit path and the most expensive one: this handler drops ``None`` values
+        # from its payload, so at ``⊥`` it POSTed ``{}`` to ``/api/live_dataset_swap`` and
+        # rendered "Live dataset swap complete." -- while ``lifecycle.swap_dataset_live()`` STOPS
+        # the training future and discards in-flight candidates. A cleared dropdown could
+        # therefore destroy a running experiment and report success.
+        if selection_axis_unset(dataset_type):
+            return (
+                False,
+                False,
+                dbc.Alert(
+                    [html.Strong("No dataset selected. "), html.Span("A live swap needs a target dataset; sending none would stop the current run without replacing its data.")],
+                    color="warning",
+                    dismissable=True,
+                    duration=8000,
+                ),
+                False,
+            )
+        payload = self._dataset_stage_payload(dataset_type, n_samples=n_samples, noise=noise, rotations=rotations, n_spirals=n_spirals, gen_values=gen_values, gen_ids=gen_ids, nn_model=nn_model)
+        try:
+            resp = requests.post(
+                self._api_url("/api/live_dataset_swap"),
+                json=payload,
+                timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
+                headers=internal_api_headers(),
+            )
+            if resp.status_code == 200:
+                data = (resp.json() or {}).get("data", {}) or {}
+                swap_status = data.get("status")
+                if swap_status == "cancelled":
+                    outcome = dbc.Alert("Live dataset swap cancelled.", color="info", duration=5000, dismissable=True)
+                else:
+                    pre_snap = data.get("pre_swap_snapshot_id") or "n/a"
+                    outcome = dbc.Alert(["Live dataset swap complete. Pre-swap snapshot: ", html.Code(pre_snap)], color="success", duration=5000, dismissable=True)
+                return False, False, outcome, {"in_flight": False}
+            detail = resp.text[:300] if resp.text else f"HTTP {resp.status_code}"
+            self.logger.warning("Live dataset swap rejected: %s", detail)
+            outcome = dbc.Alert(f"Live dataset swap failed: {detail}", color="danger", duration=5000, dismissable=True)
+            return False, False, outcome, {"in_flight": False}
+        except requests.RequestException as exc:
+            self.logger.warning("Live dataset swap exception: %s", exc)
+            outcome = dbc.Alert(f"Backend unreachable: {exc}", color="danger", duration=5000, dismissable=True)
+            return False, False, outcome, {"in_flight": False}
+
+    def _open_progress_alert_on_accept_handler(self, n_clicks=None):
+        """Open the progress alert + flip in_flight=True the moment Accept
+        is clicked.
+
+        Returns ``(progress_open, in_flight)``. Split from the Accept POST
+        handler so the user sees the spinner immediately rather than
+        waiting for the (5–30 s) POST to return. Dash runs both callbacks
+        on the worker pool; this one returns near-instantly.
+        """
+        if not n_clicks:
+            return dash.no_update, dash.no_update
+        return True, {"in_flight": True}
+
+    def _cancel_live_switch_handler(self, n_clicks=None):
+        """DELETE ``/api/live_dataset_swap`` to cancel an in-flight swap.
+
+        Returns ``dash.no_update`` on success — the "cancelled" outcome
+        alert is rendered by ``_accept_live_switch_handler`` when its
+        POST returns with ``status="cancelled"``. Suppressing this
+        callback's outcome avoids double-rendering the alert.
+
+        Non-200 / RequestException → warning alert ("cancel had no
+        effect" / "cancel failed: ..."). Cascor 404 (no swap in
+        progress) is the common case and surfaces here as a warning.
+        """
+        if not n_clicks:
+            return dash.no_update
+        try:
+            resp = requests.delete(
+                self._api_url("/api/live_dataset_swap"),
+                timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
+                headers=internal_api_headers(),
+            )
+            if resp.status_code == 200:
+                self.logger.info("Live swap cancel signal sent")
+                return dash.no_update
+            detail = resp.text[:200] if resp.text else f"HTTP {resp.status_code}"
+            self.logger.warning("Live swap cancel rejected: %s", detail)
+            return dbc.Alert(f"Cancel had no effect: {detail}", color="warning", duration=5000, dismissable=True)
+        except requests.RequestException as exc:
+            self.logger.warning("Live swap cancel exception: %s", exc)
+            return dbc.Alert(f"Cancel failed: {exc}", color="warning", duration=5000, dismissable=True)
+
     # Define event handlers for callbacks
+    @staticmethod
+    def _merge_pinned_params(values, ids, current):
+        """Merge the RENDERED pin checkboxes into the persisted pin list (F-CANOPY-028).
+
+        The pattern-matched writer used to rebuild the whole list from the DOM, which
+        makes "this checkbox is absent" indistinguishable from "this key is not
+        pinned". Any render that under-reports the pin set — a mount before the
+        ``storage_type="local"`` store hydrates, or tables that are not in the DOM —
+        therefore got persisted on the next toggle, discarding earlier pins with no
+        warning.
+
+        Rules:
+
+        - No checkboxes rendered at all → ``no_update``. An empty component set is
+          never evidence that nothing is pinned, and writing ``[]`` there is exactly
+          how a full pin set gets wiped.
+        - Otherwise, keys whose checkbox IS rendered take their state from it (so
+          unpinning still works), and keys that are pinned but NOT rendered are
+          carried through untouched.
+
+        Order is stable: preserved-but-unseen keys first, then the rendered keys in
+        render order, so the sidebar mirror does not reshuffle on every toggle.
+        """
+        rendered = [i.get("key") for i in (ids or []) if isinstance(i, dict) and i.get("key")]
+        if not rendered:
+            return dash.no_update
+        checked = {i.get("key") for v, i in zip(values or [], ids or [], strict=False) if v and isinstance(i, dict)}
+        rendered_set = set(rendered)
+        preserved = [k for k in (current or []) if k and k not in rendered_set]
+        return preserved + [k for k in rendered if k in checked]
+
     def _toggle_dark_mode_handler(self, current_dark_mode=None):
-        """Toggle dark mode on button click."""
-        is_dark = not current_dark_mode
-        icon = "☀️" if is_dark else "🌙"
-        return is_dark, icon
+        """Flip the persisted dark-mode flag on button click.
+
+        F-CANOPY-001: this used to return ``(is_dark, icon)`` and own the toggle's
+        glyph directly. Because its callback is ``prevent_initial_call=True``, the
+        glyph was written ONLY on a click — so after a reload the theme restored
+        correctly from ``dark-mode-store`` while the button still rendered the
+        layout default 🌙. The glyph is now derived from the store by
+        ``update_theme_state`` (which does run on mount), and this handler owns
+        only the flag.
+        """
+        return not current_dark_mode
+
+    @staticmethod
+    def _dark_mode_icon(is_dark=None) -> str:
+        """Toggle glyph as a pure function of the persisted flag (F-CANOPY-001).
+
+        The glyph shows the mode the button would switch TO: ☀️ while dark,
+        🌙 while light. Deriving it from the flag — rather than from the click —
+        is what makes it correct on mount, and keeps a single writer for
+        ``dark-mode-toggle.children``.
+        """
+        return "☀️" if is_dark else "🌙"
 
     def _update_theme_state_handler(self, is_dark=None):
         """Update theme state based on dark mode store."""
         return "dark" if is_dark else "light"
 
-    def _update_unified_status_bar_handler(self, n_intervals=None):
+    @staticmethod
+    def _classify_response_failure(response) -> tuple[str, str]:
+        """Map a non-OK HTTP response to (status_label, detail_label) pair.
+
+        Used by both the status-bar handler (via ``_status_bar_error_tuple``)
+        and the network-info panel handlers so the labels stay in lockstep —
+        a 429 surfacing on the status bar simultaneously surfaces as the
+        same "Rate Limited" message on the network-info panels.
+        """
+        code = response.status_code
+        if code == 429:
+            return ("Rate Limited", f"Rate limited (HTTP {code})")
+        if code in (401, 403):
+            return ("Unauthorized", f"Auth failed (HTTP {code})")
+        if code >= 500:
+            return ("Backend Error", f"Backend error (HTTP {code})")
+        return ("Backend Unavailable", f"Backend unavailable (HTTP {code})")
+
+    @staticmethod
+    def _classify_exception_failure(exc) -> tuple[str, str]:
+        """Map a request exception to (status_label, detail_label) pair."""
+        if isinstance(exc, requests.Timeout):
+            return ("Backend Timeout", "Backend timed out")
+        if isinstance(exc, requests.ConnectionError):
+            return ("Unreachable", "Backend unreachable")
+        return ("Error", f"Connection Error ({type(exc).__name__})")
+
+    def _network_info_error_div(self, panel_label: str, status_label: str, detail: str):
+        """Build the error placeholder for the network-info panels.
+
+        Mirrors PR #340's status-bar diagnosability so the operator can
+        distinguish a transient rate limit from a real backend outage on
+        the Network Information panel and its Details counterpart. Replaces
+        the previous opaque "Unable to fetch network info" / "Unable to
+        fetch network stats" / "Unable to fetch detailed network info"
+        messages.
+        """
+        return html.Div(
+            [
+                html.P(f"{panel_label}: {status_label}", style={"color": "orange"}),
+                html.P([html.Small(detail)], style={"color": "gray", "fontSize": "12px"}),
+            ]
+        )
+
+    def _status_bar_error_tuple(self, status_label: str, connection_label: str):
+        """Build the 9-element status-bar tuple for a FAILED /api/status poll.
+
+        ``status_label`` is shown (red) in the status display; ``connection_label``
+        is the hidden backward-compat element. Phase/epoch/units collapse to "--".
+        Replaces the previous bare "Error" so the operator can tell a transient
+        rate limit from an auth failure, a 5xx, a timeout, or an unreachable
+        backend (#3 "Error"-label diagnosability).
+        """
+        error_indicator = {"fontSize": "16px", "color": "#dc3545", "marginRight": "12px"}
+        error_style = {"fontWeight": "bold", "color": "#dc3545"}
+        neutral_style = {"fontWeight": "bold", "color": "#6c757d"}
+        return (
+            error_indicator,
+            connection_label,
+            "Latency: --",
+            status_label,
+            error_style,
+            "--",
+            neutral_style,
+            "--",
+            "--",
+        )
+
+    def _update_unified_status_bar_handler(self, n_intervals=None, prev_training_status=None, experimental_flags=None, prev_switch_disabled=None):
         """
         Update unified status bar with all state info from /api/status.
 
-        Returns tuple of 9 elements:
+        Returns tuple of 11 elements:
         - status_indicator style (latency color)
         - connection_status children (hidden, for backward compat)
         - latency_display children
@@ -3042,48 +7457,258 @@ class DashboardManager:
         - top_phase_display style
         - top_epoch_display children
         - top_hidden_units_display children
+        - training-status-store data (Stage 2, design §13 row 1: this callback
+          absorbed the store's dedicated /api/status poller; ``no_update`` while
+          ``{is_running, phase}`` is unchanged so consumers only re-run on real
+          transitions, and on every error path so a hiccup never blanks it)
+        - live-dataset-switch-button disabled (F-CANOPY-025: computed IN the
+          feeder from the same payload — the standalone gate could never win
+          promotion against this callback's own in-flight claim on the store;
+          same gate truth table as ``_gate_live_switch_button_handler``;
+          ``no_update`` while unchanged and on every error path)
         """
-        error_indicator = {"fontSize": "16px", "color": "#dc3545", "marginRight": "12px"}
-        error_style = {"fontWeight": "bold", "color": "#dc3545"}
-
         try:
             # Single request: /api/status provides all needed info and doubles as health check.
             # Use fast timeout since this fires every tick.
             start_time = time.time()
-            status_response = requests.get(self._api_url("/api/status"), timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS)
+            status_response = requests.get(self._api_url("/api/status"), timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS, headers=internal_api_headers())
             latency_ms = (time.time() - start_time) * 1000
 
             if status_response.status_code == 200:
-                return self._build_unified_status_bar_content(status_response, latency_ms)
-            else:
-                return (
-                    error_indicator,
-                    "Backend Unavailable",
-                    "Latency: --",
-                    "Error",
-                    error_style,
-                    "Error",
-                    error_style,
-                    "--",
-                    "--",
-                )
+                payload = status_response.json() or {}
+                training_status = {
+                    "is_running": bool(payload.get("is_running", False)),
+                    "phase": str(payload.get("phase", "idle")),
+                }
+                store_out = dash.no_update if training_status == prev_training_status else training_status
+                switch_disabled = self._gate_live_switch_button_handler(flags=experimental_flags, status=training_status)
+                switch_out = dash.no_update if switch_disabled == prev_switch_disabled else switch_disabled
+                return (*self._build_unified_status_bar_content(status_response, latency_ms), store_out, switch_out)
+            # Non-200: surface a specific, actionable label instead of a bare "Error"
+            # so a transient rate limit isn't confused with a real backend outage.
+            # Dominant "Error" cause on the deployed stack: canopy's own rate
+            # limiter throttling the dashboard's own polling (see #2a).
+            status_label, detail = self._classify_response_failure(status_response)
+            return (*self._status_bar_error_tuple(status_label, detail), dash.no_update, dash.no_update)
+        except (requests.Timeout, requests.ConnectionError) as e:
+            self.logger.warning(f"Status bar update failed: {type(e).__name__}")
+            status_label, detail = self._classify_exception_failure(e)
+            return (*self._status_bar_error_tuple(status_label, detail), dash.no_update, dash.no_update)
         except Exception as e:
             self.logger.warning(f"Status bar update failed: {type(e).__name__}: {e}")
-            return (
-                error_indicator,
-                "Connection Error",
-                "Latency: --",
-                "Error",
-                error_style,
-                "Error",
-                error_style,
-                "--",
-                "--",
-            )
+            return (*self._status_bar_error_tuple("Error", "Connection Error"), dash.no_update, dash.no_update)
+
+    # The longest a reason may occupy in the status bar. The completed-run vocabularies are
+    # short phrases and never approach it; it exists for the FAILED branch, whose reason is a
+    # raw exception string of unbounded length.
+    _COMPLETION_REASON_MAX_CHARS = 120
+
+    # The longest a FAILED run's reason may occupy in the status bar's hover tooltip (W0.5 /
+    # F-C1). The bar keeps the short bound above; the tooltip carries the reason whole. The
+    # recurrence adapter bounds the service's ``detail`` at 300 characters behind at most 176 of
+    # its own (the 401/403 wording on ``POST /v1/train``, which names both key variables since
+    # W1.6 / F-C5; it was 92 before), so 480 holds every recurrence failure reason uncut. The
+    # bound exists because the field is free text from any producer.
+    _FAILURE_REASON_TOOLTIP_MAX_CHARS = 480
+
+    @staticmethod
+    def _completion_reason_label(reason):
+        """Map a backend's ``completion_reason`` to a status-bar suffix.
+
+        Two producers write this field, with disjoint vocabularies:
+
+        * **cascor** (#320) emits one of five ``grow_network`` reasons.
+          ``residual_collapsed`` / ``below_threshold`` are both genuine convergence;
+          ``no_candidate`` is the 0-unit stall.
+        * **recurrence** emits ``TrainResult.stopped_reason`` from juniper-recurrence-model:
+          ``max_epochs`` (``_readout_mlp.py:78``), ``early_stopping`` (``:161`` — val-patience
+          fired), or ``converged`` (``model.py:219`` — the closed-form readout, which exposes
+          no epoch diagnostics).
+
+        The two sets do not collide, so one table serves both. Note the near-misses, which are
+        why this is a table and not a normaliser: cascor says ``early_stopped`` where recurrence
+        says ``early_stopping``, and ``max_iterations`` where recurrence says ``max_epochs``.
+
+        Unknown / missing reasons still return ``None`` (no suffix), so a cascor predating the
+        field degrades gracefully — and so does a recurrence-model release that adds a fourth
+        stop reason before canopy learns it.
+        """
+        return {
+            # cascor grow_network
+            "residual_collapsed": "converged",
+            "below_threshold": "converged",
+            "no_candidate": "stalled (0 new units)",
+            "early_stopped": "early stopped",
+            "max_iterations": "max iterations",
+            # juniper-recurrence-model TrainResult.stopped_reason
+            "converged": "converged",
+            "early_stopping": "early stopped",
+            "max_epochs": "max epochs",
+        }.get(reason)
+
+    @classmethod
+    def _failure_reason_label(cls, reason):
+        """Render a FAILED run's reason, which is free text rather than a vocabulary.
+
+        ``RecurrenceBackend.get_status`` writes the raw adapter error into the same
+        ``completion_reason`` field on ``state == "failed"`` (``recurrence_backend.py``).
+        That is an overload: cascor's five values are all *completion* outcomes, so the
+        consumer below was gated on ``status == "Completed"`` and a failure reason was written
+        and then never read — the operator saw a bare "Failed" with the cause discarded.
+
+        Free text, so it is bounded and flattened rather than mapped. A mapping table cannot
+        cover an exception string, and a status bar cannot carry a traceback.
+        """
+        return cls._flattened_and_bounded(reason, cls._COMPLETION_REASON_MAX_CHARS)
+
+    @classmethod
+    def _failure_reason_tooltip(cls, reason):
+        """The FAILED run's whole reason for the status bar's hover tooltip (W0.5 / F-C1).
+
+        The label above is cut at ``_COMPLETION_REASON_MAX_CHARS``, and the recurrence
+        service's 422 ``detail`` -- the part that says *why* -- sits at the END of the reason
+        (``recurrence service error 422 on POST /v1/train: <detail>``), so a long one is cut
+        exactly where the operator needs it. This is the same text, flattened the same way,
+        under the larger ``_FAILURE_REASON_TOOLTIP_MAX_CHARS`` bound.
+        """
+        return cls._flattened_and_bounded(reason, cls._FAILURE_REASON_TOOLTIP_MAX_CHARS)
+
+    @staticmethod
+    def _flattened_and_bounded(text, max_chars):
+        """``text`` on one line (whitespace runs collapsed), cut to ``max_chars`` with an ellipsis.
+
+        ``None`` for anything that is not a string or holds no visible text.
+        """
+        if not isinstance(text, str):
+            return None
+        collapsed = " ".join(text.split())
+        if not collapsed:
+            return None
+        if len(collapsed) > max_chars:
+            return collapsed[: max_chars - 1].rstrip() + "…"
+        return collapsed
+
+    @staticmethod
+    def _counter_displays(status):
+        """N6 (training-runtime-defects plan §4 I-1c / §5 S12): map the reconciled
+        cascor status surface to the dashboard's Step / Hidden-Units / Iteration /
+        Epoch display strings, per the C2b counter contract.
+
+        Field meanings are the single source of truth documented in juniper-cascor
+        ``docs/api/JUNIPER_CASCOR_API_REFERENCE.md`` ("Counter semantics (C2b)"):
+
+        - ``current_epoch`` / ``current_step`` — completed **training steps** (one
+          initial output-training pass plus one per cascade growth iteration), NOT
+          inner output-training epochs; single-writer and monotonic. Rendered as
+          "Step" (the pre-C2b "Epoch" label conflated this with an inner epoch —
+          the S12 "Epoch: 10000 vs 12" confusion).
+        - ``hidden_units`` / ``max_hidden_units`` — installed cascade units vs the
+          growth-capacity cap (C2b reconciled ``max_hidden_units`` to the live
+          network's effective value; pre-C2b the divergent surfaces showed a stale
+          ``10000`` denominator).
+        - ``grow_iteration`` / ``grow_max`` — cascade growth iteration vs
+          ``max_iterations``. The TRUE "Iteration" counter, distinct from the
+          hidden-unit count it was previously conflated with.
+        - ``output_epoch`` / ``candidate_epoch`` (with ``*_total_epochs``) — live
+          within-pass inner-epoch progress, phase-qualified. These reset to 0 at
+          each phase entry BY DESIGN, so "0 / N" is the correct render, not a
+          regression or a blank.
+        - ``max_epochs`` is the C2b DERIVED total-epoch budget — a whole-run budget
+          in inner-epoch units. It is deliberately NOT paired with the (step-unit)
+          "Step" counter as a fraction (they are different units); it is surfaced
+          as the Parameters panel's "Maximum Total Epochs" budget instead.
+
+        Returns display strings under the keys ``step``, ``hidden_units``,
+        ``iteration`` and ``phase_epoch``. Missing fields (e.g. a pre-C2b cascor,
+        or demo mode which has no within-pass output epoch) degrade to a plain
+        count or the em-dash placeholder rather than raising.
+        """
+        status = status if isinstance(status, dict) else {}
+
+        # Step — completed training steps (monotonic). ``current_epoch`` is the
+        # canonical field; ``current_step`` is its alias.
+        step_val = status.get("current_epoch")
+        if step_val is None:
+            step_val = status.get("current_step", 0)
+        step = str(step_val if step_val is not None else 0)
+
+        # Hidden Units — installed / capacity (reconciled denominator).
+        hidden = status.get("hidden_units", 0) or 0
+        max_hidden = status.get("max_hidden_units")
+        hidden_units = f"{hidden} / {max_hidden}" if max_hidden else str(hidden)
+
+        # Iteration — the true cascade growth iteration vs its ``max_iterations``
+        # cap (``grow_max``); NOT the hidden-unit count.
+        grow_iteration = status.get("grow_iteration")
+        grow_max = status.get("grow_max")
+        if grow_iteration is not None and grow_max:
+            iteration = f"{grow_iteration} / {grow_max}"
+        elif grow_iteration is not None:
+            iteration = str(grow_iteration)
+        else:
+            iteration = "—"
+
+        # Epoch — the phase-qualified within-pass inner epoch ("Epoch 12 (output)"),
+        # which is what "epoch" genuinely means here. Resets to 0 at phase entry by
+        # design; "0 / N (phase)" must render (never blank) so the reset does not
+        # read as a regression.
+        phase = (status.get("phase") or "").lower()
+        phase_epoch = "—"
+        if phase == "output":
+            total = status.get("output_total_epochs")
+            if total:
+                phase_epoch = f"{status.get('output_epoch') or 0} / {total} (output)"
+        elif phase == "candidate":
+            total = status.get("candidate_total_epochs")
+            if total:
+                phase_epoch = f"{status.get('candidate_epoch') or 0} / {total} (candidate)"
+
+        return {"step": step, "hidden_units": hidden_units, "iteration": iteration, "phase_epoch": phase_epoch}
 
     def _build_unified_status_bar_content(self, status_response, latency_ms):
         """Build unified status bar content from /api/status response."""
         status_data = status_response.json()
+
+        # Adapter-error fall-through: when the canopy → cascor circuit
+        # breaker is OPEN (or the underlying cascor client raised),
+        # ``CascorServiceAdapter.get_training_status`` returns
+        # ``{"is_training": False, "error": <reason>}`` — see
+        # ``src/backend/cascor_service_adapter.py:1264-1272``. The
+        # ``service_backend.get_status`` shim passes that dict through
+        # unchanged because it isn't shaped like a cascor-nested
+        # response (``is_cascor_nested`` is False), so the
+        # ``/api/status`` route returns HTTP 200 with the error marker.
+        # Without this guard every status field falls back to its
+        # ``False`` / ``0`` default and the existing ``elif`` chain
+        # renders "Stopped" — indistinguishable from a legitimate
+        # idle / never-started state, even though the backend is
+        # actually unreachable. This was the deferred follow-up in
+        # PR #340 ("handle the circuit-open 200 explicitly instead
+        # of as Stopped").
+        error_marker = status_data.get("error") if isinstance(status_data, dict) else None
+
+        # X7 slice 1c: render the class the status cache CONCLUDED, not the payload it
+        # happens to hold. The ``error``-marker branch below is necessary but not
+        # sufficient: on a *half-dead 200* — a dict that carries no error and is not
+        # cascor-shaped — it does not fire, every field falls back to its False/0 default,
+        # and the elif chain renders "Stopped", which is indistinguishable from a healthy
+        # idle backend. That is the defect PR #340 was opened to fix, and reading the
+        # payload rather than the verdict re-creates it. The cache classifies that shape
+        # UNREACHABLE, so ``status_class`` fires here where ``error`` could not.
+        #
+        # ``indeterminate`` gets its own label rather than borrowing "Unreachable":
+        # the breaker was open, so the tick SKIPPED the call and observed nothing.
+        # Rendering "Unreachable" would assert evidence that was never gathered.
+        status_class = status_data.get("status_class") if isinstance(status_data, dict) else None
+        if status_class == "unreachable":
+            return self._status_bar_error_tuple("Unreachable", f"Backend unreachable ({error_marker or 'no cascor-shaped status'})")
+        if status_class == "indeterminate":
+            return self._status_bar_error_tuple("Unknown", f"Backend status unknown ({error_marker or 'not polled'})")
+
+        # Legacy path: demo/recurrence serve the raw backend result (no cache), and a UI
+        # running against an older canopy sees no ``status_class`` at all.
+        if error_marker:
+            return self._status_bar_error_tuple("Unreachable", f"Backend unreachable ({error_marker})")
 
         # Determine latency indicator color
         if latency_ms < 100:
@@ -3102,9 +7727,11 @@ class DashboardManager:
         is_completed = status_data.get("completed", False)
         is_failed = status_data.get("failed", False)
         raw_phase = status_data.get("phase", "idle")
-        epoch = status_data.get("current_epoch", 0)
-        hidden_units = status_data.get("hidden_units", 0)
-        max_hidden_units = status_data.get("max_hidden_units")
+        # N6/C2b: derive the header counter strings from the reconciled surface.
+        # ``step`` = completed training steps (``current_epoch``); ``hidden_units``
+        # = installed / capacity with the reconciled denominator. See
+        # ``_counter_displays`` for the full contract.
+        counters = self._counter_displays(status_data)
 
         # Determine display status (terminal states take priority)
         if is_failed:
@@ -3115,6 +7742,10 @@ class DashboardManager:
             status = "Running"
         elif is_paused:
             status = "Paused"
+        elif status_data.get("outcome_unknown", False):
+            # W1.5 / F-C4: a recurrence fit whose reply timed out and whose outcome the service's status did not
+            # establish. Not "Failed" (it may have succeeded upstream), not "Stopped" (canopy cannot say that either).
+            status = "Unknown"
         else:
             status = "Stopped"
 
@@ -3134,8 +7765,47 @@ class DashboardManager:
             "Stopped": "#6c757d",  # Gray
             "Completed": "#17a2b8",  # Cyan
             "Failed": "#dc3545",  # Red
+            "Unknown": "#fd7e14",  # Amber -- W1.5: an outcome canopy could not establish
         }
         status_color = status_colors.get(status, "#6c757d")
+        # Set only by the Failed / Unknown branch below (W0.5 / F-C1): the whole reason, when the label cut it.
+        status_tooltip = None
+
+        # Issue #3 follow-up: on a completed run, append cascor's grow_network
+        # completion_reason so the operator sees *why* it stopped (converged vs a
+        # 0-unit stall) instead of a bare "Completed". Display-only — status_color
+        # above keys off the base "Completed".
+        if status == "Completed":
+            completion_label = self._completion_reason_label(status_data.get("completion_reason"))
+            if completion_label:
+                status = f"{status} — {completion_label}"
+        elif status in ("Failed", "Unknown"):  # W1.5: an unknown outcome's reason is free text too
+            # There was no Failed branch here at all, and that — not the mapper — is why a
+            # failed recurrence run showed no reason. ``completion_reason`` carries a
+            # completion OUTCOME from cascor and a failure ERROR from recurrence; only the
+            # cascor reading was implemented, so the branch above never ran for a failure and
+            # the error string was written and discarded.
+            #
+            # Deliberately NOT routed through ``_completion_reason_label``: that is a
+            # vocabulary table, and this value is free text. Passing it there would return
+            # ``None`` for every real error and reinstate the silence.
+            failure_reason = status_data.get("completion_reason")
+            failure_label = self._failure_reason_label(failure_reason)
+            if failure_label:
+                status = f"{status} — {failure_label}"
+                # W0.5 / F-C1: when the label had to cut the reason, the whole reason rides
+                # on a hover tooltip -- the service's ``detail`` is at its end, which is
+                # exactly what the cut drops. A reason the label already holds gets none: a
+                # tooltip that repeats the label adds nothing.
+                failure_tooltip = self._failure_reason_tooltip(failure_reason)
+                if failure_tooltip != failure_label:
+                    status_tooltip = failure_tooltip
+
+        # Partial-data contract: a run on a partial dataset carries the mark on the surface
+        # every operator watches, in every state -- progress while it runs, result when it
+        # completes. ``dataset_shortfall`` is None when the producer delivered in full.
+        if status_data.get("dataset_shortfall"):
+            status = f"{status} · partial data"
 
         # Determine phase color
         phase_colors = {
@@ -3152,150 +7822,304 @@ class DashboardManager:
         # Build connection status text for backward compat (hidden element)
         connection_status = f"Status: {status} | Phase: {phase}"
 
+        # ``top-status-display.children`` is the plain status string in every case but one: a
+        # failure whose reason the label had to cut renders as a Span whose ``title`` (the
+        # browser's hover tooltip) holds the reason whole. Carrying it as the children keeps
+        # this callback's Output list -- and the 9-tuple every caller unpacks -- unchanged.
+        status_display = html.Span(status, title=status_tooltip) if status_tooltip else status
+
         return (
             latency_indicator_style,
             connection_status,
             latency_text,
-            status,
+            status_display,
             status_style,
             phase,
             phase_style,
-            str(epoch),
-            f"{hidden_units} / {max_hidden_units}" if max_hidden_units else str(hidden_units),
+            counters["step"],
+            counters["hidden_units"],
         )
 
-    def _update_network_info_handler(self, n=None):
-        """Update network information panel from API."""
+    def _update_system_panels_handler(self, n=None):
+        """Stage 2 (design §13 row 2): one slow-lane slot for four global surfaces.
+
+        Returns ``(network_info_children, network_details_children,
+        stream_health_data, pending_banner_is_open)``. One ``/api/status`` fetch
+        serves BOTH the network-info panel and the pending-dataset banner
+        reconciliation; details and stream health reuse their existing
+        single-surface handlers unchanged. Every failure arm degrades exactly as
+        the four separate callbacks did (error div for the info panel,
+        ``dash.no_update`` for the banner, and the sub-handlers' own error
+        posture for the other two).
+        """
         try:
             url = self._api_url("/api/status")
-            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
-            if not response.ok:
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
+            # ``status_code != 200`` (not ``.ok``) — parity with the banner's old
+            # reconciliation poller; /api/status has exactly one success code.
+            if response.status_code != 200:
                 self.logger.warning(f"Status API returned {response.status_code}")
-                return html.Div("Unable to fetch network info", style={"color": "orange"})
-            status = response.json()
-
-            return html.Div(
-                [
-                    html.P(
-                        [
-                            html.Strong("Input Nodes: "),
-                            str(status.get("input_size", 0)),
-                        ]
-                    ),
-                    html.P(
-                        [
-                            html.Strong("Hidden Units: "),
-                            str(status.get("hidden_units", 0)),
-                        ]
-                    ),
-                    html.P(
-                        [
-                            html.Strong("Output Nodes: "),
-                            str(status.get("output_size", 0)),
-                        ]
-                    ),
-                    html.Hr(),
-                    html.P(
-                        [
-                            html.Strong("Training Step: "),
-                            str(status.get("current_epoch", 0)),
-                        ]
-                    ),
-                    html.P(
-                        [
-                            html.Strong("Current Iteration: "),
-                            str(status.get("hidden_units", 0)),
-                        ]
-                    ),
-                    html.P(
-                        [
-                            html.Strong("Training Phase: "),
-                            status.get("current_phase", "Idle"),
-                        ]
-                    ),
-                    html.P(
-                        [
-                            html.Strong("Network Connected: "),
-                            "Yes" if status.get("network_connected") else "No",
-                        ]
-                    ),
-                    html.P(
-                        [
-                            html.Strong("Monitoring: "),
-                            ("Active" if status.get("monitoring_active") else "Inactive"),
-                        ]
-                    ),
-                ]
-                + (
-                    [
-                        html.Hr(),
-                        html.P([html.Strong("Dataset: "), str(status.get("dataset_name", ""))]),
-                    ]
-                    + ([html.P([html.Strong("Version: "), str(status["dataset_version"])])] if status.get("dataset_version") else [])
-                    if status.get("dataset_name")
-                    else []
-                )
-            )
+                status_label, detail = self._classify_response_failure(response)
+                info = self._network_info_error_div("Network Info", status_label, detail)
+                banner = dash.no_update
+            else:
+                status = response.json()
+                info = self._render_network_info(status)
+                banner = bool(status.get("pending_dataset"))
+        except (requests.Timeout, requests.ConnectionError) as e:
+            self.logger.warning(f"Failed to fetch network info: {type(e).__name__}")
+            status_label, detail = self._classify_exception_failure(e)
+            info = self._network_info_error_div("Network Info", status_label, detail)
+            banner = dash.no_update
         except Exception as e:
             self.logger.warning(f"Failed to fetch network info: {e}")
-            return html.Div(
+            info = self._network_info_error_div("Network Info", "Error", f"{type(e).__name__}: {e}")
+            banner = dash.no_update
+        details = self._update_network_info_details_handler(n=n)
+        health = self._update_stream_health_handler(n)
+        return info, details, health, banner
+
+    def _update_network_info_handler(self, n=None):
+        """Update network information panel from API.
+
+        Stage 2 note: the dedicated slow-lane callback that invoked this merged
+        into ``update_system_panels`` (one shared ``/api/status`` fetch); this
+        single-panel form remains the directly invocable unit-test surface and
+        delegates its rendering to the same ``_render_network_info``.
+        """
+        try:
+            url = self._api_url("/api/status")
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
+            if not response.ok:
+                self.logger.warning(f"Status API returned {response.status_code}")
+                status_label, detail = self._classify_response_failure(response)
+                return self._network_info_error_div("Network Info", status_label, detail)
+            return self._render_network_info(response.json())
+        except (requests.Timeout, requests.ConnectionError) as e:
+            self.logger.warning(f"Failed to fetch network info: {type(e).__name__}")
+            status_label, detail = self._classify_exception_failure(e)
+            return self._network_info_error_div("Network Info", status_label, detail)
+        except Exception as e:
+            self.logger.warning(f"Failed to fetch network info: {e}")
+            return self._network_info_error_div("Network Info", "Error", f"{type(e).__name__}: {e}")
+
+    @staticmethod
+    def _dataset_shortfall_note_children(status):
+        """A warning block for the Network Info panel when the run is on a partial dataset, else ``[]``.
+
+        Reads cascor's ``dataset_shortfall`` annotation (``None`` when the producer delivered in
+        full). The ``summary`` is cascor's own sentence -- one formatter, so the panel cannot
+        disagree with the training log -- and it already says who accepted the shortfall.
+        """
+        shortfall = status.get("dataset_shortfall") if isinstance(status, dict) else None
+        if not isinstance(shortfall, dict) or not shortfall:
+            return []
+        summary = shortfall.get("summary") or "the producer could not deliver the dataset in full"
+        dataset_id = shortfall.get("dataset_id")
+        children = [html.Strong("Partial dataset. "), html.Span(f"{summary}.")]
+        if dataset_id:
+            children.extend([html.Br(), html.Small(f"dataset_id {dataset_id}", className="text-muted")])
+        return [dbc.Alert(children, color="warning", className="mb-2 py-2"), html.Hr()]
+
+    def _render_network_info(self, status):
+        """Render the Network Information panel body from an ``/api/status`` payload."""
+        # N6/C2b: derive each counter's display against its correct
+        # denominator from the reconciled status surface (see
+        # ``_counter_displays``): Hidden Units carries the reconciled
+        # ``max_hidden_units`` cap, Iteration is the true growth iteration
+        # (``grow_iteration``/``grow_max``, previously mislabelled as the
+        # unit count), and the phase-qualified within-pass Epoch renders
+        # "N / M (phase)".
+        counters = self._counter_displays(status)
+
+        return html.Div(
+            self._dataset_shortfall_note_children(status)
+            + [
+                html.P(
+                    [
+                        html.Strong("Input Nodes: "),
+                        str(status.get("input_size", 0)),
+                    ]
+                ),
+                html.P(
+                    [
+                        html.Strong("Hidden Units: "),
+                        counters["hidden_units"],
+                    ]
+                ),
+                html.P(
+                    [
+                        html.Strong("Output Nodes: "),
+                        str(status.get("output_size", 0)),
+                    ]
+                ),
+                html.Hr(),
+                html.P(
+                    [
+                        html.Strong("Training Step: "),
+                        counters["step"],
+                    ]
+                ),
+                html.P(
+                    [
+                        html.Strong("Epoch (in phase): "),
+                        counters["phase_epoch"],
+                    ]
+                ),
+                html.P(
+                    [
+                        html.Strong("Iteration: "),
+                        counters["iteration"],
+                    ]
+                ),
+                html.P(
+                    [
+                        html.Strong("Training Phase: "),
+                        status.get("current_phase", "Idle"),
+                    ]
+                ),
+                html.P(
+                    [
+                        html.Strong("Network Connected: "),
+                        "Yes" if status.get("network_connected") else "No",
+                    ]
+                ),
+                html.P(
+                    [
+                        html.Strong("Monitoring: "),
+                        ("Active" if status.get("monitoring_active") else "Inactive"),
+                    ]
+                ),
+            ]
+            + (
                 [
-                    html.P("Unable to fetch network info", style={"color": "orange"}),
-                    html.P([html.Small(f"Error: {str(e)}")], style={"color": "gray"}),
+                    html.Hr(),
+                    html.P([html.Strong("Dataset: "), str(status.get("dataset_name", ""))]),
                 ]
+                + ([html.P([html.Strong("Version: "), str(status["dataset_version"])])] if status.get("dataset_version") else [])
+                if status.get("dataset_name")
+                else []
             )
+        )
 
     def _update_network_info_details_handler(self, n=None):
         """Update detailed network information panel from API."""
         try:
             url = self._api_url("/api/network/stats")
-            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Network stats API returned {response.status_code}")
-                return html.Div("Unable to fetch network stats", style={"color": "orange"})
+                status_label, detail = self._classify_response_failure(response)
+                return self._network_info_error_div("Network Stats", status_label, detail)
             stats = response.json()
 
             # Use the metrics_panel helper to create the detailed table
             return self.metrics_panel._create_network_info_table(stats)
+        except (requests.Timeout, requests.ConnectionError) as e:
+            self.logger.warning(f"Failed to fetch network stats: {type(e).__name__}")
+            status_label, detail = self._classify_exception_failure(e)
+            return self._network_info_error_div("Network Stats", status_label, detail)
         except Exception as e:
             self.logger.warning(f"Failed to fetch network stats: {e}")
-            return html.Div(
-                [
-                    html.P("Unable to fetch detailed network info", style={"color": "orange", "fontSize": "14px"}),
-                    html.P([html.Small(f"Error: {str(e)}")], style={"color": "gray", "fontSize": "12px"}),
-                ]
-            )
+            return self._network_info_error_div("Network Stats", "Error", f"{type(e).__name__}: {e}")
 
-    def _update_metrics_store_handler(self, n=None, display_mode_state=None, ws_status=None):
-        """Fetch metrics history from API and update metrics panel store.
+    def _append_ws_metrics_store_handler(self, ws_metrics_buffer=None, display_mode_state=None, current_metrics=None):
+        """N8 (posture O3): accumulate drained WS metrics onto the store.
 
-        Phase B polling toggle: when WS bridge reports connected, skip REST poll
-        to eliminate redundant traffic. Falls back to 1 Hz (every 10th tick at
-        100ms fast interval) when WS is disconnected (D-05).
-
-        GAP-WS-16: the gate now also requires ``metricsReceived`` so REST
-        keeps polling during the brief window between socket-open and the
-        first metrics frame (initial_metrics burst on fresh connect, or a
-        live metrics broadcast on resume). Without this, a tab that
-        connects while training is mid-stream sees an empty chart for one
-        polling interval.
+        Runs only when ``ws-metrics-buffer`` changes — i.e. the clientside drain
+        actually produced events (a WS frame arrived). Appends them onto the
+        last-known-good store, bounded to the display window so the figure rebuild +
+        tiles track a scrolling live window (matching the REST window fetch's
+        ``limit=window_size``). Because it is triggered ONLY by real WS pushes it can
+        never starve the store when the stream is quiet — the liveness-gated poll
+        (``_update_metrics_store_handler``) is the sole writer then. History-analysis
+        modes (``full`` / ``hidden_units``) opt out: they are non-real-time and want
+        the complete REST history, which a WS window would truncate.
         """
-        settings = get_settings()
-        if settings.ws_bridge_enabled and ws_status and ws_status.get("connected") and ws_status.get("metricsReceived"):
+        mode_state = display_mode_state if isinstance(display_mode_state, dict) else {}
+        if mode_state.get("mode", "window") in ("full", "hidden_units"):
+            return dash.no_update
+        ws_events = [e for e in ((ws_metrics_buffer or {}).get("events") or []) if isinstance(e, dict)]
+        if not ws_events:
+            return dash.no_update
+        window_size = mode_state.get("window_size", 100) or 100
+        merged = (current_metrics if isinstance(current_metrics, list) else []) + ws_events
+        return merged[-window_size:] if len(merged) > window_size else merged
+
+    @staticmethod
+    def _metrics_store_trigger(request):
+        """Map a paced request onto the trigger ``_update_metrics_store_handler`` gates on.
+
+        The handler's full-history modulus gate skips only INTERVAL-driven fetches, and still
+        fetches at once on a display-mode switch or the mount call. Under request/ack pacing
+        the feeder's one trigger is the request store, so the request's ``reason`` says which
+        it was: ``"tick"`` and ``"stale"`` read as the lane's tick, ``"extra"`` (the display
+        mode changed) as the mode store, and the layout's seq-0 request (no reason) as mount.
+        """
+        reason = request.get("reason") if isinstance(request, dict) else None
+        if reason in ("tick", "stale"):
+            return f"{_METRICS_STORE_INTERVAL}.n_intervals"
+        if reason == "extra":
+            return "metrics-panel-display-mode-store.data"
+        return ""
+
+    def _update_metrics_store_handler(self, n=None, display_mode_state=None, current_metrics=None, trigger=None, ws_live=None):
+        """Liveness-gated REST poll for the metrics-panel store (N8 posture O1).
+
+        Fires on every fast-interval tick (the interval is the sole trigger, so the
+        callback can never be starved — see the callback's Dash-model note on why the
+        WS buffer must NOT be an Input here). Two regimes:
+
+        1. **Demoted while WS-primary is live** — when the metrics stream is fresh
+           (``ws_live``) in the real-time ``window`` view, return ``dash.no_update``:
+           the REST fetch is SKIPPED and the ``allow_duplicate`` append callback
+           (``_append_ws_metrics_store_handler``) owns the store from the WS buffer.
+        2. **Liveness-gated REST fallback (O1)** — when the stream is stale/absent
+           (``ws_live`` falsy — the default for every non-WS caller, so the N1 poll is
+           preserved exactly), poll ``/api/metrics/history``. ``ws_live`` is derived
+           from the bridge's frame-arrival age (never the sticky ``metricsReceived``
+           flag), so a stream that goes quiet flips stale within
+           ``WS_LIVENESS_WINDOW_MS`` and this poll re-engages on the next tick — the
+           anti-sticky guarantee that killed the N1-era starvation.
+           ``full`` / ``hidden_units`` (history-analysis) modes are NOT WS-gated: they
+           always poll (Q6: polling is correct for non-real-time surfaces).
+
+        Guard rails (both validation-mandated, plan §8 rows 1-2):
+
+        - **Empty-guard**: when the fetch is empty or errored AND the store
+          already holds data, return ``dash.no_update`` so the last-known-good
+          store survives — cascor clears metrics post-run, and a 1 Hz poll would
+          otherwise blank a completed run's charts. A genuinely empty fetch with an
+          empty store passes through unchanged.
+        - **Bounded full-history fetch**: ``full`` / ``hidden_units`` display
+          modes fetch the complete history (``limit=0`` → up to 10k rows), so
+          interval-driven ticks only refetch every
+          ``FULL_HISTORY_POLL_TICK_MODULUS``-th tick (~0.2 Hz); a display-mode
+          switch (or a direct/mount invocation) still fetches immediately.
+        """
+        mode_state = display_mode_state if isinstance(display_mode_state, dict) else {}
+        mode = mode_state.get("mode", "window")
+        full_fetch = mode in ("full", "hidden_units")
+
+        # N8 poll demotion (O1): while WS-primary is live in the real-time window view,
+        # skip the REST fetch — the append callback carries the store. History-analysis
+        # modes ignore the gate and always poll.
+        if ws_live and not full_fetch:
+            return dash.no_update
+
+        # F-CANOPY-035: the tick id moved from ``fast-update-interval`` to this poll's own
+        # lane. Both are accepted so a direct handler call written against either spelling
+        # still exercises the gate; the live wiring only ever sends the latter.
+        if full_fetch and trigger and trigger.startswith((_METRICS_STORE_INTERVAL, "fast-update-interval")) and n and n % DashboardConstants.FULL_HISTORY_POLL_TICK_MODULUS != 0:
             return dash.no_update
 
         try:
-            mode_state = display_mode_state or {"mode": "window", "window_size": 100}
-            mode = mode_state.get("mode", "window")
-            if mode == "full" or mode == "hidden_units":
-                limit = 0  # fetch all
-            else:
-                limit = mode_state.get("window_size", 100)
+            limit = 0 if full_fetch else mode_state.get("window_size", 100)  # 0 = fetch all
             url = self._api_url(f"/api/metrics/history?limit={limit}")
-            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Metrics history API returned {response.status_code}")
-                return []
+                return dash.no_update if current_metrics else []
             payload = response.json()
 
             # Normalize to a list for the Store (handle different API envelopes)
@@ -3312,6 +8136,10 @@ class DashboardManager:
                 metrics = []
 
             self.logger.debug(f"Fetched {len(metrics)} metrics from {url}")
+
+            if not metrics and current_metrics:
+                # Empty-guard: preserve the last-known-good store (see docstring).
+                return dash.no_update
 
             # Phase B: Track REST polling bandwidth (P0 motivator proof metric)
             if not hasattr(self, "_rest_bytes_gauge"):
@@ -3334,52 +8162,209 @@ class DashboardManager:
                 except (TypeError, AttributeError):
                     pass
 
+            # Stage 2 (design §13 row 4): suppress the no-op rewrite. Post-run /
+            # idle, this poll re-fetches an IDENTICAL history list every fast tick
+            # and every write re-fires 4+ consumers — the tiles, the model-class
+            # styles, the replay UI and the 8-output topology renderer (whose own
+            # comment marks this chained-store class as Stage 2). Identical fetch
+            # ⇒ ``no_update``; anything new lands exactly as before.
+            if isinstance(current_metrics, list) and metrics == current_metrics:
+                return dash.no_update
+
             return metrics
         except Exception as e:
             self.logger.warning(f"Failed to fetch metrics from API: {type(e).__name__}: {e}")
-            return []
+            return dash.no_update if current_metrics else []
 
-    def _update_topology_store_handler(self, n=None, active_tab=None):
-        """Fetch topology from API and update network visualizer store."""
+    def _update_topology_store_handler(self, n=None, active_tab=None, current=None):
+        """Fetch topology from API and update network visualizer store.
+
+        Failure paths deliberately return ``dash.no_update`` (same last-known-good
+        posture as the metrics handler's N1 empty-guard) so a transient upstream
+        error never blanks the network view.
+
+        F-CANOPY-039 — identity suppression. ``current`` is the store's existing
+        value, threaded from the callback as State. When the freshly fetched
+        topology is canonically identical to it we return ``dash.no_update``
+        instead of rewriting the store, because **Dash fires every consumer of a
+        store on any write, identical or not**, and this poll rewrote a
+        byte-identical 7,059 B payload every 5 s.
+
+        That rewrite is what starved the topology rebuild. It put THREE triggers
+        on ``update_network_graph`` every cycle —
+        ``tabpoll-topology.n_intervals`` + ``…-topology-store.data`` +
+        ``…-depth-slider.value`` (the slider's clientside bounds-sync at
+        ``network_visualizer.py:706`` re-emits ``value`` on every store write,
+        unchanged or not) — so each 1.5-5 s rebuild was superseded before its
+        response could be applied, and canopy#537's ``len(ctx.triggered) == 1``
+        short-circuit could never fire. Suppressing the identical write leaves a
+        bare tick, which that guard then catches.
+
+        ``current=None`` (the default, and what the handler's direct unit tests
+        pass) means "no previous value" and never suppresses.
+        """
         # Only update if topology tab is active
         if active_tab != "topology":
             return dash.no_update
 
+        def _suppress_if_unchanged(fetched):
+            """Return ``no_update`` when ``fetched`` matches the store's value.
+
+            Compared canonically (sorted keys) rather than by ``==`` so that a
+            re-serialised payload with reordered dict keys still counts as
+            unchanged. Any comparison failure falls through to the write — a
+            suppressed real update is far worse than a redundant one.
+            """
+            if current is None:
+                return fetched
+            try:
+                if json.dumps(current, sort_keys=True, default=str) == json.dumps(fetched, sort_keys=True, default=str):
+                    return dash.no_update
+            except (TypeError, ValueError):
+                # Deliberately swallowed: an unserialisable payload means we
+                # cannot PROVE the two are identical, and the safe answer to
+                # "are these the same?" is "assume not". Falling through to the
+                # write below costs a redundant rebuild; suppressing on a failed
+                # comparison would drop a real topology update and freeze the
+                # panel — the exact failure this guard exists to fix.
+                pass
+            return fetched
+
         try:
             url = self._api_url("/api/topology")
-            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Topology API returned {response.status_code}")
                 return dash.no_update
             result = response.json()
             # Unwrap success envelope: {"status": "success", "data": {...}}
             topology = result.get("data", result) if isinstance(result, dict) else result
+            # Graph-format payloads (the demo backend emits them directly) pass
+            # through UNTRANSFORMED — critically, without importing the service
+            # adapter: ``backend.cascor_service_adapter`` hard-imports
+            # ``juniper_cascor_client``, which is the optional [juniper-cascor]
+            # extra and legitimately absent in demo-only installs (and the CI UI
+            # env). Pre-fix, that ModuleNotFoundError landed in the broad except
+            # below → silent ``no_update`` on every dispatch → a permanently
+            # empty Network Topology panel in any client-less env (the
+            # 2026-07-12..14 UI-leg red; regression pin:
+            # test_topology_store_fetches_on_tab_switch_with_ws_silent).
+            if isinstance(topology, dict) and "input_units" in topology:
+                self.logger.debug(f"Fetched topology from {url}: {len(topology.get('connections', []))} connections (graph-format passthrough)")
+                return _suppress_if_unchanged(topology)
             # Transform CasCor weight-oriented format to graph-oriented format
             # expected by NetworkVisualizer (input_units/output_units/connections)
             from backend.cascor_service_adapter import CascorServiceAdapter
 
             topology = CascorServiceAdapter._transform_topology(topology)
             self.logger.debug(f"Fetched topology from {url}: {len(topology.get('connections', []))} connections")
-            return topology
+            return _suppress_if_unchanged(topology)
         except Exception as e:
             self.logger.warning(f"Failed to fetch topology from API: {type(e).__name__}: {e}")
             return dash.no_update
 
-    def _update_raw_topology_store_handler(self, n=None, active_tab=None, view_mode=None):
-        """Fetch raw weight-oriented topology from API for heatmap view (OF-1)."""
-        if active_tab != "topology" or view_mode != "weight_matrix":
+    def _update_raw_topology_store_handler(self, n=None, active_tab=None, display_mode=None, current=None):
+        """Fetch raw weight-oriented topology from API for heatmap view (OF-1).
+
+        F-CANOPY-040: the parameter is ``display_mode``, not ``view_mode``. It is
+        compared against ``"weight_matrix"``, which is a value of
+        ``network-visualizer-display-mode`` (Node Graph / Weight Matrix) — NOT of
+        ``network-visualizer-view-mode`` (2D / 3D). The callback used to pass the
+        latter, so this gate was always true and the heatmap never had data.
+        The name is part of the fix: it is what made the mis-wiring look right.
+
+        F-CANOPY-043 — identity suppression, the same guard canopy#542 gave
+        ``-topology-store``. Fixing F-CANOPY-040 turned a poll that had returned
+        ``dash.no_update`` on EVERY tick since it was written into a live 5 s
+        writer, and ``-raw-topology-store`` is an ``Input`` of the topology
+        rebuild. Dash fires every consumer of a store on any write, identical or
+        not, so an unchanged weight payload re-triggered the 1.5-31 s rebuild
+        every 5 s — and dash-renderer's ``getUniqueIdentifier`` hashes a
+        callback's inputs/outputs/state and NOT its trigger, so the re-request
+        retires the IN-FLIGHT rebuild rather than queueing behind it. That is
+        F-CANOPY-039's starvation mechanism, re-created by the fix for -040 on a
+        different store. A saturated 40-unit network is exactly where it bites:
+        the payload is large, unchanging, and the rebuild is slowest.
+
+        ``current=None`` (the default, and what this handler's direct unit tests
+        pass) means "no previous value" and never suppresses.
+        """
+        if active_tab != "topology" or display_mode != "weight_matrix":
             return dash.no_update
 
         try:
             url = self._api_url("/api/topology/raw")
-            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Raw topology API returned {response.status_code}")
                 return dash.no_update
-            return response.json()
+            fetched = response.json()
+            if current is not None:
+                try:
+                    if json.dumps(current, sort_keys=True, default=str) == json.dumps(fetched, sort_keys=True, default=str):
+                        return dash.no_update
+                except (TypeError, ValueError):
+                    # Deliberately swallowed, same posture as the -topology-store
+                    # guard: an unserialisable payload means we cannot PROVE the two
+                    # are identical, and the safe answer to "are these the same?" is
+                    # "assume not". Falling through costs a redundant rebuild;
+                    # suppressing on a failed comparison would drop a real weight
+                    # update and freeze the heatmap.
+                    pass
+            return fetched
         except Exception as e:
             self.logger.warning(f"Failed to fetch raw topology from API: {type(e).__name__}: {e}")
             return dash.no_update
+
+    def _update_workers_store_handler(self, n=None, active_tab=None):
+        """Fetch the worker roster (+ aggregate stats) and update the worker store (N10, U-5).
+
+        Tab-gated to the Workers tab and empty-guarded: any upstream error or a
+        non-OK roster response returns ``dash.no_update`` (same last-known-good
+        posture as the topology/metrics N1 handlers) so a transient hiccup never
+        blanks the roster. The proxy (``GET /api/v1/workers/list``) already annotates
+        each worker's ``kind`` and a ``local_reported`` honesty flag — cascor models
+        remote WS workers only, so ``local_reported`` is ``False`` in service mode and
+        the panel renders an honest "local not individually reported" note. Aggregate
+        stats are best-effort: the roster table renders even if ``/stats`` is down.
+        """
+        if active_tab != "workers":
+            return dash.no_update
+
+        try:
+            list_resp = requests.get(self._api_url("/api/v1/workers/list"), timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
+            if not list_resp.ok:
+                self.logger.warning(f"Workers list API returned {list_resp.status_code}")
+                return dash.no_update
+            list_data = list_resp.json()
+        except Exception as e:
+            self.logger.warning(f"Failed to fetch worker list from API: {type(e).__name__}: {e}")
+            return dash.no_update
+
+        if not isinstance(list_data, dict):
+            return dash.no_update
+
+        workers = list_data.get("workers", []) or []
+        payload = {
+            "workers": workers,
+            "count": list_data.get("count", len(workers)),
+            "local_reported": bool(list_data.get("local_reported", False)),
+            "error": list_data.get("error"),
+            "stats": {},
+        }
+
+        # Aggregate stats are non-fatal — cascor computes ``stale`` from its own
+        # heartbeat-timeout, so we prefer its numbers over recomputing client-side.
+        try:
+            stats_resp = requests.get(self._api_url("/api/v1/workers/stats"), timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
+            if stats_resp.ok:
+                stats_data = stats_resp.json()
+                if isinstance(stats_data, dict):
+                    payload["stats"] = stats_data
+        except Exception as e:
+            self.logger.debug(f"Worker stats fetch failed (non-fatal): {type(e).__name__}: {e}")
+
+        return payload
 
     def _update_dataset_store_handler(self, n=None, active_tab=None):
         """Fetch dataset from API and update dataset plotter store."""
@@ -3389,7 +8374,7 @@ class DashboardManager:
 
         try:
             url = self._api_url("/api/dataset")
-            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Dataset API returned {response.status_code}")
                 return dash.no_update
@@ -3400,8 +8385,15 @@ class DashboardManager:
             self.logger.warning(f"Failed to fetch dataset from API: {type(e).__name__}: {e}")
             return dash.no_update
 
-    def _update_boundary_store_handler(self, n=None, active_tab=None, resolution=None):
-        """Fetch decision boundary from API and update decision boundary store."""
+    def _update_boundary_store_handler(self, n=None, active_tab=None, resolution=None, current_data=None):
+        """Fetch decision boundary from API and update decision boundary store.
+
+        Stage 2 lever 3 (design §13 row 5): ``no_update`` when the fetched mesh
+        equals the store's current value — post-run this feeder re-fetched an
+        IDENTICAL mesh every tick, and each rewrite re-fired the panel's render
+        chain. A resolution change or a network change produces a different
+        payload and lands exactly as before.
+        """
         # Only update if boundaries tab is active
         if active_tab != "boundaries":
             return dash.no_update
@@ -3410,30 +8402,40 @@ class DashboardManager:
             url = self._api_url("/api/decision_boundary")
             if resolution is not None:
                 url = f"{url}?resolution={resolution}"
-            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Decision boundary API returned {response.status_code}")
                 return dash.no_update
             boundary_data = response.json()
+            if current_data is not None and boundary_data == current_data:
+                return dash.no_update
             self.logger.debug(f"Fetched decision boundary from {url}")
             return boundary_data
         except Exception as e:
             self.logger.warning(f"Failed to fetch decision boundary from API: {type(e).__name__}: {e}")
             return dash.no_update
 
-    def _update_boundary_dataset_store_handler(self, n=None, active_tab=None):
-        """Sync dataset data to decision boundary component."""
+    def _update_boundary_dataset_store_handler(self, n=None, active_tab=None, current_data=None):
+        """Sync dataset data to decision boundary component.
+
+        Stage 2 lever 3 (design §13 row 5): ``no_update`` when the fetched
+        dataset equals the store's current value — the full sample arrays were
+        being rewritten identically every tick while the dataset never changed.
+        """
         # Only update if boundaries tab is active
         if active_tab != "boundaries":
             return dash.no_update
 
         try:
             url = self._api_url("/api/dataset")
-            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Boundary dataset API returned {response.status_code}")
                 return dash.no_update
-            return response.json()
+            dataset = response.json()
+            if current_data is not None and dataset == current_data:
+                return dash.no_update
+            return dataset
         except Exception as e:
             self.logger.warning(f"Failed to fetch dataset for boundary from API: {type(e).__name__}: {e}")
             return dash.no_update
@@ -3447,6 +8449,7 @@ class DashboardManager:
         reset_clicks=None,
         last_click=None,
         button_states=None,
+        oneshot_start_body=None,
         **kwargs,
     ):
         """Handle training control button clicks with debouncing and optimistic UI."""
@@ -3481,17 +8484,66 @@ class DashboardManager:
         new_button_states = button_states.copy()
         new_button_states[command] = {"disabled": True, "loading": True, "timestamp": current_time}
 
+        detail = ""
         try:
             url = self._api_url(f"/api/train/{command}")
-            response = requests.post(url, timeout=DashboardConstants.DASHBOARD_POST_TIMEOUT)
+            # A1-iv-3c: a one-shot (recurrence) Start forwards the dataset-ref body so the fit has
+            # a generator + registry params; every other command and the live (cascor/demo) Start
+            # send no body, so the route sees ``body=None`` and their start path is unchanged.
+            post_kwargs = {"timeout": DashboardConstants.DASHBOARD_POST_TIMEOUT, "headers": internal_api_headers()}
+            if command == "start" and oneshot_start_body:
+                post_kwargs["json"] = oneshot_start_body
+            response = requests.post(url, **post_kwargs)
             response.raise_for_status()
             success = True
         except Exception as e:
-            self.logger.warning(f"Training control failed: {type(e).__name__}: {e}")
             success = False
+            detail = self._extract_training_error_detail(e)
+            self.logger.warning(f"Training control '{command}' failed: {detail}")
             # Re-enable button on error
             new_button_states[command] = {"disabled": False, "loading": False, "timestamp": 0}
-        return {"last": trigger, "ts": current_time, "success": success}, new_button_states
+        # ``command`` + ``detail`` feed the training-control-outcome-alert render
+        # callback so a rejected command surfaces a dismissable danger alert
+        # instead of silently bouncing the button back. See
+        # notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md.
+        return {"last": trigger, "ts": current_time, "success": success, "command": command, "detail": detail}, new_button_states
+
+    @staticmethod
+    def _extract_training_error_detail(exc: Exception) -> str:
+        """Best-effort human-readable reason for a failed training-control POST.
+
+        Prefers the backend's structured error message (cascor returns
+        ``{"error": {"message": ...}}``; after cascor#332 a rejected Start names
+        the specific reason, e.g. "Training cannot be started: Training data not
+        provided"), then the raw response body, then the exception string. Never
+        raises — error surfacing must not itself fail.
+        """
+        response = getattr(exc, "response", None)
+        if response is not None:
+            status = getattr(response, "status_code", None)
+            message = None
+            try:
+                payload = response.json()
+                if isinstance(payload, dict):
+                    err = payload.get("error")
+                    if isinstance(err, dict):
+                        message = err.get("message") or err.get("detail")
+                    message = message or payload.get("message") or payload.get("detail")
+            except Exception:
+                message = None
+            if not message:
+                try:
+                    body = (response.text or "").strip()
+                    message = body[:300] if body else None
+                except Exception:
+                    message = None
+            if message and status is not None:
+                return f"HTTP {status}: {message}"
+            if message:
+                return str(message)
+            if status is not None:
+                return f"HTTP {status}"
+        return f"{type(exc).__name__}: {exc}"
 
     def _update_last_click_handler(self, action=None):
         """Update last button click timestamp for debouncing."""
@@ -3499,17 +8551,322 @@ class DashboardManager:
             return {"button": action["last"], "timestamp": action.get("ts", 0)}
         return dash.no_update
 
-    def _update_button_appearance_handler(self, button_states=None):
-        """Update button states (disabled/loading) with visual feedback."""
+    # Human-readable labels for the outcome alert (matches the button captions).
+    _TRAINING_COMMAND_LABELS = {"start": "Start", "pause": "Pause", "stop": "Stop", "resume": "Resume", "reset": "Reset"}
+
+    def _surface_training_control_outcome_handler(self, action=None):
+        """Render a dismissable danger alert when a training-control command failed.
+
+        Both transports feed this single callback via the ``training-control-action``
+        store: the server-side REST handler writes ``success``/``command``/``detail``
+        directly, and the Phase D clientside JS writes the real *async* WS/REST
+        outcome into the same store via ``dash_clientside.set_props`` once the command
+        resolves. On success (or no action yet) we clear the surface — a later
+        successful command dismisses any stale error — because the optimistic button
+        state and the status broadcast already convey success. Only *failures* get an
+        alert. See notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md.
+        """
+        if not action or action.get("success", True):
+            return None
+        command = action.get("command") or ""
+        label = self._TRAINING_COMMAND_LABELS.get(command, command.capitalize() or "Command")
+        detail = (action.get("detail") or "").strip() or "the backend rejected the request."
+        if command == "start" and self._is_start_fresh_required_refusal(action.get("detail_full") or detail):
+            return self._start_fresh_required_alert(action.get("detail_full") or detail)
+        return dbc.Alert(
+            [html.Strong(f"{label} failed. "), html.Span(detail)],
+            color="danger",
+            dismissable=True,
+            duration=8000,
+        )
+
+    @staticmethod
+    def _is_start_fresh_required_refusal(detail) -> bool:
+        """True when a Start refusal is cascor's "the dataset is wider than the network" class (F1)."""
+        return START_FRESH_REQUIRED_MARKER in str(detail or "")
+
+    @staticmethod
+    def _start_fresh_required_alert(detail):
+        """F1: the refusal names its remedy, and the control that applies it.
+
+        cascor refuses a Start that would continue a network narrower than the staged dataset,
+        before loading anything, so the dataset stays staged. That keeps the pending-dataset
+        banner up, and its "Stop & Restart with new dataset" button opens the modal whose
+        "Start fresh" toggle is the remedy. The alert names both controls. It also states what
+        did NOT change: the results on screen are still the previous run's, and no dataset was
+        loaded under them.
+
+        It is not auto-dismissed, unlike the generic failure alert: it carries an instruction,
+        and eight seconds is shorter than reading it. A later successful command clears it, as
+        it clears every failure alert. cascor's own sentence, which names the two shapes, follows
+        in muted text.
+        """
+        shapes = str(detail or "").split(START_FRESH_REQUIRED_MARKER, 1)[-1].strip().split(". ", 1)[0].strip()
+        body = [
+            html.Strong("Start refused: the staged dataset is wider than the current network. "),
+            html.Span("Start continues the current network, and Start cannot widen a network to more features or outputs. To train on this dataset, use "),
+            html.Strong("Stop & Restart with new dataset"),
+            html.Span(" and turn on "),
+            html.Strong("Start fresh"),
+            html.Span(". Nothing was loaded: the dataset is still staged, and the results shown are still the previous run's."),
+        ]
+        if shapes:
+            body.append(html.Div(f"{shapes.rstrip('.')}.", className="small text-muted mt-1"))
+        return dbc.Alert(body, color="danger", dismissable=True)
+
+    # ------------------------------------------------------------------
+    # Partial-data contract: the three-way prompt (accept / drop / fail).
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_dataset_shortfall_refusal(detail) -> bool:
+        """True when a Start refusal is the producer's "cannot deliver in full" class.
+
+        cascor#633 opens the message with ``DATASET_SHORTFALL_REFUSAL_MARKER``; the fixed
+        sentence is matched too so the prompt works against a cascor that predates the
+        token. An ordinary outage ("juniper-data fetch failed: connection refused") carries
+        neither, and must not open a prompt whose every option re-sends the request.
+        """
+        text = str(detail or "")
+        return DATASET_SHORTFALL_REFUSAL_MARKER in text or DATASET_SHORTFALL_REFUSAL_SENTENCE in text
+
+    @staticmethod
+    def _producer_detail_from_refusal(detail: str) -> str:
+        """Pull juniper-data's own sentence (affected symbols, row counts) out of cascor's refusal."""
+        marker = "Producer detail: "
+        if marker not in detail:
+            return ""
+        tail = detail.split(marker, 1)[1]
+        for stop in (" To accept it,", " The resulting dataset"):
+            if stop in tail:
+                tail = tail.split(stop, 1)[0]
+        return tail.strip()
+
+    def _open_dataset_shortfall_prompt_handler(self, action=None):
+        """Open the three-way prompt when a Start failed because the dataset is partial.
+
+        Returns ``(modal_is_open, body_children, context)``. Any other action -- a success, a
+        different command, an outage -- leaves the modal alone (``no_update``), so a later
+        unrelated outcome does not close a prompt the operator has not answered.
+        """
+        if not action or action.get("success", True) or action.get("command") != "start":
+            return dash.no_update, dash.no_update, dash.no_update
+        detail_full = (action.get("detail_full") or action.get("detail") or "").strip()
+        if not self._is_dataset_shortfall_refusal(detail_full):
+            return dash.no_update, dash.no_update, dash.no_update
+        self.logger.warning("Start refused for a partial dataset; opening the three-way prompt: %s", detail_full[:200])
+        producer_detail = self._producer_detail_from_refusal(detail_full)
+        body = [
+            html.P(
+                [
+                    html.Strong("juniper-data could not produce the staged dataset in full, and this run has not accepted a partial one. "),
+                    html.Span("Training did not start. The staged dataset change is still in place, so decide what to do with it."),
+                ]
+            ),
+        ]
+        if producer_detail:
+            body.append(html.P(producer_detail, className="text-muted", style={"fontSize": "0.85rem", "whiteSpace": "pre-wrap"}))
+        body.append(
+            html.Ul(
+                [
+                    html.Li([html.Strong("Accept broken rows and continue"), " — train on the partial dataset as delivered. Rows the producer could not resolve carry placeholder values; the run, its metrics and its results are permanently annotated as partial."]),
+                    html.Li([html.Strong("Drop broken rows and continue"), " — remove the affected symbols and train on the rest; the run is annotated as partial and the record says what was dropped."]),
+                    html.Li([html.Strong("Fail the load"), " — cancel the staged change, deselect this dataset, and choose another."]),
+                ]
+            )
+        )
+        return True, body, {"detail": detail_full, "ts": time.time()}
+
+    def _fetch_pending_dataset_config(self):
+        """The staged dataset config cascor still holds, in cascor's dialect, or ``None``."""
+        try:
+            resp = requests.get(self._api_url("/api/status"), timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+        except (requests.RequestException, ValueError) as exc:
+            self.logger.warning("Could not read the pending dataset config: %s", exc)
+            return None
+        pending = data.get("pending_dataset") if isinstance(data, dict) else None
+        return dict(pending) if isinstance(pending, dict) and pending else None
+
+    @staticmethod
+    def _restage_payload_with_policy(pending, choice):
+        """Translate cascor's staged config back into an ``/api/stage_dataset`` body carrying the opt-in.
+
+        ``nn_dataset_params`` (the generic channel) is where the policy fields live -- they are
+        juniper-data request parameters, and the adapter forwards that dict verbatim as cascor's
+        ``params``. The typed spiral fields map back by name; anything unknown is dropped
+        rather than guessed.
+        """
+        payload = {}
+        for cascor_key, canopy_key in _CASCOR_TO_CANOPY_DATASET_KEYS.items():
+            value = pending.get(cascor_key)
+            if value is not None:
+                payload[canopy_key] = value
+        params = dict(pending.get("params") or {})
+        params.update(choice)
+        payload["nn_dataset_params"] = params
+        return payload
+
+    def _post_stage_dataset(self, payload):
+        """POST /api/stage_dataset; returns ``(ok, detail)``."""
+        try:
+            resp = requests.post(self._api_url("/api/stage_dataset"), json=payload, timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT, headers=internal_api_headers())
+        except requests.RequestException as exc:
+            return False, f"backend unreachable: {exc}"
+        if resp.status_code == 200:
+            self.logger.info("Re-staged dataset with the partial-data choice: %s", payload)
+            return True, ""
+        return False, (resp.text[:300] if resp.text else f"HTTP {resp.status_code}")
+
+    def _post_train_start(self):
+        """POST /api/train/start the way the server-side control handler does; returns ``(started, detail)``."""
+        try:
+            resp = requests.post(self._api_url("/api/train/start"), timeout=DashboardConstants.DASHBOARD_POST_TIMEOUT, headers=internal_api_headers())
+            resp.raise_for_status()
+            return True, ""
+        except Exception as exc:
+            detail = self._extract_training_error_detail(exc)
+            self.logger.warning("Start after the partial-data choice failed: %s", detail)
+            return False, detail
+
+    def _cancel_pending_dataset_via_api(self):
+        """DELETE /api/cancel_pending_dataset; returns ``(ok, detail)``."""
+        try:
+            resp = requests.delete(self._api_url("/api/cancel_pending_dataset"), timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT, headers=internal_api_headers())
+        except requests.RequestException as exc:
+            return False, f"backend unreachable: {exc}"
+        if resp.status_code == 200:
+            return True, ""
+        return False, (resp.text[:300] if resp.text else f"HTTP {resp.status_code}")
+
+    def _resolve_dataset_shortfall_handler(self, triggered_id=None, clicks=(None, None, None), context=None):
+        """Carry out the operator's answer to the three-way prompt.
+
+        Returns ``(modal_is_open, outcome_alert, control_action, dataset_dropdown_value,
+        pending_banner_is_open)``.
+
+        * accept / drop: re-stage the config cascor still holds (``pending_dataset`` on
+          ``/api/status``) with ``allow_truncation=true`` and the chosen ``incomplete_rows``,
+          then Start again. The outcome is written into ``training-control-action`` so the
+          existing alert renders a second failure -- and, if that failure is ANOTHER shortfall
+          refusal (drop can empty the universe), the prompt re-opens on it.
+        * fail: cancel the staged change and clear the dataset selection (``⊥``), so Start
+          and Apply are gated until the operator picks another dataset.
+
+        ``context`` is the prompt's own record of the refusal; it is informational here (the
+        config to re-stage is read back from cascor, which is the authority on what is staged).
+        """
+        idle = (dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update)
+        if not triggered_id or not any(clicks):
+            return idle
+        if triggered_id == DATASET_SHORTFALL_FAIL_BUTTON:
+            ok, detail = self._cancel_pending_dataset_via_api()
+            if ok:
+                self.logger.info("Partial-data prompt: load failed by operator choice; staged change discarded and dataset deselected")
+                alert = dbc.Alert(
+                    [html.Strong("Dataset load cancelled. "), html.Span("The staged change was discarded and the dataset deselected — choose another dataset.")],
+                    color="info",
+                    dismissable=True,
+                    duration=10000,
+                )
+                return False, alert, dash.no_update, None, False
+            alert = dbc.Alert([html.Strong("Could not cancel the staged dataset: "), html.Span(detail)], color="danger", dismissable=True, duration=10000)
+            return False, alert, dash.no_update, dash.no_update, dash.no_update
+        choice = DATASET_SHORTFALL_OPTIONS.get(triggered_id)
+        if choice is None:
+            return idle
+        pending = self._fetch_pending_dataset_config()
+        if not pending:
+            alert = dbc.Alert(
+                [html.Strong("Nothing to re-stage. "), html.Span("cascor no longer holds a staged dataset change; apply the dataset again, then Start.")],
+                color="warning",
+                dismissable=True,
+                duration=10000,
+            )
+            return False, alert, dash.no_update, dash.no_update, dash.no_update
+        payload = self._restage_payload_with_policy(pending, choice)
+        ok, detail = self._post_stage_dataset(payload)
+        if not ok:
+            alert = dbc.Alert([html.Strong("Could not re-stage the dataset with your choice: "), html.Span(detail)], color="danger", dismissable=True, duration=10000)
+            return False, alert, dash.no_update, dash.no_update, dash.no_update
+        started, start_detail = self._post_train_start()
+        action = {
+            "last": triggered_id,
+            "ts": time.time(),
+            "success": started,
+            "command": "start",
+            "transport": "rest",
+            "detail": (start_detail or "")[:300],
+            "detail_full": (start_detail or "")[:4000],
+        }
+        if not started:
+            # The training-control outcome alert renders the failure from ``action``.
+            return False, dash.no_update, action, dash.no_update, dash.no_update
+        label = "accepting" if choice["incomplete_rows"] == "accept" else "dropping"
+        alert = dbc.Alert(
+            [html.Strong("Training started on the partial dataset, "), html.Span(f"{label} the broken rows. The run is annotated as partial (status bar and Network Info).")],
+            color="warning",
+            dismissable=True,
+            duration=12000,
+        )
+        return False, alert, action, dash.no_update, dash.no_update
+
+    def _update_button_appearance_handler(self, button_states=None, model_key=None, dataset_value=None, model_state=None):
+        """Update button states (disabled/loading) with visual feedback.
+
+        A1-iv-5 / D8 Train-gate: when the selected model is non-live (``coming_soon`` /
+        ``experimental`` / ``deprecated`` / ``broken``), the Start button is force-disabled
+        regardless of training state — a non-live model is shown and selectable for inspection but
+        not trainable (design §5.7). The pause / stop / resume / reset controls follow
+        ``button-states`` unchanged. Live models (the common path) are entirely unaffected.
+
+        **X5 / §4.8 — Start also requires a dataset, and a model.** Before the ✕ shipped, the
+        dataset could not be empty, so Start was gated on the model alone. That is no longer safe:
+        at ``⊥`` a ``recurrence`` start fails closed with a 409, but a ``cascor`` start sent the
+        bare POST and trained on whatever was *last staged* while the sidebar showed no dataset —
+        the same silent misattribution X1 closed on the model axis. ``model_is_trainable`` cannot
+        carry this: it answers ``True`` for ``None`` (``model_registry.py:245``), by design, so a
+        cleared model would leave Start live too. Both axes are therefore checked here, in the one
+        callback that already owns ``start-button.disabled`` — no racy second writer.
+
+        Returning ``disabled`` for **Apply Dataset** from the same place is deliberate for the same
+        reason: it is the other control that would otherwise commit a ``⊥``.
+
+        **N5 / §4.4 — Start also requires the selected model to be the one that would run.** A
+        complete, compatible, lifecycle-live selection passes every gate above and can still be
+        *inactive*: with ``recurrence_service_url`` unset, selecting Recurrence records the
+        selection over the cascor/demo backend and answers 200. canopy#592 made the sidebar say
+        "NOT ACTIVE"; this callback never saw the payload, so Start stayed enabled and filed a
+        cascor run under Recurrence (LMU). ``model_state`` is that payload (``model-state-store``),
+        and provider disagreement disables Start here -- the same predicate the label uses, so the
+        two cannot diverge again. ``None`` (never round-tripped) is unknown, not disagreement. The
+        server refuses the run as well (``main._selection_inactive_reason``) for anything that
+        bypasses this control.
+        """
 
         def get_button_props(cmd, label, icon):
-            state = button_states.get(cmd, {"disabled": False, "loading": False, "timestamp": 0})
+            state = (button_states or {}).get(cmd, {"disabled": False, "loading": False, "timestamp": 0})
             disabled = state.get("disabled", False)
             loading = state.get("loading", False)
             text = f"⏳ {label}..." if loading else f"{icon} {label}"
             return disabled, text
 
         start_disabled, start_text = get_button_props("start", "Start Training", "▶")
+        # D8 Train-gate: a non-live model can be selected (to inspect) but not trained.
+        if not model_is_trainable(model_key):
+            start_disabled = True
+        # X5 / §4.8: an incomplete selection is not trainable on either axis.
+        dataset_missing = selection_axis_unset(dataset_value)
+        if dataset_missing or selection_axis_unset(model_key):
+            start_disabled = True
+        # N5 / §4.4: a selected model that the live backend does not serve is not startable -- nor
+        # stageable (below): X6's cascor branch was a rank-3 dataset staged toward
+        # cascade-correlation from exactly this state.
+        selection_inactive = self._selection_is_live(model_state) is False
+        if selection_inactive:
+            start_disabled = True
         pause_disabled, pause_text = get_button_props("pause", "Pause Training", "⏸")
         stop_disabled, stop_text = get_button_props("stop", "Stop Training", "⏹")
         resume_disabled, resume_text = get_button_props("resume", "Resume Training", "⏯")
@@ -3526,10 +8883,25 @@ class DashboardManager:
             resume_text,
             reset_disabled,
             reset_text,
+            # N9: Apply Dataset cannot be honoured at ``⊥`` — disable it at the control rather
+            # than discovering it at the backend, where an empty body is destructive (see the
+            # guards in ``_apply_dataset_handler``). N5: nor over a backend the selection does
+            # not target — ``/api/stage_dataset`` refuses that too, for anything that bypasses
+            # this control.
+            dataset_missing or selection_inactive,
         )
 
     def _handle_button_timeout_and_acks_handler(self, action=None, n_intervals=None, button_states=None, **kwargs):
-        """Re-enable buttons after the dashboard timeout based on their individual timestamps."""
+        """Re-enable a loading button on its success ack, or after the dashboard timeout.
+
+        F-CANOPY-003: the "and_acks" half never existed -- only the interval-driven
+        timeout sweep (``DASHBOARD_TIMEOUT_THRESHOLD``) ever released a button, and
+        under callback congestion that sweep lands 30 s to minutes late. An ack is a
+        ``training-control-action`` write with ``success`` True, a ``command`` and a
+        ``ts`` not older than that button's click timestamp (a stale ack from an
+        earlier click must not release a newer one). The timeout stays as the
+        backstop.
+        """
         if not button_states:
             return dash.no_update
 
@@ -3537,11 +8909,22 @@ class DashboardManager:
         new_states = {}
         changed = False
 
+        acked_cmd = None
+        acked_ts = 0.0
+        if isinstance(action, dict) and action.get("success") and action.get("command") and action.get("ts") is not None:
+            acked_cmd = action.get("command")
+            acked_ts = float(action.get("ts") or 0)
+
         for cmd, state in button_states.items():
             timestamp = state.get("timestamp", 0)
             is_loading = state.get("loading", False)
 
             if is_loading and timestamp > 0:
+                if cmd == acked_cmd and acked_ts >= timestamp:
+                    new_states[cmd] = {"disabled": False, "loading": False, "timestamp": 0}
+                    changed = True
+                    self.logger.debug(f"Button {cmd} released by its success ack")
+                    continue
                 elapsed = current_time - timestamp
                 # Reset after the configured timeout threshold
                 if elapsed > DashboardConstants.DASHBOARD_TIMEOUT_THRESHOLD:
@@ -3568,8 +8951,14 @@ class DashboardManager:
         return True, False
 
     def _toggle_cn_selection_inputs_handler(self, selection_mode):
-        """Enable/disable sub-inputs based on candidate selection mode."""
-        if selection_mode == "top_tier":
+        """Enable/disable sub-inputs based on candidate selection mode.
+
+        F-CANOPY-022: ``top_tier`` is the pre-fix value of this radio and is
+        still accepted here so a persisted ``applied-params-store`` (or a
+        browser session open across the upgrade) keeps gating correctly. The
+        shipped option value is now ``top``, matching cascor's schema.
+        """
+        if selection_mode in ("top", "top_tier"):
             return False, True
         elif selection_mode == "random":
             return True, False
@@ -3625,6 +9014,9 @@ class DashboardManager:
         nn_optimizer_type=None,
         nn_activation_function=None,
         applied=None,
+        # D-2: appended AFTER ``applied`` so every existing positional caller
+        # (the wrapper passes it by keyword) keeps its argument positions.
+        nn_init_output_weights=None,
     ):
         """Enable Apply button when parameters differ from applied values."""
         if not applied:
@@ -3653,12 +9045,27 @@ class DashboardManager:
             (nn_patience, "nn_patience", "int"),
             (nn_spiral_rot, "nn_spiral_rotations", "float"),
             (nn_spiral_num, "nn_spiral_number", "int"),
-            (nn_dataset_elem, "nn_dataset_elements", "int"),
-            (nn_dataset_noise, "nn_dataset_noise", "float"),
+            # F-CANOPY-018 (2 of 3): ``nn_dataset_elements`` / ``nn_dataset_noise`` are
+            # canopy-local and travel on /api/stage_dataset, which the Apply button does
+            # not call — #2b dropped them from the set_params payload for that reason.
+            # Comparing them here was wrong twice over: it latched the form dirty after
+            # every apply (see below), and it lit Apply for an edit Apply cannot make.
+            # NB ``nn_spiral_rotations`` / ``nn_spiral_number`` above ride BOTH payloads,
+            # so they stay compared.
             (cn_pool_size, "cn_pool_size", "int"),
             (cn_corr_thresh, "cn_correlation_threshold", "float"),
             (cn_selected, "cn_selected_candidates", "int"),
-            (cn_training_complete, "cn_training_complete", "str"),
+            # F-CANOPY-018 (3 of 3): ``cn_training_complete`` is deliberately NOT compared.
+            # It is a read-only status flag that #2b dropped from the /api/set_params
+            # payload, so ``_apply_parameters_handler``'s store write cannot carry it.
+            # The MOUNT seed (``_load_current_params_handler``) does carry it, which is
+            # why the form is clean on load and permanently dirty afterwards: the first
+            # successful apply replaces the seeded store with a params dict that has no
+            # such key, ``applied.get(...)`` returns None against a real radio value,
+            # and the dirty check latches True for the rest of the session. That is what
+            # overwrote the "Parameters applied" toast with "⚠️ Unsaved changes" ~900 ms
+            # later, and why the form never returned to clean without a reload.
+            # A key that can never be applied can never be unsaved.
             (cn_training_iter, "cn_training_iterations", "int"),
             (cn_training_conv_thresh, "cn_training_convergence_threshold", "float"),
             (cn_patience, "cn_patience", "int"),
@@ -3669,6 +9076,9 @@ class DashboardManager:
             (nn_output_epochs, "nn_output_epochs", "int"),
             (nn_optimizer_type, "nn_optimizer_type", "str"),
             (nn_activation_function, "nn_activation_function_name", "str"),
+            # D-2: the apply handler stores this key (``_choice(...)`` above the
+            # payload), so the dirty set can finally compare it.
+            (nn_init_output_weights, "nn_init_output_weights", "str"),
         ]
 
         has_changes = False
@@ -3717,56 +9127,138 @@ class DashboardManager:
         cn_cand_selection,
         cn_top_cands,
         cn_random_cands,
-        nn_output_epochs=None,
-        nn_optimizer_type=None,
-        nn_activation_function=None,
+        nn_output_epochs=_UNSET,
+        nn_optimizer_type=_UNSET,
+        nn_activation_function=_UNSET,
+        nn_init_output_weights=_UNSET,
+        nn_model=None,
     ):
-        """Apply parameters to backend and update applied store."""
+        """Apply parameters to backend and update applied store.
+
+        ``nn_model`` (FR9 / canopy#368) is the model this tab believes is selected. It rides on the
+        REQUEST only (``/api/set_params`` refuses a stale one with 409) and is deliberately kept out
+        of ``params``, which becomes the applied-params store: a routing key there would read as an
+        applied parameter to the dirty tracker and to the read-back verification below.
+        """
         if not n_clicks:
             return dash.no_update, dash.no_update
 
         def checkbox_to_bool(v):
             return "enabled" in (v or [])
 
+        # ── F-CANOPY-017 ──────────────────────────────────────────────────
+        # A numeric ``dbc.Input`` whose current content fails HTML5 validity
+        # (out of range, or — before the step sweep below — off the step grid)
+        # delivers ``None`` as its Dash State. ``None`` therefore means "this
+        # widget holds no committed value", NEVER "restore the factory
+        # default". Substituting ``TrainingConstants.DEFAULT_*`` for it, as
+        # this dict did, silently replaced the operator's live backend value
+        # with a hardcoded constant: typing 0.0733 into the learning rate and
+        # clicking Apply POSTed 0.01, which is neither the typed value nor the
+        # 0.0789 that was live. The dirty tracker had already lit the Apply
+        # button and shown "Unsaved changes", so it read as a pending edit.
+        #
+        # Refuse loudly instead. Omitting the keys is not an option: the
+        # backend contract is the full form (see the 27-key body in
+        # src/tests/ui/test_param_roundtrip_visible.py), so a partial payload
+        # risks a wholesale 422.
+        # ``_UNSET`` (the four late-added kwargs' default) means "this caller did
+        # not supply the argument at all" — a signature contract, distinct from
+        # ``None``, which means "the widget delivered no value". Only the latter
+        # is the defect above; an omitted kwarg keeps its documented default.
+        invalid_fields: list[str] = []
+
+        def _num(value, label, cast, default=None):
+            if value is _UNSET:
+                return default
+            if value is None:
+                invalid_fields.append(label)
+                return None
+            try:
+                return cast(value)
+            except (TypeError, ValueError):
+                invalid_fields.append(label)
+                return None
+
+        def _choice(value, default):
+            return default if value is _UNSET or not value else value
+
         params = {
-            "nn_max_iterations": int(nn_max_iter) if nn_max_iter is not None else TrainingConstants.DEFAULT_MAX_GROWTH_ITERATIONS,
-            "nn_max_total_epochs": int(nn_max_epochs) if nn_max_epochs is not None else TrainingConstants.DEFAULT_TRAINING_EPOCHS,
-            "nn_learning_rate": float(nn_lr) if nn_lr is not None else TrainingConstants.DEFAULT_LEARNING_RATE,
-            "nn_max_hidden_units": int(nn_max_hu) if nn_max_hu is not None else TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS,
+            "nn_max_iterations": _num(nn_max_iter, "Maximum Iterations", int),
+            "nn_max_total_epochs": _num(nn_max_epochs, "Maximum Total Epochs", int),
+            "nn_learning_rate": _num(nn_lr, "Learning Rate", float),
+            "nn_max_hidden_units": _num(nn_max_hu, "Maximum Hidden Units", int),
             "nn_multi_node_layers": checkbox_to_bool(nn_multi_node),
             "nn_growth_trigger": nn_growth_trigger or TrainingConstants.DEFAULT_GROWTH_TRIGGER,
-            "nn_growth_preset_epochs": int(nn_growth_epochs) if nn_growth_epochs is not None else TrainingConstants.DEFAULT_PRESET_EPOCHS,
-            "nn_growth_convergence_threshold": float(nn_growth_conv_thresh) if nn_growth_conv_thresh is not None else TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD,
-            "nn_patience": int(nn_patience) if nn_patience is not None else TrainingConstants.DEFAULT_PATIENCE,
-            "nn_spiral_rotations": float(nn_spiral_rot) if nn_spiral_rot is not None else TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
-            "nn_spiral_number": int(nn_spiral_num) if nn_spiral_num is not None else TrainingConstants.DEFAULT_SPIRAL_NUMBER,
-            "nn_dataset_elements": int(nn_dataset_elem) if nn_dataset_elem is not None else TrainingConstants.DEFAULT_DATASET_ELEMENTS,
-            "nn_dataset_noise": float(nn_dataset_noise) if nn_dataset_noise is not None else TrainingConstants.DEFAULT_DATASET_NOISE,
-            "cn_pool_size": int(cn_pool_size) if cn_pool_size is not None else TrainingConstants.DEFAULT_CANDIDATE_POOL_SIZE,
-            "cn_correlation_threshold": float(cn_corr_thresh) if cn_corr_thresh is not None else TrainingConstants.DEFAULT_CANDIDATE_CORRELATION_THRESHOLD,
-            "cn_selected_candidates": int(cn_selected) if cn_selected is not None else TrainingConstants.DEFAULT_SELECTED_CANDIDATES,
-            "cn_training_complete": cn_training_complete or TrainingConstants.DEFAULT_CN_TRAINING_COMPLETE,
-            "cn_training_iterations": int(cn_training_iter) if cn_training_iter is not None else TrainingConstants.DEFAULT_CANDIDATE_TRAINING_ITERATIONS,
-            "cn_training_convergence_threshold": float(cn_training_conv_thresh) if cn_training_conv_thresh is not None else TrainingConstants.DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD,
-            "cn_patience": int(cn_patience) if cn_patience is not None else TrainingConstants.DEFAULT_CN_PATIENCE,
+            "nn_growth_preset_epochs": _num(nn_growth_epochs, "Growth: Number of Epochs", int),
+            "nn_growth_convergence_threshold": _num(nn_growth_conv_thresh, "Growth: Convergence Threshold", float),
+            "nn_patience": _num(nn_patience, "Patience", int),
+            "nn_spiral_rotations": _num(nn_spiral_rot, "Spiral Rotations", float),
+            "nn_spiral_number": _num(nn_spiral_num, "Spiral Number", int),
+            # #2b: nn_dataset_* are canopy-local and travel on /api/stage_dataset
+            # (Issue #4 cold-swap), so they're no longer duplicated onto the
+            # set_params payload (they were never mapped to cascor from here).
+            "cn_pool_size": _num(cn_pool_size, "Candidate Pool Size", int),
+            "cn_correlation_threshold": _num(cn_corr_thresh, "Correlation Threshold", float),
+            "cn_selected_candidates": _num(cn_selected, "Selected Candidates", int),
+            # #2b: cn_training_complete is a read-only status flag, not an
+            # editable parameter — dropped from the set_params payload.
+            "cn_training_iterations": _num(cn_training_iter, "Candidate Training Iterations", int),
+            "cn_training_convergence_threshold": _num(cn_training_conv_thresh, "Candidate Convergence Threshold", float),
+            "cn_patience": _num(cn_patience, "Candidate Patience", int),
             "cn_multi_candidate": checkbox_to_bool(cn_multi_cand),
             "cn_candidate_selection": cn_cand_selection,
-            "cn_top_candidates": int(cn_top_cands) if cn_top_cands is not None else TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT,
-            "cn_random_candidates": int(cn_random_cands) if cn_random_cands is not None else TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT,
-            "nn_output_epochs": int(nn_output_epochs) if nn_output_epochs is not None else TrainingConstants.DEFAULT_OUTPUT_EPOCHS,
-            "nn_optimizer_type": nn_optimizer_type or TrainingConstants.DEFAULT_OPTIMIZER_TYPE,
-            "nn_activation_function_name": nn_activation_function or TrainingConstants.DEFAULT_ACTIVATION_FUNCTION,
+            "cn_top_candidates": _num(cn_top_cands, "Top Candidates", int),
+            "cn_random_candidates": _num(cn_random_cands, "Random Candidates", int),
+            "nn_output_epochs": _num(nn_output_epochs, "Output Epochs (per pass)", int, TrainingConstants.DEFAULT_OUTPUT_EPOCHS),
+            "nn_optimizer_type": _choice(nn_optimizer_type, TrainingConstants.DEFAULT_OPTIMIZER_TYPE),
+            "nn_activation_function_name": _choice(nn_activation_function, TrainingConstants.DEFAULT_ACTIVATION_FUNCTION),
+            "nn_init_output_weights": _choice(nn_init_output_weights, TrainingConstants.DEFAULT_INIT_OUTPUT_WEIGHTS),
         }
+
+        if invalid_fields:
+            preview = ", ".join(invalid_fields[:5]) + ("…" if len(invalid_fields) > 5 else "")
+            self.logger.warning(f"Apply refused — {len(invalid_fields)} field(s) hold no valid value: {invalid_fields}")
+            return dash.no_update, f"Nothing applied — {len(invalid_fields)} field(s) hold no valid value: {preview}. Correct them and Apply again."
+
+        # N5 (I-4) / N3b: apply through the shared clamp → POST → applied/skipped
+        # core so the params panel and the N3b restart modal go through identical
+        # machinery (CascorPatchBounds clamp, ``_compose_apply_toast``, verbatim
+        # rejection detail) — never a duplicated bounds/toast path.
+        return self._apply_params_via_backend(params, nn_model=nn_model)
+
+    def _apply_params_via_backend(self, params, *, nn_model=None):
+        """Shared apply core: clamp to cascor's PATCH bounds, POST /api/set_params
+        (with the retry/backoff budget), return ``(applied_or_no_update, toast)``.
+
+        Behind BOTH ``_apply_parameters_handler`` (the params panel) and the N3b
+        restart modal's granular param apply, so N5's clamp (``CascorPatchBounds``),
+        the applied/skipped toast (``_compose_apply_toast``), and the verbatim
+        rejection detail (``_extract_apply_error_detail``) are called into once,
+        never duplicated. ``applied`` is the clamped params dict on success
+        (truthy) or ``dash.no_update`` on any failure; ``toast`` always carries the
+        human-readable result / reason.
+
+        ``nn_model`` (FR9 / canopy#368) rides on the request body only, never in ``params`` --
+        see ``_apply_parameters_handler``. The restart modal does not send it yet.
+        """
+        # N5 (I-4): defensively clamp submitted values to cascor's PATCH bounds
+        # (mirrored in ``CascorPatchBounds``) before the POST, so a single
+        # out-of-range field cannot wholesale-422 the whole form the way cascor's
+        # pre-C2b epochs_max default did. Any clamp is surfaced in the toast
+        # rather than silently changing the operator's intent.
+        params, clamp_violations = CascorPatchBounds.clamp_params(params)
 
         max_retries = DashboardConstants.DASHBOARD_SET_PARAMS_MAX_RETRIES
         last_error = None
+        body = {**params, "nn_model": nn_model} if nn_model else params
         for attempt in range(max_retries):
             try:
-                response = requests.post(self._api_url("/api/set_params"), json=params, timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT)
+                response = requests.post(self._api_url("/api/set_params"), json=body, timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT, headers=internal_api_headers())
                 if response.status_code == 200:
                     # Verify parameters were applied by reading back state
                     try:
-                        verify_resp = requests.get(self._api_url("/api/state"), timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT)
+                        verify_resp = requests.get(self._api_url("/api/state"), timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT, headers=internal_api_headers())
                         if verify_resp.status_code == 200:
                             backend_state = verify_resp.json()
                             mismatched = []
@@ -3779,13 +9271,41 @@ class DashboardManager:
                     except Exception as ve:
                         self.logger.debug(f"Parameter verification skipped: {ve}")
                     self.logger.info(f"Parameters applied (attempt {attempt + 1}): {params}")
-                    return params, "Parameters applied"
+                    # N5 (I-4 / T3 + behavior 1): compose the toast from the
+                    # adapter's own ``skipped`` (canopy keys with no cascor
+                    # mapping — the pre-existing C1a "not yet supported" format),
+                    # cascor's C2a ``applied``/``skipped_detail`` partition (what
+                    # the live network took vs. declined, with the reason), and any
+                    # client-side clamp note. See ``_compose_apply_toast``.
+                    return params, self._compose_apply_toast(response, params, clamp_violations)
                 elif response.status_code == 429:
-                    self.logger.warning("Rate limited (429) — returning error to client")
+                    # #2a: rate limited. Back off and retry within the existing
+                    # retry budget instead of returning immediately. Honor the
+                    # limiter's ``Retry-After`` (security.py sets it to the
+                    # window reset in seconds) but cap the sleep — this runs on
+                    # a Dash callback thread and the advertised value may be the
+                    # full limiter window. After #345 exempted canopy's own
+                    # self-calls, a 429 here means a genuine downstream limit,
+                    # so this is a thin resilience net, not a hot path.
+                    if attempt < max_retries - 1:
+                        sleep_s = min(
+                            self._parse_retry_after(response.headers.get("Retry-After")),
+                            DashboardConstants.DASHBOARD_RETRY_AFTER_MAX_SLEEP_S,
+                        )
+                        self.logger.warning(f"Rate limited (429) on attempt {attempt + 1}/{max_retries}; backing off {sleep_s:.2f}s before retry")
+                        time.sleep(sleep_s)
+                        continue
+                    self.logger.warning("Rate limited (429) — retries exhausted")
                     return dash.no_update, "Rate limited — please try again in a few seconds"
                 else:
+                    # N5 (I-4 / T1): carry the upstream rejection detail verbatim
+                    # (truncated) into the toast instead of the bare status code —
+                    # the evening-502s hid cascor's specific bound-violation reason
+                    # (e.g. ``epochs_max le=1_000_000``) behind "Failed to apply
+                    # (502)". Same pattern N4's snapshot toast now uses.
+                    detail = self._extract_apply_error_detail(response)
                     self.logger.warning(f"Failed to apply: {response.status_code} {response.text}")
-                    return dash.no_update, f"Failed to apply ({response.status_code})"
+                    return dash.no_update, detail
             except requests.exceptions.Timeout:
                 last_error = "Request timed out"
                 self.logger.warning(f"Timeout on attempt {attempt + 1}/{max_retries}")
@@ -3797,13 +9317,159 @@ class DashboardManager:
         self.logger.error(f"All {max_retries} parameter apply attempts failed: {last_error}")
         return dash.no_update, f"Error: {str(last_error)[:40]}"
 
+    @staticmethod
+    def _compose_apply_toast(response, params, clamp_violations):
+        """Build the ``params-status`` toast for a 200 apply (N5, I-4 / T3).
+
+        Renders, in order of specificity:
+
+          * the adapter's own ``skipped`` (canopy keys with no cascor mapping —
+            "not yet supported by the backend", the pre-existing §1.5 C1a
+            format), else
+          * cascor's C2a ``skipped_detail`` (``{key, reason}`` — ``not-updatable``
+            / ``no-such-attribute`` / ``null-value``: what the live network
+            declined and why; ``applied`` gives the took-count), else
+          * the plain success line.
+
+        A client-side clamp note (N5 behavior 1) is appended in every case. All
+        three field reads are type-guarded because existing tests patch
+        ``requests.post`` with a bare ``MagicMock`` whose ``.json()`` may return a
+        Mock; only concretely-typed values are used, so a stubbed response falls
+        through to "Parameters applied".
+        """
+        body = None
+        try:
+            body = response.json()
+        except (ValueError, AttributeError):
+            body = None
+
+        adapter_skipped: list = []
+        applied: list = []
+        skipped_detail: list = []
+        if isinstance(body, dict):
+            cand = body.get("skipped")
+            if isinstance(cand, list) and all(isinstance(k, str) for k in cand):
+                adapter_skipped = cand
+            cand = body.get("applied")
+            if isinstance(cand, list) and all(isinstance(k, str) for k in cand):
+                applied = cand
+            cand = body.get("skipped_detail")
+            if isinstance(cand, list) and all(isinstance(e, dict) and "key" in e for e in cand):
+                skipped_detail = cand
+
+        clamp_note = ""
+        if clamp_violations:
+            cparts = [f"{v['key']}→{v['clamped']}" for v in clamp_violations[:3]]
+            clamp_note = f" (clamped to bounds: {', '.join(cparts)}" + ("…" if len(clamp_violations) > 3 else "") + ")"
+
+        total = len(params)
+        if adapter_skipped:
+            applied_count = max(total - len(adapter_skipped), 0)
+            preview = ", ".join(adapter_skipped[:5]) + ("…" if len(adapter_skipped) > 5 else "")
+            return f"Applied {applied_count} of {total} parameter(s); {len(adapter_skipped)} not yet supported by the backend: {preview}{clamp_note}"
+        if skipped_detail:
+            applied_count = len(applied) if applied else max(total - len(skipped_detail), 0)
+            parts = [f"{e['key']} ({e.get('reason', 'skipped')})" for e in skipped_detail[:5]]
+            preview = ", ".join(parts) + ("…" if len(skipped_detail) > 5 else "")
+            return f"Applied {applied_count} parameter(s); {len(skipped_detail)} skipped: {preview}{clamp_note}"
+        return f"Parameters applied{clamp_note}"
+
+    @staticmethod
+    def _extract_apply_error_detail(response) -> str:
+        """Best-effort verbatim rejection reason for a non-2xx apply (N5, I-4 / T1).
+
+        Mirrors ``_extract_training_error_detail`` but reads a ``requests.Response``
+        (the apply flow holds a response, not an exception). Prefers a structured
+        backend message — canopy's ``/api/set_params`` 502 payload carries
+        ``{"error": "Backend rejected parameters: <cascor detail>"}`` and cascor's
+        own 4xx bodies use ``{"error": {"message": ...}}`` / ``detail`` — then
+        falls back to the raw body text (truncated), then the bare status code.
+        Never raises; error surfacing must not itself fail.
+        """
+        status = getattr(response, "status_code", None)
+        message = None
+        try:
+            payload = response.json()
+            if isinstance(payload, dict):
+                err = payload.get("error")
+                if isinstance(err, dict):
+                    message = err.get("message") or err.get("detail")
+                elif isinstance(err, str):
+                    message = err
+                message = message or payload.get("detail") or payload.get("message")
+        except Exception:
+            message = None
+        if not message:
+            try:
+                body = (response.text or "").strip()
+                message = body[:300] if body else None
+            except Exception:
+                message = None
+        if message and status is not None:
+            return f"Failed to apply (HTTP {status}): {str(message)[:300]}"
+        if message:
+            return f"Failed to apply: {str(message)[:300]}"
+        if status is not None:
+            return f"Failed to apply ({status})"
+        return "Failed to apply"
+
+    def _parse_retry_after(self, value):
+        """Parse a ``Retry-After`` header into an (uncapped) sleep in seconds.
+
+        canopy's rate limiter advertises ``Retry-After`` as integer
+        delta-seconds (see ``security.py``). Per RFC 9110 the header may also be
+        an HTTP-date; that form never originates from our own limiter, so we do
+        not honor it and fall back to ``DASHBOARD_RETRY_AFTER_FALLBACK_S``.
+        Missing, negative, or non-numeric values use the same fallback. The
+        caller is responsible for capping the result at
+        ``DASHBOARD_RETRY_AFTER_MAX_SLEEP_S``.
+        """
+        fallback = DashboardConstants.DASHBOARD_RETRY_AFTER_FALLBACK_S
+        if value is None:
+            return fallback
+        try:
+            seconds = float(value)
+        except (TypeError, ValueError):
+            return fallback
+        return seconds if seconds >= 0 else fallback
+
+    def _apply_in_flight_release(self, n_clicks):
+        """E-3: value for the apply callback's `apply-in-flight` Output.
+
+        Returns ``False`` (release the clamp) whenever the callback ran for a
+        real click — the apply attempt is over by the time the server callback
+        returns, success or failure alike. Returns ``dash.no_update`` for the
+        no-click guard path (nothing armed the clamp). This is the
+        server-side half of the E-3 fix; the clientside watchdog covers the
+        request-never-completed class.
+        """
+        return False if n_clicks else dash.no_update
+
+    def _update_stream_health_handler(self, n=None):
+        """N2: poll /api/stream_health into stream-health-store for the badge.
+
+        On fetch failure returns ``dash.no_update`` (the badge then falls back
+        to browser-socket truth alone — an unreachable canopy already turns
+        the badge red via the socket state).
+        """
+        try:
+            url = self._api_url("/api/stream_health")
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
+            if not response.ok:
+                self.logger.debug(f"Stream health API returned {response.status_code}")
+                return dash.no_update
+            return response.json()
+        except Exception as e:
+            self.logger.debug(f"Failed to fetch stream health: {e}")
+            return dash.no_update
+
     def _init_params_from_backend_handler(self, n, current_applied):
         """Initialize input values and applied params from backend on first load."""
-        NUM_OUTPUTS = 28
+        NUM_OUTPUTS = 29  # 27 inputs + the D-2 init-output-weights dropdown + the applied store
         if current_applied:
             return (dash.no_update,) * NUM_OUTPUTS
         try:
-            response = requests.get(self._api_url("/api/state"), timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            response = requests.get(self._api_url("/api/state"), timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if response.status_code == 200:
                 state = response.json()
                 nn_max_iter = state.get("nn_max_iterations", TrainingConstants.DEFAULT_MAX_GROWTH_ITERATIONS)
@@ -3833,6 +9499,9 @@ class DashboardManager:
                 nn_output_epochs = state.get("nn_output_epochs", TrainingConstants.DEFAULT_OUTPUT_EPOCHS)
                 nn_optimizer_type = state.get("nn_optimizer_type", TrainingConstants.DEFAULT_OPTIMIZER_TYPE)
                 nn_activation_function = state.get("nn_activation_function_name", TrainingConstants.DEFAULT_ACTIVATION_FUNCTION)
+                # D-2: seed the field the dirty tracker now compares; without it a
+                # fresh session read "unsaved changes" on mount.
+                nn_init_output_weights = state.get("nn_init_output_weights", TrainingConstants.DEFAULT_INIT_OUTPUT_WEIGHTS)
 
                 applied = {
                     "nn_max_iterations": nn_max_iter,
@@ -3862,7 +9531,36 @@ class DashboardManager:
                     "nn_output_epochs": nn_output_epochs,
                     "nn_optimizer_type": nn_optimizer_type,
                     "nn_activation_function_name": nn_activation_function,
+                    "nn_init_output_weights": nn_init_output_weights,
                 }
+
+                # N5 (I-4): clamp backend-seeded values into cascor's PATCH bounds
+                # (``CascorPatchBounds``) before they populate the form, so a
+                # backend that echoes an out-of-range default (the pre-C2b
+                # ``epochs_max``=1e11 class) can't seed a form that is doomed to a
+                # wholesale 422 on the first apply. Re-read the bounded locals so
+                # BOTH the visible inputs and the applied-params store carry the
+                # clamped (admissible) value — otherwise they would disagree and
+                # falsely show "unsaved changes".
+                applied, seed_violations = CascorPatchBounds.clamp_params(applied)
+                if seed_violations:
+                    self.logger.warning(f"init_params_from_backend: clamped {len(seed_violations)} backend-seeded value(s) to PATCH bounds: {seed_violations}")
+                    nn_max_iter = applied["nn_max_iterations"]
+                    nn_max_epochs = applied["nn_max_total_epochs"]
+                    nn_lr = applied["nn_learning_rate"]
+                    nn_max_hu = applied["nn_max_hidden_units"]
+                    nn_growth_conv_thresh = applied["nn_growth_convergence_threshold"]
+                    nn_patience = applied["nn_patience"]
+                    nn_output_epochs = applied["nn_output_epochs"]
+                    cn_pool_size = applied["cn_pool_size"]
+                    cn_corr_thresh = applied["cn_correlation_threshold"]
+                    cn_selected = applied["cn_selected_candidates"]
+                    cn_training_iter = applied["cn_training_iterations"]
+                    cn_training_conv_thresh = applied["cn_training_convergence_threshold"]
+                    cn_patience = applied["cn_patience"]
+                    cn_top_cands = applied["cn_top_candidates"]
+                    cn_random_cands = applied["cn_random_candidates"]
+
                 return (
                     nn_max_iter,
                     nn_max_epochs,
@@ -3891,6 +9589,7 @@ class DashboardManager:
                     nn_output_epochs,
                     nn_optimizer_type,
                     nn_activation_function,
+                    nn_init_output_weights,
                     applied,
                 )
         except Exception as e:

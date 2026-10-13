@@ -180,8 +180,8 @@ class TestConfigureSentryCoverage:
     def test_release_format(self):
         """Verify release string follows 'service@version' format."""
         with patch("sentry_sdk.init") as mock_init:
-            configure_sentry("https://key@sentry.io/0", "juniper-canopy", "0.4.0")
-            assert mock_init.call_args[1]["release"] == "juniper-canopy@0.4.0"
+            configure_sentry("https://key@sentry.io/0", "juniper-canopy", "0.5.0")
+            assert mock_init.call_args[1]["release"] == "juniper-canopy@0.5.0"
 
     def test_default_sample_rate_is_0_1(self):
         """Verify default traces_sample_rate is 0.1 (not 1.0)."""

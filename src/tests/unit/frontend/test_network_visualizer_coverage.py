@@ -506,7 +506,18 @@ class TestP21NewNodeHighlightState:
         assert result["state"] == "active"
 
     def test_highlight_clears_after_fade_duration(self, visualizer):
-        """Should clear highlight after 2-second fade completes."""
+        """Should clear the VISIBLE highlight after the 2-second fade completes.
+
+        M-TOPOLOGY-16 changed the representation, not the behaviour. This used to
+        assert ``result is None``; the fade path now returns a
+        ``{"node_id": None, "state": "done", "shown_unit": N}`` marker so the
+        dedupe memory outlives the highlight. Without that memory the new
+        whole-window scan re-detects the same addition on the next rebuild and
+        re-arms it forever.
+
+        So the contract is now asserted where it actually lives -- nothing renders
+        -- rather than on the sentinel's identity.
+        """
         # Assume FAST_UPDATE_INTERVAL_MS = 100, so 20 intervals = 2000ms
         from canopy_constants import DashboardConstants
 
@@ -526,7 +537,11 @@ class TestP21NewNodeHighlightState:
             selected_nodes=[],
             n_intervals=100 + intervals_for_2s + 1,  # Past fade duration
         )
-        assert result is None
+        # The highlight is no longer VISIBLE ...
+        assert (result or {}).get("node_id") is None
+        assert visualizer._calculate_highlight_properties(result, 100 + intervals_for_2s + 1) is None
+        # ... and the dedupe memory survived the fade.
+        assert result is not None and "shown_unit" in result
 
     def test_no_highlight_returns_none(self, visualizer):
         """Should return None when no highlight exists and no new unit."""

@@ -325,11 +325,15 @@ class TestWebSocketManagerUnit:
             # Call broadcast_sync from main thread
             manager.broadcast_sync({"type": "test"})
 
-            # Give time for broadcast to complete
-            time.sleep(0.2)
+            # Bounded poll, not a fixed sleep; the deadline only bounds the failure path.
+            deadline = time.monotonic() + 5.0
+            while not mock_websocket.send_json.await_count and time.monotonic() < deadline:
+                time.sleep(0.01)
 
-            # Should have been called
-            assert mock_websocket.send_json.called or manager.message_count > 0
+            # Delivered, not merely attempted: ``broadcast`` increments ``message_count`` BEFORE
+            # the send, so the old ``or manager.message_count > 0`` also passed when it raised.
+            mock_websocket.send_json.assert_awaited()
+            assert mock_websocket.send_json.await_args.args[0]["type"] == "test"
 
         finally:
             loop.call_soon_threadsafe(loop.stop)
@@ -374,11 +378,15 @@ class TestWebSocketManagerUnit:
             bg_thread.start()
             bg_thread.join(timeout=1)
 
-            # Give time for broadcast
-            time.sleep(0.2)
+            # Bounded poll, not a fixed sleep; the deadline only bounds the failure path.
+            deadline = time.monotonic() + 5.0
+            while not mock_websocket.send_json.await_count and time.monotonic() < deadline:
+                time.sleep(0.01)
 
-            # Should have been called
-            assert mock_websocket.send_json.called or manager.message_count > 0
+            # Delivered, not merely attempted: ``broadcast`` increments ``message_count`` BEFORE
+            # the send, so the old ``or manager.message_count > 0`` also passed when it raised.
+            mock_websocket.send_json.assert_awaited()
+            assert mock_websocket.send_json.await_args.args[0]["type"] == "test"
 
         finally:
             loop.call_soon_threadsafe(loop.stop)

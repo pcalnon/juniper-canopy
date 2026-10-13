@@ -145,3 +145,75 @@ class TestModuleLevelConvenience:
         assert MIN_TRAINING_EPOCHS == TrainingConstants.MIN_TRAINING_EPOCHS
         assert MAX_TRAINING_EPOCHS == TrainingConstants.MAX_TRAINING_EPOCHS
         assert DEFAULT_TRAINING_EPOCHS == TrainingConstants.DEFAULT_TRAINING_EPOCHS
+
+
+def _validate_candidate_pool_triple(s, t, r, p):
+    """Local mirror of cascor's post-merge (S, T, R, P) invariant.
+
+    Byte-for-byte the branch order of
+    ``juniper-cascor/src/api/lifecycle/manager.py:225`` (``_validate_candidate_
+    pool_triple``). canopy cannot import cascor, so the invariant is restated
+    here; the clientside ``cn-pool-triple-feedback`` validator mirrors the same
+    truth table, and live driving confirmed canopy's message text is identical
+    to cascor's rejection string.
+
+    Returns ``None`` when valid, else a human-readable violation.
+    """
+    if not (1 <= s <= p):
+        return f"selected_candidates {s} not in [1, candidate_pool_size={p}]"
+    if t < 0 or r < 0:
+        return f"top_candidates and random_candidates must be >= 0 (got T={t}, R={r})"
+    if t > s or r > s:
+        return f"each component must be <= selected_candidates (S={s}, T={t}, R={r})"
+    if t == 0 and r == 0:
+        return "top_candidates and random_candidates cannot both be 0"
+    if t == 0 and r != s:
+        return f"with top_candidates=0, random_candidates must equal S={s} (got R={r})"
+    if r == 0 and t != s:
+        return f"with random_candidates=0, top_candidates must equal S={s} (got T={t})"
+    if t > 0 and r > 0 and t + r != s:
+        return f"top_candidates+random_candidates must equal S={s} (got {t}+{r}={t + r})"
+    return None
+
+
+class TestShippedCandidateTripleIsValid:
+    """F-CANOPY-024 — the shipped (S, T, R) default must satisfy the invariant.
+
+    canopy shipped S=1, T=1, R=1, so T+R=2 != S=1 and the FIRST ``Apply
+    Parameters`` on a fresh dashboard always failed validation — client-side
+    and again at cascor, with the same sentence. The operator could not correct
+    it in place because T and R both ship ``disabled=True`` behind
+    ``cn-multi-candidate-checkbox``.
+    """
+
+    def test_shipped_defaults_satisfy_the_invariant(self):
+        violation = _validate_candidate_pool_triple(
+            TrainingConstants.DEFAULT_SELECTED_CANDIDATES,
+            TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT,
+            TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT,
+            TrainingConstants.DEFAULT_CANDIDATE_POOL_SIZE,
+        )
+        assert violation is None, f"shipped candidate triple is invalid: {violation}"
+
+    def test_the_pre_fix_triple_is_what_this_guards_against(self):
+        """Negative control — the shipped-before values must fail the mirror.
+
+        Without this, a mirror that silently accepted everything would make the
+        test above vacuous.
+        """
+        assert _validate_candidate_pool_triple(1, 1, 1, 100) is not None
+
+    def test_count_floors_match_cascor_field_bounds(self):
+        """cascor declares T and R as ``ge=0``.
+
+        (``juniper-cascor/src/api/models/training.py:161-162``, ``:329-330``.)
+        A canopy floor of 1 is stricter than the backend and makes the valid
+        single-strategy config (T=S, R=0) unreachable from the UI.
+        """
+        assert TrainingConstants.MIN_TOP_CANDIDATES_COUNT == 0
+        assert TrainingConstants.MIN_RANDOM_CANDIDATES_COUNT == 0
+
+    def test_defaults_are_within_their_own_bounds(self):
+        assert TrainingConstants.MIN_TOP_CANDIDATES_COUNT <= TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT <= TrainingConstants.MAX_TOP_CANDIDATES_COUNT
+        assert TrainingConstants.MIN_RANDOM_CANDIDATES_COUNT <= TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT <= TrainingConstants.MAX_RANDOM_CANDIDATES_COUNT
+        assert TrainingConstants.MIN_SELECTED_CANDIDATES <= TrainingConstants.DEFAULT_SELECTED_CANDIDATES <= TrainingConstants.MAX_SELECTED_CANDIDATES

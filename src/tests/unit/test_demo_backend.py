@@ -312,7 +312,7 @@ class TestPhase4TypedContract:
     """Phase 4 / P5-RC-18: DemoBackend conforms to the same TypedDict
     contract as ServiceBackend. Field-presence assertions only — TypedDicts
     erase to plain dicts at runtime.
-    See juniper-ml/notes/code-review/CANOPY_CASCOR_INTERFACE_ROADMAP_2026-04-08.md §6.1.
+    See juniper-ml/notes/code-review/JUNIPER_2026-04-08_JUNIPER-ECOSYSTEM_CANOPY-CASCOR-INTERFACE-ROADMAP.md §6.1.
     """
 
     def test_apply_params_returns_envelope(self, demo_backend):

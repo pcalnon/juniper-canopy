@@ -32,11 +32,12 @@ class TestDashboardManagerInitialization:
         # trunk-ignore(bandit/B101)
         assert isinstance(manager.app, dash.Dash)
         # trunk-ignore(bandit/B101)
-        # 15 core components: metrics, candidate_metrics, network, dataset,
+        # 16 core components: metrics, candidate_metrics, network, dataset,
         # decision, about, hdf5_snapshots, replay_player (Phase 6E B-6,
         # CAN-015f), network_editor (Phase 6E CAN-015h-5), redis, cassandra,
-        # parameters, tutorial, network_evolution, worker.
-        assert len(manager.components) == 15
+        # parameters, tutorial, network_evolution, worker,
+        # recurrence_request_preview (W1.2).
+        assert len(manager.components) == 16
 
     def test_init_with_full_config(self):
         """Test initialization with complete configuration."""
@@ -159,7 +160,7 @@ class TestDashboardManagerCallbacks:
 
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"status": "healthy", "latency_ms": 10}
+        mock_response.json.return_value = {"status": "ok", "latency_ms": 10}  # API-01: canopy now returns "ok"
         mock_get.return_value = mock_response
 
         config = {}

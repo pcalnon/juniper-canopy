@@ -93,7 +93,11 @@ class TestDemoMode:
         demo = DemoMode(update_interval=0.1)
         demo.start()
 
-        time.sleep(0.5)  # Let it generate some metrics
+        # Bounded poll, not a fixed sleep: the claim is "demo mode generates metrics", not "within
+        # 0.5 s on this runner". The deadline only bounds the failure path.
+        deadline = time.monotonic() + 5.0
+        while not demo.get_metrics_history() and time.monotonic() < deadline:
+            time.sleep(0.01)
 
         metrics = demo.get_metrics_history()
         assert len(metrics) > 0  # trunk-ignore(bandit/B101)
@@ -112,15 +116,18 @@ class TestDemoMode:
 class TestAPIEndpoints:
     """Test API endpoints return correct data."""
 
-    @pytest.fixture(scope="class")
-    def base_url(self):
-        """Base URL for API."""
-        return "http://localhost:8050"
+    # Renamed from a ``base_url`` fixture to a class attribute to avoid colliding
+    # with the session-scoped ``base_url`` fixture supplied by the
+    # ``pytest-base-url`` plugin (transitively pulled in by ``pytest-playwright``
+    # via the ``[ui-test]`` extra). The previous class-scoped fixture caused a
+    # ``ScopeMismatch`` at setup of every test below whenever pytest-base-url
+    # was installed.
+    api_url = "http://localhost:8050"
 
-    def test_health_endpoint(self, base_url):
+    def test_health_endpoint(self, auth_headers):
         """Test /api/health endpoint."""
         try:
-            response = requests.get(f"{base_url}/api/health", timeout=2)
+            response = requests.get(f"{self.api_url}/api/health", timeout=2, headers=auth_headers)
             if response.status_code >= 500:
                 pytest.skip(f"Server endpoint error: {response.status_code}")
             assert response.status_code == 200  # trunk-ignore(bandit/B101)
@@ -132,10 +139,10 @@ class TestAPIEndpoints:
         except requests.exceptions.ConnectionError:
             pytest.skip("Server not running")
 
-    def test_status_endpoint(self, base_url):
+    def test_status_endpoint(self, auth_headers):
         """Test /api/status endpoint."""
         try:
-            response = requests.get(f"{base_url}/api/status", timeout=2)
+            response = requests.get(f"{self.api_url}/api/status", timeout=2, headers=auth_headers)
             if response.status_code >= 500:
                 pytest.skip(f"Server endpoint error: {response.status_code}")
             assert response.status_code == 200  # trunk-ignore(bandit/B101)
@@ -148,10 +155,10 @@ class TestAPIEndpoints:
         except requests.exceptions.ConnectionError:
             pytest.skip("Server not running")
 
-    def test_metrics_endpoint(self, base_url):
+    def test_metrics_endpoint(self, auth_headers):
         """Test /api/metrics endpoint."""
         try:
-            response = requests.get(f"{base_url}/api/metrics?limit=10", timeout=2)
+            response = requests.get(f"{self.api_url}/api/metrics?limit=10", timeout=2, headers=auth_headers)
             if response.status_code >= 500:
                 pytest.skip(f"Server endpoint error: {response.status_code}")
             assert response.status_code == 200  # trunk-ignore(bandit/B101)
@@ -169,10 +176,10 @@ class TestAPIEndpoints:
         except requests.exceptions.ConnectionError:
             pytest.skip("Server not running")
 
-    def test_topology_endpoint(self, base_url):
+    def test_topology_endpoint(self, auth_headers):
         """Test /api/topology endpoint."""
         try:
-            response = requests.get(f"{base_url}/api/topology", timeout=2)
+            response = requests.get(f"{self.api_url}/api/topology", timeout=2, headers=auth_headers)
             if response.status_code >= 500:
                 pytest.skip(f"Server endpoint error: {response.status_code}")
             assert response.status_code == 200  # trunk-ignore(bandit/B101)
@@ -182,16 +189,21 @@ class TestAPIEndpoints:
         except requests.exceptions.ConnectionError:
             pytest.skip("Server not running")
 
-    def test_dataset_endpoint(self, base_url):
+    def test_dataset_endpoint(self, auth_headers):
         """Test /api/dataset endpoint."""
         try:
-            response = requests.get(f"{base_url}/api/dataset", timeout=2)
+            response = requests.get(f"{self.api_url}/api/dataset", timeout=2, headers=auth_headers)
             if response.status_code >= 500:
                 pytest.skip(f"Server endpoint error: {response.status_code}")
             assert response.status_code == 200  # trunk-ignore(bandit/B101)
 
             data = response.json()
-            if "error" not in data:
+            # The endpoint returns one of three shapes:
+            #   {"error": "..."}            — request handled error condition
+            #   {"loaded": false}           — backend has no dataset loaded yet
+            #   {"inputs": ..., "targets": ..., "num_samples": ..., ...} — loaded
+            # The dataset-shape assertions only apply to the third case.
+            if "error" not in data and data.get("loaded") is not False:
                 assert "inputs" in data  # trunk-ignore(bandit/B101)
                 assert "targets" in data  # trunk-ignore(bandit/B101)
                 assert "num_samples" in data  # trunk-ignore(bandit/B101)

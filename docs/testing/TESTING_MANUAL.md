@@ -1,7 +1,7 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** 2026-04-05  
-**Version:** v0.26.0
+**Last Updated:** 2026-09-05  
+**Version:** v0.26.2
 
 Complete guide to testing the Juniper Canopy application.
 
@@ -86,6 +86,21 @@ pytest -m "not slow"
 pytest -m "not requires_cascor and not requires_server and not requires_redis and not requires_cassandra and not requires_display"
 ```
 
+### X7 event-loop suite
+
+```bash
+# Slice 1b client budget (on main)
+pytest src/tests/regression/test_x7_client_budget.py -v
+
+# Slice 1a gate + responsiveness (landed with #567). Not marked slow on purpose.
+pytest src/tests/regression/test_x7_off_loop_discipline.py \
+  src/tests/regression/test_x7_loop_responsiveness.py -v
+```
+
+The structural gate reads `main.py` only. After adapter edits run
+`python util/ad-hoc/2026-09-04_async_blocking_callgraph.py` (needs sibling
+`juniper-cascor-client`). See [AGENTS_REFERENCE.md § Event-loop I/O discipline](../AGENTS_REFERENCE.md#event-loop-io-discipline-x7).
+
 ### Running by Pattern
 
 ```bash
@@ -100,7 +115,29 @@ pytest -k "demo_mode or config"
 
 # Multiple patterns (AND)
 pytest -k "demo_mode and advanced"
+
+# X7 slice 1c — classifier, status-bar class routing, breaker isolation, staleness
+# Landed with #578.
+pytest src/tests/regression/test_x7_status_cache.py -v
+
+# Replay index contract — exclusive range end, window length, render echoes.
+# Landed with canopy#697.
+pytest src/tests/unit/frontend/test_replay_range_end_and_echo.py -v
+
+# Recurrence 4xx detail, 5xx omission, and in-sample card (landed with #702)
+pytest src/tests/unit/test_recurrence_service_adapter.py \
+  src/tests/unit/backend/test_recurrence_backend.py \
+  src/tests/unit/frontend/test_completion_reason_status_bar.py \
+  src/tests/unit/test_recurrence_oneshot_result.py \
+  src/tests/unit/test_outbound_errors.py -q
 ```
+
+See [TESTING_REFERENCE.md — X7 Status Cache](TESTING_REFERENCE.md#x7-status-cache-slice-1c)
+and [TESTING_REFERENCE.md — Recurrence fit refusal](TESTING_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores)
+and [AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
+Replay index pins:
+[TESTING_REFERENCE.md — Replay index contract](TESTING_REFERENCE.md#replay-index-contract)
+and [AGENTS_REFERENCE.md — Replay index contract](../AGENTS_REFERENCE.md#replay-index-contract).
 
 ### Running with Coverage
 
@@ -144,11 +181,21 @@ pytest tests/unit/test_response_normalization.py -k "Fix1 or Fix2 or Fix3 or Fix
 # ServiceBackend status/dataset normalization tests
 pytest tests/unit/test_service_backend.py -k "get_status or get_dataset" -v
 
-# Metrics panel handler edge-case tests (replay/progress/validation overlays)
+# Metrics panel handler edge-case tests (replay visibility/progress/validation overlays)
 pytest tests/unit/frontend/test_metrics_panel_handlers.py -k "validation_overlay or replay or progress_detail or training_progress or hidden_units" -v
+
+# Metrics replay controls (clientside since F-CANOPY-054; the node-executed tests skip without `node`)
+pytest tests/unit/frontend/test_f054_replay_block_clientside.py tests/unit/frontend/test_f048_replay_cycle.py -v
+
+# Wider-dataset Start alert and Start-fresh modal wording (F1, F2; #681)
+pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
 
 # Documentation link checker regression tests
 pytest tests/unit/test_doc_link_checker.py -v
+
+# F-CANOPY-047: plotly PNG export vs Bootstrap CSP pair
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
 ```
 
 ### Advanced Options
@@ -905,7 +952,7 @@ pre-commit run --all-files
 ```bash
 # Problem: ModuleNotFoundError
 # Solution: Activate conda environment
-conda activate JuniperCanopy
+conda activate JuniperCanopy1
 ```
 
 #### 2. Test Discovery Fails

@@ -1,0 +1,573 @@
+#!/usr/bin/env python
+#####################################################################################################################################################################################################
+# Project:       Juniper
+# Sub-Project:   JuniperCanopy
+# Application:   juniper_canopy
+# Purpose:       Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
+#
+# Author:        Paul Calnon
+# Version:       0.5.0
+# File Name:     dataset_schema.py
+# File Path:     ${HOME}/Development/python/Juniper/juniper-canopy/src/
+#
+# Date Created:  2026-07-21
+# Last Modified: 2026-10-08
+#
+# License:       MIT License
+# Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
+#
+# Description:
+#     N7 (training-runtime defects plan, I-7 / U-6 / I-5-UX): the schema-driven
+#     dataset-panel core. Pure, browser-free helpers that turn a juniper-data
+#     generator's JSON-Schema (``params_class.model_json_schema()``, surfaced by
+#     GET /v1/generators as of juniper-data 0.10.0 / D1) into an ordered list of
+#     renderable field descriptors, and that read the additive per-generator
+#     ``available`` flag with a flag-absent-means-available fallback (older
+#     juniper-data). The dashboard maps these descriptors into sidebar inputs and
+#     the availability gate; the staging dialect stays intact because non-spiral
+#     schema params are forwarded through cascor's generic ``params`` channel.
+#
+#     Design of record: juniper-ml
+#     notes/JUNIPER_2026-07-11_JUNIPER-CANOPY_TRAINING-RUNTIME-DEFECTS-PLAN.md §4 I-7 / §4-U U-6 / row N7.
+#
+#####################################################################################################################################################################################################
+# Notes:
+#     - Pure module: no Dash, no httpx, no I/O. The dashboard owns the fetch (cached
+#       httpx GET of /api/dataset/generators) and the rendering; this module owns the
+#       schema->fields mapping and the availability predicate so both are unit-testable
+#       without a browser or a live data service.
+#     - INFRASTRUCTURE_FIELDS are the split/seed/cache plumbing every generator schema
+#       carries: train_ratio/test_ratio/shuffle/seed/use_cache, plus the THREE-PARTITION
+#       contract's sizing_mode/val_percent/test_percent/val_ratio (added canopy#630 --
+#       this list named a two-partition world and stopped covering its own subject).
+#       cascor and juniper-data own those; the canopy training sidebar surfaces
+#       generator *content* params only.
+#     - SHAPE_DETERMINING_FIELDS are the per-generator knobs that would contradict a
+#       DIFFERENT registry declaration -- today the rank-flipping booleans (canopy#623).
+#       form_excluded_fields() unions the two.
+#     - GENERATOR_NAME_ALIASES bridges canopy's historical plural dataset-type values
+#       ("spirals"/"moons") to juniper-data's singular registry keys ("spiral"/"moon").
+#       Everything else is identity.
+#
+#####################################################################################################################################################################################################
+# References:
+#     - juniper-data GET /v1/generators (juniper_data/api/routes/generators.py): each
+#       entry is {name, version, description, available: bool, schema: <JSON-Schema>}.
+#     - cascor StageDatasetRequest.params (src/api/models/training.py): the generic
+#       generator-params channel forwarded verbatim to juniper-data create_dataset.
+#
+#####################################################################################################################################################################################################
+# TODO :
+#     - Surface the generator's per-501 install hint verbatim once the /v1/generators
+#       list carries it (today only the create-time 501 body carries the hint text).
+#
+#####################################################################################################################################################################################################
+# COMPLETED:
+#     - N7: parse_schema_fields / availability_map / is_generator_available /
+#       generator_name_for_type / apply_availability_gate / unavailable_reason.
+#     - W1.2 (F-C2 / F-C3, ruling R7): DECLARED_PARAM_DEFAULTS / declared_param_defaults --
+#       the dated snapshot of what each recurrence-reachable generator declares.
+#
+#####################################################################################################################################################################################################
+"""Schema-driven dataset-panel helpers (N7): JSON-Schema -> field descriptors + availability.
+
+The dashboard's Dataset sub-section historically rendered spiral-centric typed inputs for
+every dataset type (I-7). This module supplies the pure core that lets the panel render only
+the fields the *selected* generator actually declares, with schema-derived labels, bounds and
+defaults, and lets it gate generators the deployment cannot serve (``available: false``) with a
+UI-friendly reason. Both are pure so they can be exercised without Dash or a live data service.
+"""
+
+from __future__ import annotations
+
+import copy
+import dataclasses
+from dataclasses import dataclass, field
+from typing import Any, Iterable, Mapping, Sequence
+
+# Split / seed / cache plumbing every generator schema carries. cascor and juniper-data own the
+# split ratios and RNG seeding, so the canopy training sidebar must not surface them as generator
+# content params (they would collide with cascor's own dataset config). Excluded from the rendered
+# field set and from the generic ``params`` payload.
+#
+# The last four were added 2026-09-15 (canopy#630). The first five predate the THREE-PARTITION
+# contract, which introduced ``sizing_mode`` / ``val_percent`` / ``test_percent`` / ``val_ratio``
+# -- so this set named the split plumbing of a two-partition world and silently stopped covering
+# its own subject. Measured before the fix: all 16 upstream generators leaked at least one, and
+# 13 of canopy's 14 selectable dataset types rendered at least one control (6 rendered all four).
+#
+# These are not inert controls. ``_collect_generator_params`` drops only ``None`` and ``""``, so a
+# rendered value is POSTED on every Apply -- an operator adjusting what looks like a dataset knob
+# was silently reshaping the train/val/test split that cascor and juniper-data own. ``val`` is the
+# in-loop split and ``test`` is touched once; a UI that lets the split be edited beside
+# ``n_samples`` invites exactly the selected-on-test confusion the data contract warns about.
+#
+# ``sizing_mode`` additionally rendered as a FREE TEXT box, because its schema emits
+# ``type: string`` with no ``enum`` -- so a typo became a 422 from juniper-data rather than an
+# unselectable option. Excluding it closes that too; there is no separate fix.
+INFRASTRUCTURE_FIELDS: frozenset[str] = frozenset(
+    {
+        "train_ratio",
+        "test_ratio",
+        "shuffle",
+        "seed",
+        "use_cache",
+        "sizing_mode",
+        "val_percent",
+        "test_percent",
+        "val_ratio",
+    }
+)
+
+# The partial-data contract's two DECISION fields. juniper-data's ``equities`` /
+# ``equities_seq`` / ``csv_import`` schemas carry ``allow_truncation`` (the gate: accept a
+# dataset the producer cannot deliver in full), and the equities pair also carry
+# ``incomplete_rows`` (accept or drop the rows it could not resolve, once the gate is open).
+# Rendered as ordinary sidebar inputs they broke the contract twice over: an unticked checkbox
+# sent an EXPLICIT ``allow_truncation: false`` on every apply, and a ticked one pre-answered a
+# question the contract says must be put to the operator when the shortfall actually happens.
+#
+# What that explicit ``false`` does has GROWN since, which is why withholding it matters more
+# than it did. cascor#624 honours a caller's explicit value over cascor's own deployment
+# default. Until juniper-data 0.15.0, juniper-data then OR'd the flag with ITS deployment
+# default, so a juniper-data opt-in still rescued the request. 0.15.0 (juniper-data#418,
+# APD-DATA-052) made ``allow_truncation`` a tri-state: ``true`` opts in, ``null`` / omitted
+# defers to the deployment, and ``false`` REFUSES even where the deployment opted in. So a
+# ``false`` from canopy now overrides EVERY opt-in on the path: any shortfall -- an over-cap
+# universe, or rows whose fundamentals cannot be resolved -- is refused with HTTP 422
+# (``InputTooLargeError`` / ``IncompleteDataError``, ``api/routes/datasets.py``) where silence
+# would have let the deployment accept it. A clean, under-cap request never consults the flag,
+# so the refusal appears only when data is actually short -- the one moment the prompt below
+# exists for. Verified against juniper-data main 68c3cd7, 2026-09-22.
+#
+# The dashboard's three-way prompt owns both fields: the form sends NEITHER, so a default apply
+# defers to the deployments (on a default deployment that is option 3, fail) and the prompt
+# supplies options 1 and 2 (accept / drop) on the re-stage. Silence is the only value that
+# defers. TestNoPathSendsAPartialDataStance (tests/regression/test_dataset_generator_contract.py)
+# pins that no other channel -- the registry seed, Apply, the one-shot Start body, the restart
+# modal -- sends either field.
+PARTIAL_DATA_POLICY_FIELDS: frozenset[str] = frozenset({"allow_truncation", "incomplete_rows"})
+
+# Everything the schema-driven form must neither render nor forward.
+FORM_EXCLUDED_FIELDS: frozenset[str] = INFRASTRUCTURE_FIELDS | PARTIAL_DATA_POLICY_FIELDS
+
+# Fields whose value CONTRADICTS a declaration the registry makes elsewhere -- the same reason
+# class as the two sets above, but generator-specific rather than universal, so it is keyed by
+# juniper-data generator name rather than folded into FORM_EXCLUDED_FIELDS.
+#
+# Both members flip their generator's output RANK. ``DatasetTypeSpec.ndim`` is a static scalar
+# (model_registry.py), so rendering the knob lets an operator contradict canopy's own
+# declaration: mnist is seeded ``ndim=2`` while ``flatten=False`` yields rank-3 (N, 28, 28), and
+# arc_agi's ``flatten_pairs=False`` yields rank-3 (n, pad_to, pad_to). cascor then refuses the
+# artifact at the tier boundary -- but only at Start, so Apply has already returned 200 with a
+# green banner and the failure surfaces on an unrelated action (canopy#623).
+#
+# WITHHELD, not described: §12.9 of JUNIPER_2026-09-02_JUNIPER-CANOPY_SELECTION-REACHABILITY-
+# DESIGN.md rejected widening the registry's rank type to express the variable rank, because no
+# ModelSpec accepts more than one rank (cascor {2}, recurrence {3}) -- so a variable-rank dataset
+# is compatible with nothing under the sound reading, and the reading that isn't sound reinstates
+# this very hazard.
+#
+# Keyed per generator DELIBERATELY: this schema space has cross-generator name collisions
+# (``normalize_features`` in three generators, ``one_hot_labels`` in two), so a global name-keyed
+# exclusion would reach fields that are ordinary content params elsewhere.
+SHAPE_DETERMINING_FIELDS: dict[str, frozenset[str]] = {
+    "mnist": frozenset({"flatten"}),
+    "arc_agi": frozenset({"flatten_pairs"}),
+}
+
+
+def form_excluded_fields(generator_name: str | None) -> frozenset[str]:
+    """Return the fields the form must neither render nor forward for ``generator_name``.
+
+    The universal :data:`FORM_EXCLUDED_FIELDS` plus any generator-specific
+    :data:`SHAPE_DETERMINING_FIELDS`. An unknown or ``None`` generator gets the universal set,
+    which is the correct posture: a generator canopy does not recognise has no rank declaration
+    to contradict.
+    """
+    return FORM_EXCLUDED_FIELDS | SHAPE_DETERMINING_FIELDS.get(generator_name or "", frozenset())
+
+
+# canopy dataset-type value -> juniper-data generator name. canopy's registry (model_registry.
+# DATASET_TYPES) keeps the historical plural values "spirals"/"moons"; juniper-data's generator
+# registry keys are singular "spiral"/"moon". Everything else (xor, mnist, circles, equities_seq)
+# is identity. The cascor #396 translation applies the same alias server-side for staging; this
+# copy lets canopy resolve the schema/availability of the *selected* value locally.
+GENERATOR_NAME_ALIASES: dict[str, str] = {
+    "spirals": "spiral",
+    "moons": "moon",
+}
+
+# UI-reworded unavailability reasons keyed by juniper-data generator name.
+#
+# **The wire carries the install hint now, and this map is the FALLBACK, not the source.** The
+# comment here used to say ``/v1/generators`` "carries ``available: bool`` but not the install
+# hint (that reaches the client only in the create-time 501 body)". That stopped being true at
+# juniper-data's W-4: ``GeneratorInfo.install_hint`` is a first-class field on that response, and
+# its own docstring gives the reason — without it ``available: false`` "says a generator cannot
+# run and nothing at all about what would fix that, so a preflight has nowhere to send an
+# operator". canopy was hand-maintaining reworded duplicates of a string the producer already
+# publishes, for two generators, and falling back to a bare "unavailable in this deployment" for
+# every other one — including both equities seeds, which are exactly the ones an operator is most
+# likely to hit, since the ``equities`` extra is absent from juniper-data's lockfile.
+#
+# So the derivation is now: if the producer published a hint, this generator needs an optional
+# extra and the label says so generically (the dropdown option has no room for a pip command —
+# the full hint goes in the params panel, via ``unavailable_hint``). Only when the producer
+# published nothing does this curated map speak, and it survives for exactly one reason: a
+# juniper-data older than W-4 sends no hint at all, and "unavailable in this deployment" is a
+# worse answer than the two entries below for the two generators canopy happens to know about.
+_UNAVAILABLE_REASONS: dict[str, str] = {
+    "mnist": "needs juniper-data's optional dataset extra",
+    "arc_agi": "needs juniper-data's optional dataset extra",
+}
+_UNAVAILABLE_REASON_DEFAULT: str = "unavailable in this deployment"
+# What the label says when the producer published a hint: short, because it shares a dropdown
+# option with the dataset name. The actionable text is the hint itself, rendered in the panel.
+_UNAVAILABLE_REASON_HAS_HINT: str = "needs an optional juniper-data extra"
+
+
+@dataclass(frozen=True)
+class GeneratorField:
+    """A single renderable generator parameter derived from a JSON-Schema property.
+
+    ``input_type`` is the abstract control kind the dashboard maps to a concrete Dash input:
+    ``"number"`` -> ``dbc.Input(type="number")``; ``"checkbox"`` -> a boolean toggle; ``"select"``
+    -> a dropdown over ``options``; ``"text"`` -> a free-text input. ``minimum``/``maximum`` are the
+    (possibly exclusive) numeric bounds; ``options`` is the enum choice list for ``select``.
+    """
+
+    name: str
+    label: str
+    input_type: str  # "number" | "checkbox" | "select" | "text"
+    default: Any = None
+    minimum: float | None = None
+    maximum: float | None = None
+    step: float | None = None
+    description: str = ""
+    options: tuple[str, ...] = field(default_factory=tuple)
+
+
+def humanize(name: str) -> str:
+    """Fallback label for a schema property with no ``title`` (``n_samples`` -> ``N Samples``)."""
+    return " ".join(part.capitalize() for part in str(name).replace("-", "_").split("_") if part)
+
+
+def generator_name_for_type(value: str | None) -> str:
+    """Resolve a canopy dataset-type value to its juniper-data generator name via the alias map."""
+    if not value:
+        return ""
+    return GENERATOR_NAME_ALIASES.get(value, value)
+
+
+def dataset_type_for_generator_name(name: str | None, known_values: Iterable[str]) -> str | None:
+    """The canopy dataset-type value a backend's dataset name denotes, or None (§4.10 hydration).
+
+    The inverse of :func:`generator_name_for_type`, for reading a dataset back OUT of a backend.
+    A backend's staged or loaded config can name it either way: canopy stages the juniper-data
+    generator name (``"spiral"``), while cascor's first-start default and older stagers carry
+    canopy's own value (``"spirals"``). Both must resolve to the one value the dropdown offers.
+
+    ``known_values`` is canopy's seeded set (``DATASET_TYPES``). A name that is none of them --
+    an unseeded generator another client staged -- returns ``None``: the dropdown cannot show it,
+    and inventing the nearest match would be a selection nobody made.
+    """
+    if not name:
+        return None
+    known = set(known_values)
+    if name in known:
+        return name
+    for value, generator in GENERATOR_NAME_ALIASES.items():
+        if generator == name and value in known:
+            return value
+    return None
+
+
+def _primary_branch(prop: Mapping[str, Any]) -> dict[str, Any]:
+    """Collapse a schema property to the branch that carries its type/bounds.
+
+    Optional fields render as ``{"anyOf": [{...type...}, {"type": "null"}], ...}``; pick the first
+    non-null branch and merge the property-level keys (``default``/``title``/``description``) over
+    it so bounds nested inside the branch (e.g. ``max_symbols``: ``minimum`` lives in the branch)
+    are preserved. A non-anyOf property is returned unchanged.
+    """
+    any_of = prop.get("anyOf")
+    if not isinstance(any_of, list):
+        return dict(prop)
+    for branch in any_of:
+        if isinstance(branch, Mapping) and branch.get("type") != "null":
+            merged = dict(branch)
+            for carry in ("default", "title", "description"):
+                if carry in prop:
+                    merged[carry] = prop[carry]
+            return merged
+    return dict(prop)
+
+
+def _bound(branch: Mapping[str, Any], inclusive: str, exclusive: str) -> float | None:
+    """Return the inclusive bound, falling back to the exclusive one (UI hint precision only)."""
+    for key in (inclusive, exclusive):
+        if key in branch:
+            value = branch[key]
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return value
+    return None
+
+
+def _field_from_property(name: str, prop: Mapping[str, Any]) -> GeneratorField | None:
+    """Map one JSON-Schema property to a :class:`GeneratorField`, or None if not renderable.
+
+    Array / object properties (e.g. equities ``symbols``, spiral ``origin``) and null-only
+    properties are skipped — they have sensible generator defaults and no simple sidebar control.
+    """
+    branch = _primary_branch(prop)
+    label = prop.get("title") or branch.get("title") or humanize(name)
+    description = prop.get("description") or branch.get("description") or ""
+    default = prop.get("default", branch.get("default"))
+    enum = branch.get("enum") or prop.get("enum")
+    json_type = branch.get("type")
+
+    if enum:
+        options = tuple(str(choice) for choice in enum)
+        return GeneratorField(name=name, label=label, input_type="select", default=default, description=description, options=options)
+    if json_type == "boolean":
+        return GeneratorField(name=name, label=label, input_type="checkbox", default=default, description=description)
+    if json_type in ("integer", "number"):
+        minimum = _bound(branch, "minimum", "exclusiveMinimum")
+        maximum = _bound(branch, "maximum", "exclusiveMaximum")
+        step: float | None = 1 if json_type == "integer" else None
+        return GeneratorField(name=name, label=label, input_type="number", default=default, minimum=minimum, maximum=maximum, step=step, description=description)
+    if json_type == "string":
+        return GeneratorField(name=name, label=label, input_type="text", default=default, description=description)
+    # array / object / null-only -> not renderable as a simple sidebar control; use the default.
+    return None
+
+
+def parse_schema_fields(schema: Mapping[str, Any] | None, *, exclude: Iterable[str] = FORM_EXCLUDED_FIELDS) -> list[GeneratorField]:
+    """Return the ordered renderable content fields of a generator ``schema``.
+
+    ``schema`` is a Pydantic ``model_json_schema()`` dict (its ``properties`` map). Excluded
+    fields (``exclude`` — the split/seed/cache plumbing plus the partial-data policy fields the
+    three-way prompt owns, by default) and non-renderable (array/object/null-only)
+    properties are dropped. Property order is preserved (Pydantic emits declaration order), which is
+    the user-facing field order. A missing/empty ``properties`` yields ``[]``.
+    """
+    if not schema:
+        return []
+    properties = schema.get("properties")
+    if not isinstance(properties, Mapping):
+        return []
+    excluded = set(exclude)
+    fields: list[GeneratorField] = []
+    for name, prop in properties.items():
+        if name in excluded or not isinstance(prop, Mapping):
+            continue
+        parsed = _field_from_property(name, prop)
+        if parsed is not None:
+            fields.append(parsed)
+    return fields
+
+
+def apply_seeded_defaults(fields: Sequence[GeneratorField], seeded: Mapping[str, Any] | None) -> list[GeneratorField]:
+    """Overlay a registry ``default_params`` seed onto schema-derived field defaults.
+
+    Without this the params panel renders juniper-data's schema defaults while the registry
+    seeds something else, so the operator is shown one value and a different one is sent —
+    and, worse, the rendered control sends the SCHEMA default straight back over the seed on
+    every Apply. ``equities`` is the case that forces it: its seed pins
+    ``fundamentals_fill="drop"`` and ``normalize_features=True`` precisely because the schema
+    defaults (``"nan"`` / ``False``) produce a dataset CasCor cannot fit — non-finite columns
+    and a first-pass loss twenty-two orders of magnitude out.
+
+    Pure and injectable: the seed arrives as a plain mapping rather than being looked up here,
+    so this module keeps its "no registry import" shape and a test can state the seed directly.
+    Keys the schema does not render are ignored here — they ride to the backend through the
+    payload seed in ``_apply_dataset_handler``, which is the only channel an array-valued param
+    like ``symbols`` has.
+
+    Args:
+        fields: the schema-derived fields, in render order.
+        seeded: the registry's ``default_params`` for this dataset (``{}``/None -> unchanged).
+
+    Returns:
+        A new list; ``fields`` is not mutated and neither are its (frozen) members.
+    """
+    if not seeded:
+        return list(fields)
+    return [dataclasses.replace(field_, default=seeded[field_.name]) if field_.name in seeded else field_ for field_ in fields]
+
+
+def availability_is_known(generators: Sequence[Mapping[str, Any]] | None) -> bool:
+    """Whether the availability surface was actually read, as distinct from what it said.
+
+    ``None`` means the fetch did not succeed — the service was unreachable, or answered
+    non-2xx. Every other value, **including an empty list**, means canopy heard back.
+
+    This exists because those two were the same value until 2026-09-22, and the collapse was
+    load-bearing in the wrong direction. ``_fetch_generators`` returned ``[]`` on an exception,
+    on a non-ok response, and on a 200 whose payload was empty; the availability helpers then
+    read every generator as available (the flag-absent fallback) and the panel looked
+    identical whether juniper-data had said "everything is fine" or had said nothing at all.
+
+    The GATING stays fail-open either way — that is the ratified two-tier posture (D5: the UI
+    is a best-effort affordance, the backend is the correctness guarantee, and it still refuses
+    with a 501 install hint). What changes is that the operator can now be TOLD which of the
+    two they are looking at, instead of being shown a confident panel built on nothing.
+    """
+    return generators is not None
+
+
+def availability_map(generators: Sequence[Mapping[str, Any]] | None) -> dict[str, bool]:
+    """Map generator name -> availability from a ``/v1/generators`` list (flag-absent -> True).
+
+    An entry with no ``available`` key (older juniper-data, or the built-in demo fallback list)
+    defaults to available — the documented compat posture (I-5 / N7): canopy must not grey out a
+    generator merely because the running data service predates the availability surface.
+    """
+    result: dict[str, bool] = {}
+    for entry in generators or ():
+        if not isinstance(entry, Mapping):
+            continue
+        name = entry.get("name")
+        if not name:
+            continue
+        result[str(name)] = bool(entry.get("available", True))
+    return result
+
+
+def is_generator_available(value: str | None, generators: Sequence[Mapping[str, Any]] | None) -> bool:
+    """True when the generator for canopy dataset-type ``value`` is available (or the flag is absent).
+
+    Resolves ``value`` to its generator name via the alias map, then reads the availability map.
+    A generator absent from the list (e.g. the fallback demo list, or a desync) is treated as
+    available so a transient/older data service never strands a dataset type (fail-open UI; the
+    create call still fails closed with the 501 install hint if the extra is truly missing).
+    """
+    name = generator_name_for_type(value)
+    if not name:
+        return True
+    return availability_map(generators).get(name, True)
+
+
+def unavailable_hint(value: str | None, generators: Sequence[Mapping[str, Any]] | None) -> str | None:
+    """The producer's own install hint for ``value``'s generator, or None.
+
+    ``GeneratorInfo.install_hint`` (juniper-data W-4) is the same string the generator's guarded
+    ``ImportError`` carries and the same text the 501 on ``POST /v1/datasets`` returns, so it is
+    the one place the remedy is stated by the party that knows it. Reading it here is what stops
+    canopy re-wording a curated string it does not own.
+
+    Returns None for a generator that declares no optional dependency, for one missing from the
+    list, and for a juniper-data older than W-4 that sends no hint — all of which are "nothing
+    actionable to add", not errors.
+    """
+    name = generator_name_for_type(value)
+    if not name:
+        return None
+    for entry in generators or ():
+        if isinstance(entry, Mapping) and entry.get("name") == name:
+            hint = entry.get("install_hint")
+            return hint if isinstance(hint, str) and hint.strip() else None
+    return None
+
+
+def unavailable_reason(value: str | None, generators: Sequence[Mapping[str, Any]] | None = None) -> str:
+    """Short UI reason a generator is greyed — for the dropdown label, which has no room for more.
+
+    Derived from the wire first: a generator the producer published an install hint for needs an
+    optional extra, and says so without canopy hand-maintaining a per-generator string. The
+    curated map speaks only when the producer published nothing (a pre-W-4 juniper-data), and the
+    generic phrase only when neither does.
+
+    ``generators`` is optional so the existing call shape keeps working; omitting it simply means
+    the wire cannot be consulted and the curated/generic path is taken. The ACTIONABLE text —
+    the pip command — is ``unavailable_hint``, rendered where there is room for it.
+    """
+    name = generator_name_for_type(value)
+    if unavailable_hint(value, generators):
+        return _UNAVAILABLE_REASON_HAS_HINT
+    return _UNAVAILABLE_REASONS.get(name, _UNAVAILABLE_REASON_DEFAULT)
+
+
+def apply_availability_gate(options: Sequence[Mapping[str, Any]], generators: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
+    """Disable unavailable dataset options in a model-compat option list, with a reworded reason.
+
+    Composition rule: an option already ``disabled`` (a model-incompatibility gate — the primary
+    D5 correctness gate) is left untouched (no double reason). An enabled option whose generator is
+    unavailable becomes ``disabled`` with an availability reason appended to its label. Available
+    options pass through unchanged. Pure over the option dicts (``{"label","value",...}``) so the
+    dashboard can compose it after ``model_registry.gated_dataset_options``.
+    """
+    gated: list[dict[str, Any]] = []
+    for option in options:
+        out = dict(option)
+        value = out.get("value")
+        if not out.get("disabled") and not is_generator_available(value, generators):
+            base = out.get("label", value)
+            out["label"] = f"{base} — {unavailable_reason(value, generators)}"
+            out["disabled"] = True
+        gated.append(out)
+    return gated
+
+
+# --- W1.2 / ruling R7: the parameters each recurrence-reachable generator DECLARES ------------------
+#
+# juniper-ml plan ``notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md``,
+# findings F-C2 and F-C3. ``backend/recurrence_request.py`` shapes the recurrence ``POST /v1/train``
+# request from this table, and needs both halves of each entry:
+#
+# * the NAMES, because it forwards only a parameter the generator declares. canopy translated its
+#   generic ``nn_dataset_elements`` / ``nn_dataset_noise`` into ``n_samples`` / ``noise`` for every
+#   generator, and no rank-3 generator declares either: the synthetics size by ``n_steps`` and add
+#   noise through ``noise_std`` / ``sigma`` / ``init_noise_std``, ``equities_seq`` by its universe and
+#   date range (F-C3).
+# * the DEFAULTS, because a form value equal to what the form rendered for that field is not an
+#   operator's edit. The schema-driven panel renders every field and Apply posts every rendered value,
+#   so an untouched ``equities_seq`` form used to stage seven keys beside the registry seed --
+#   ``start_date``, ``purchase_date``, ``basis_price_field``, ``week52_window``,
+#   ``normalize_features``, ``max_symbols: 14`` and ``lookback: 64`` -- and the fit request carried
+#   them all (F-C2). A field renders the registry seed when the seed sets it
+#   (``apply_seeded_defaults``) and juniper-data's default otherwise -- which is this table.
+#
+# A DATED SNAPSHOT, for the reason ``model_registry.KNOWN_UPSTREAM_GENERATORS`` is one: canopy talks to
+# juniper-data over HTTP and does not depend on it, and the copy installed in the test env is 0.6.0,
+# which predates ``equities_seq``. Captured 2026-10-08 from juniper-data ``462da218`` (main) as
+# ``params_class.model_json_schema()`` -- the ``schema`` field ``GET /v1/generators`` serves -- by
+# ``util/ad-hoc/2026-10-08_capture_sequence_generator_schemas.py``, which also wrote the fixture
+# ``tests/fixtures/juniper_data_sequence_generator_schemas.json`` that
+# ``tests/unit/test_recurrence_request.py`` pins this table against, name for name and default for
+# default. The field set and every default are identical at the published v0.16.0 (diffed: only the R3
+# validator and descriptions moved), where ``equities_seq`` is ``5.0.0`` rather than ``6.0.0``.
+#
+# Keyed by juniper-data generator NAME. Every rank-3 seed in ``model_registry.DATASET_TYPES`` must have
+# an entry (``TestEveryRecurrenceSeedIsDeclared``): a generator missing here is forwarded UNFILTERED,
+# which is the pre-W1.2 behaviour, and logged as a WARNING.
+#
+# Drift has two directions, and neither is silent. A parameter juniper-data adds is withheld from the
+# request and named in the preview's "not forwarded" line and a WARNING. A default juniper-data changes
+# makes an untouched field read as an edit, so it is sent at the producer's own default: the same
+# dataset, one more key in the body, visible in the preview.
+DECLARED_PARAM_DEFAULTS: dict[str, dict[str, Any]] = {
+    "multi_sine": {"n_steps": 2000, "lookback": 32, "horizon": 1, "sample_dt": 1.0, "train_ratio": 0.8, "val_ratio": 0.1, "seed": 0, "scaling": "identity", "n_components": 3, "frequencies": None, "amplitudes": None, "phases": None, "noise_std": 0.0},
+    "mackey_glass": {"n_steps": 2000, "lookback": 32, "horizon": 1, "sample_dt": 1.0, "train_ratio": 0.8, "val_ratio": 0.1, "seed": 0, "scaling": "identity", "tau": 17.0, "beta": 0.2, "gamma": 0.1, "n_exp": 10.0, "x0": 0.5, "init_noise_std": 0.0, "discard": 250},
+    "irregular_sine": {"n_steps": 2000, "lookback": 32, "horizon": 1, "sample_dt": 1.0, "train_ratio": 0.8, "val_ratio": 0.1, "seed": 0, "scaling": "identity", "jitter": 0.5, "n_components": 3, "frequencies": None, "amplitudes": None, "phases": None, "noise_std": 0.0},
+    "ar_p": {"n_steps": 2000, "lookback": 32, "horizon": 1, "sample_dt": 1.0, "train_ratio": 0.8, "val_ratio": 0.1, "seed": 0, "scaling": "identity", "coefficients": [0.5, -0.3], "const": 0.0, "sigma": 0.1, "burn_in": 100},
+    "delay_product": {"n_steps": 2000, "lookback": 32, "horizon": 1, "sample_dt": 1.0, "train_ratio": 0.8, "val_ratio": 0.1, "seed": 0, "scaling": "identity", "lag1": 2, "lag2": 8, "jitter": 0.5, "n_components": 3, "frequencies": None, "amplitudes": None, "phases": None, "noise_std": 0.0},
+    "equities_seq": {"symbols": None, "start_date": "2000-01-01", "end_date": None, "purchase_date": "2000-01-03", "basis_price_field": "close", "fundamentals_fill": "nan", "regression_target": "next_close", "week52_window": 252, "normalize_features": False, "max_symbols": 14, "incomplete_rows": None, "allow_truncation": None, "use_cache": True, "train_ratio": 0.8, "val_ratio": 0.1, "test_ratio": 0.1, "seed": 42, "lookback": 64},
+}
+
+# Where the table above came from, quoted in the preview so an operator can tell which producer contract
+# canopy is filtering against.
+DECLARED_PARAMS_SOURCE: str = "juniper-data 462da218 (main, 2026-10-08); identical at v0.16.0"
+
+
+def declared_param_defaults(generator_name: str | None) -> dict[str, Any] | None:
+    """Return ``{param: juniper-data default}`` for ``generator_name``, or None when canopy declares none.
+
+    A deep copy: ``ar_p``'s ``coefficients`` default is a list, and a shallow copy would hand every
+    caller the table's own list object (the aliasing hole ``model_registry.dataset_default_params``
+    closes for the seeds). ``None`` -- not ``{}`` -- for an undeclared generator, so a caller can tell
+    "declares nothing" from "not declared here" and forward unfiltered rather than drop everything.
+    """
+    declared = DECLARED_PARAM_DEFAULTS.get(generator_name or "")
+    return copy.deepcopy(declared) if declared is not None else None

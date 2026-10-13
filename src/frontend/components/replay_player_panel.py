@@ -31,8 +31,8 @@ Wiring:
   the snapshots panel after a successful POST /replay).
 - Each control writes to ``/api/v1/snapshots/{id}/replay/control``
   via ``_invoke_replay_control``.
-- WebSocket events from the cascor backend update the Store via the
-  websocket bridge (consumed in dashboard_manager).
+- No WebSocket event writes the Store. Its only writers are the
+  snapshots panel's replay confirm and ``dispatch_control``.
 """
 
 from typing import Any, Dict, Optional
@@ -41,6 +41,9 @@ import dash
 import dash_bootstrap_components as dbc
 import requests
 from dash import Input, Output, State, dcc, html
+
+from frontend.internal_api import internal_api_headers
+from settings import get_settings
 
 from ..base_component import BaseComponent
 
@@ -69,13 +72,26 @@ SPEED_MARKS = {
     10: "10×",
 }
 
+# The weight drain's gate: its interval is disabled unless the session Store holds a truthy
+# ``snapshot_id``. Only a started replay writes one; a successful Stop clears it (F-CANOPY-056), as do a
+# page reload and a successful model select, which rebuilds the tab bar and re-mounts the Store empty.
+# ``test_idle_dispatch_cuts.py`` runs this function under node.
+WEIGHT_DRAIN_GATE_JS = "function(session) { return !(session && session.snapshot_id); }"
+
 
 class ReplayPlayerPanel(BaseComponent):
     """V1 replay player UI for snapshot playback sessions."""
 
     def __init__(self, config: Dict[str, Any], component_id: str = "replay-player-panel"):
         super().__init__(config, component_id)
-        self._api_base_url = config.get("api_base_url", "")
+        # F-CANOPY-014: the empty-string fallback built every control URL as a
+        # schemeless path ("/api/v1/snapshots/<id>/replay/control"), which
+        # requests rejects with "No scheme supplied" -- and the runtime config
+        # never supplies api_base_url, so the whole replay control surface was
+        # dead. Mirror the sibling panels (network_editor_panel,
+        # hdf5_snapshots_panel): fall back to this service's own port.
+        _settings = get_settings()
+        self._api_base_url = config.get("api_base_url", f"http://127.0.0.1:{_settings.server.port}")
         self.api_timeout = float(config.get("api_timeout", 5))
 
     # ------------------------------------------------------------------
@@ -99,9 +115,16 @@ class ReplayPlayerPanel(BaseComponent):
                 # Status / error line.
                 html.Div(id=f"{self.component_id}-status", style={"marginTop": "10px"}),
                 # Session state Store. Populated by the snapshots panel after POST
-                # /replay, cleared on stop. Schema:
+                # /replay. ``_merge_session`` maps each control's result from
+                # cascor's envelope into it, and clears it on any successful
+                # stop (F-CANOPY-056). Schema:
                 #   {snapshot_id, fsm_state, time_index, range: [start, end] | None,
                 #    speed, playing}
+                # cascor's replay block nests range/speed/weights_available under
+                # ``session``, with range as {start, end}, end EXCLUSIVE;
+                # ``_session_range`` normalises both shapes to an inclusive
+                # [lo, hi] (F-CANOPY-059). ``time_index.snapshot_window.end_epoch``
+                # is the history length, so the last index is end_epoch - 1.
                 dcc.Store(id="replay-player-session", data=None),
                 # Trigger the player to issue a control request. The
                 # callbacks below write here when buttons / sliders fire;
@@ -120,11 +143,11 @@ class ReplayPlayerPanel(BaseComponent):
                 # network_evolution, this panel's last-sample
                 # readout) decode on demand.
                 dcc.Store(id="replay-weight-buffer", data=[]),
-                # Periodic drain trigger. Fires on the existing
-                # fast-update interval (sourced from dashboard_manager)
-                # so the player stays in sync with the replay session
-                # without spawning a dedicated interval.
-                dcc.Interval(id=f"{self.component_id}-weight-drain", interval=500, n_intervals=0),
+                # Periodic drain trigger: this panel's own 500 ms interval.
+                # It ships DISABLED and runs only once this page has
+                # started a replay (``WEIGHT_DRAIN_GATE_JS``, registered
+                # in ``register_callbacks``).
+                dcc.Interval(id=f"{self.component_id}-weight-drain", interval=500, n_intervals=0, disabled=True),
             ],
             id=self.component_id,
             style={"padding": "20px", "maxWidth": "900px"},
@@ -295,6 +318,35 @@ class ReplayPlayerPanel(BaseComponent):
                     ],
                     style={"marginBottom": "10px"},
                 ),
+                # Phase 2 P2-7 (Issue #3): dataset_swap events timeline.
+                # Each event recorded for the live cascor session (P2-2
+                # storage, exposed via cascor follow-up B / canopy
+                # /api/history/dataset_swaps) renders as a vertical
+                # marker on a wall-clock time axis. Hover shows
+                # before→after dataset_type + arch_changes summary.
+                # Click navigation (jump to pre/post-swap snapshot)
+                # lives in the History panel's paired-diff cards —
+                # this figure is hover-only.
+                html.Div(
+                    [
+                        html.Label("Dataset swap events", style={"fontWeight": "500", "marginRight": "10px"}),
+                        html.Span(
+                            id=f"{self.component_id}-swap-events-count",
+                            style={"fontFamily": "monospace", "color": "var(--text-muted)"},
+                        ),
+                        dcc.Graph(
+                            id=f"{self.component_id}-swap-events-graph",
+                            figure={"data": [], "layout": {"height": 110, "margin": {"l": 30, "r": 20, "t": 20, "b": 30}, "xaxis": {"title": "", "showgrid": False}, "yaxis": {"visible": False, "fixedrange": True}, "showlegend": False, "plot_bgcolor": "rgba(0,0,0,0)", "paper_bgcolor": "rgba(0,0,0,0)"}},
+                            config={"displayModeBar": False, "staticPlot": False},
+                            style={"height": "110px"},
+                        ),
+                        html.Small(
+                            "Each marker is a recorded swap. Hover for before→after detail. Use the History panel to seek to the pre-/post-swap snapshot.",
+                            style={"color": "var(--text-muted)"},
+                        ),
+                    ],
+                    style={"marginBottom": "10px"},
+                ),
             ]
         )
 
@@ -325,6 +377,7 @@ class ReplayPlayerPanel(BaseComponent):
                 f"{self._api_base_url}/api/v1/snapshots/{snapshot_id}/replay/control",
                 json=body,
                 timeout=self.api_timeout + 5,
+                headers=internal_api_headers(),
             )
             if resp.status_code == 200:
                 return {"success": True, "data": resp.json()}
@@ -349,20 +402,81 @@ class ReplayPlayerPanel(BaseComponent):
 
     @staticmethod
     def _session_window(session: Optional[Dict[str, Any]]) -> tuple[int, int]:
-        """Extract (start_epoch, end_epoch) from the session payload.
+        """Extract the first and last playable index, inclusive, from the session payload.
 
         Tolerates the unified response shape (``time_index.snapshot_window``)
         and the legacy/test shape (``length`` / ``window``).
+
+        cascor's ``snapshot_window.end_epoch`` is a COUNT, the length of the
+        history (``_compute_snapshot_window``), and its replay indexes run
+        ``0 .. length - 1``. So the last playable index is ``end_epoch - 1``;
+        reading the count as an index put one unplayable position on the
+        scrubber and the range slider. The legacy ``window.end_epoch`` is
+        already the last index (``length - 1``).
         """
         if not session:
             return 0, 1
         ti = session.get("time_index") or {}
-        window = ti.get("snapshot_window") or session.get("window") or {}
+        unified = ti.get("snapshot_window") if isinstance(ti, dict) else None
+        if unified:
+            start = int(unified.get("start_epoch", 0))
+            end = int(unified.get("end_epoch", start + 1)) - 1
+            return start, max(start, end)
+        window = session.get("window") or {}
         start = int(window.get("start_epoch", 0))
         end = int(window.get("end_epoch", session.get("length", 1) - 1))
         if end < start:
             end = start
         return start, end
+
+    @staticmethod
+    def _session_summary(session: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """The live session-summary block inside the stored data block (F-CANOPY-015).
+
+        ``confirm_snapshot_op`` stores cascor's ``data`` block as the session store —
+        correct as far as it goes. That block carries ``fsm_state`` / ``time_index`` /
+        ``snapshot_id``, which this panel reads directly and correctly; but ``range``,
+        ``speed`` and ``weights_available`` live one level deeper, in
+        ``data["session"]``. Reading them off the block's top level yields ``None`` for
+        all three. Only one of the three was visible: ``weights_available`` falsy
+        rendered the **V1 (metrics only)** badge for a V2 snapshot, while ``range`` and
+        ``speed`` were masked because their fallbacks coincide with the real values.
+
+        Falls back to the block itself for the flat legacy/test shape, matching
+        ``_session_window``'s tolerance.
+        """
+        if not isinstance(session, dict):
+            return {}
+        inner = session.get("session")
+        return inner if isinstance(inner, dict) else session
+
+    @staticmethod
+    def _session_range(raw: Any, start: int, end: int) -> list:
+        """The playback range as an inclusive ``[lo, hi]`` list, clamped to the snapshot window (F-CANOPY-059).
+
+        cascor's ``state_summary()`` serves ``range`` as a dict, ``{"start": …, "end": …}``
+        (cascor ``manager.py``, since cascor#178). canopy#532 read it one level deeper for
+        F-CANOPY-015 but indexed it as a list, so every session cascor served raised
+        ``KeyError: 0`` inside ``render_session`` and the player never rendered. The list
+        shape stays accepted (legacy sessions). Anything else, or an unparsable value,
+        falls back to the full window.
+
+        cascor's ``end`` is EXCLUSIVE (``set_range``: "``[start, end)``"), while the slider
+        and its readout are inclusive, so the dict's ``end`` maps to ``end - 1``.
+        ``queue_control`` adds the 1 back when it sends a range. The list shape is
+        canopy's own and already inclusive.
+        """
+        lo, hi = start, end
+        try:
+            if isinstance(raw, dict) and "start" in raw and "end" in raw:
+                lo, hi = int(raw["start"]), int(raw["end"]) - 1
+            elif isinstance(raw, (list, tuple)) and len(raw) == 2:
+                lo, hi = int(raw[0]), int(raw[1])
+        except (TypeError, ValueError):
+            lo, hi = start, end
+        lo = max(start, min(lo, end))
+        hi = max(lo, min(hi, end))
+        return [lo, hi]
 
     @staticmethod
     def _session_current_index(session: Optional[Dict[str, Any]]) -> int:
@@ -433,10 +547,13 @@ class ReplayPlayerPanel(BaseComponent):
 
             start, end = self._session_window(session)
             cur = self._session_current_index(session)
-            range_value = session.get("range") or [start, end]
-            speed = float(session.get("speed", SPEED_DEFAULT))
-            fsm = session.get("fsm_state") or "Replaying"
-            weights_available = bool(session.get("weights_available"))
+            # F-CANOPY-015: these three live in data["session"], not on the data block.
+            summary = self._session_summary(session)
+            # F-CANOPY-059: cascor serves a {start, end} dict; never index the raw value.
+            range_value = self._session_range(summary.get("range"), start, end)
+            speed = float(summary.get("speed", SPEED_DEFAULT))
+            fsm = session.get("fsm_state") or "Replaying"  # correctly on the data block
+            weights_available = bool(summary.get("weights_available"))
             badge_text = "V2 ✓ weights" if weights_available else "V1 (metrics only)"
             badge_style = {
                 "marginLeft": "8px",
@@ -468,10 +585,10 @@ class ReplayPlayerPanel(BaseComponent):
 
         # CAN-015g (g-4): periodic drain of the JS-side replay weight
         # ring buffer into the Dash Store. Clientside so the browser
-        # doesn't pay a server round-trip per drain — at default
-        # 500ms cadence with 100-entry buffer, the steady-state cost
-        # is dominated by JSON serialization of one or two recent
-        # weight events.
+        # doesn't pay a server round-trip per drain. No replay weight
+        # reaches the page today (F-CANOPY-057), so every drain finds
+        # nothing; its cost is the tick itself, which is why the gate
+        # below holds the timer off until this page starts a replay.
         app.clientside_callback(
             f"""
             function(n_intervals, current_buffer) {{
@@ -493,6 +610,36 @@ class ReplayPlayerPanel(BaseComponent):
             Output("replay-weight-buffer", "data"),
             Input(f"{component_id}-weight-drain", "n_intervals"),
             State("replay-weight-buffer", "data"),
+        )
+
+        # The drain runs only once this page has started a replay: the snapshots panel writes
+        # the session on POST /replay. Ungated, its 2 Hz timer ran on every tab for the life of
+        # the page, and each tick was a store update plus a clientside callback that found
+        # nothing. Parking it on an idle page cut the median response-delivery latency by 42%
+        # and 32% in two runs (juniper-ml E2E evidence ledger, Phase 8). The JS buffer is capped
+        # at 100 entries (``ws_dash_bridge.js`` ``MAX_REPLAY_WEIGHTS``), so a paused drain
+        # cannot grow it.
+        #
+        # A successful Stop clears ``snapshot_id`` (``_merge_session``; F-CANOPY-056, which
+        # kept the drain running after a Stop until the page reloaded), so it parks the drain.
+        #
+        # One limit, filed in that ledger:
+        #  * F-CANOPY-057: no replay weight reaches the page today. cascor's replay frames carry
+        #    none, and the metrics relay rebuilds each payload without the key. If that stream is
+        #    ever wired, this gate keys on THIS page's session while the WS broadcast reaches
+        #    every open page. Another page buffers the weights until its own session opens, then
+        #    drains them into it; Network Evolution renders the buffer with no session check,
+        #    and Decision Boundary would render that page's ``buffer[-1]`` at session open.
+        #
+        # The ONLY writer of the drain's ``disabled``: it is not in dashboard_manager's
+        # ``_GATED_POLL_INTERVALS``. Every writer of ``replay-player-session`` is an
+        # ``allow_duplicate`` Output, whose ``@hash`` closure reaches nothing, so no pending
+        # callback can hold this gate.
+        app.clientside_callback(
+            WEIGHT_DRAIN_GATE_JS,
+            Output(f"{component_id}-weight-drain", "disabled"),
+            Input("replay-player-session", "data"),
+            prevent_initial_call=False,
         )
 
         # CAN-015g (g-4): last-sample readout reflects the most recent
@@ -531,6 +678,15 @@ class ReplayPlayerPanel(BaseComponent):
 
             Writes ``{action, params}`` to ``-control-trigger`` Store; a
             sibling callback issues the HTTP POST.
+
+            ``render_session`` writes the scrubber, speed and range values
+            whenever the session changes, and those writes are this
+            callback's Inputs. So a slider value that equals what the
+            session already shows is an echo of that render, not a user
+            action, and queues nothing. Without this, every session write
+            sent a control request whose result wrote the session again
+            (the ``can015-replay-player-control-loop`` exemption in
+            ``test_f048_replay_cycle.py``).
             """
             ctx = dash.callback_context
             if not ctx.triggered or not session or not session.get("snapshot_id"):
@@ -552,17 +708,23 @@ class ReplayPlayerPanel(BaseComponent):
                     return dash.no_update
                 return {"action": "stop", "ts": stop}
             if prop_id.endswith("-scrubber.value"):
-                if value is None:
+                if value is None or int(value) == self._session_current_index(session):
                     return dash.no_update
                 return {"action": "seek", "params": {"time_index": int(value)}}
+            summary = self._session_summary(session)
             if prop_id.endswith("-speed.value"):
-                if value is None:
+                if value is None or float(value) == float(summary.get("speed", SPEED_DEFAULT)):
                     return dash.no_update
                 return {"action": "speed", "params": {"value": float(value)}}
             if prop_id.endswith("-range.value"):
                 if not value or len(value) != 2:
                     return dash.no_update
-                return {"action": "range", "params": {"start": int(value[0]), "end": int(value[1])}}
+                lo, hi = int(value[0]), int(value[1])
+                start, end = self._session_window(session)
+                if [lo, hi] == self._session_range(summary.get("range"), start, end):
+                    return dash.no_update
+                # The slider is inclusive; cascor's range end is exclusive.
+                return {"action": "range", "params": {"start": lo, "end": hi + 1}}
             return dash.no_update
 
         @app.callback(
@@ -589,11 +751,119 @@ class ReplayPlayerPanel(BaseComponent):
             new_session = self._merge_session(session, action, params, result.get("data"))
             return self._success_status(action), new_session
 
+        # Phase 2 P2-7 (Issue #3): dataset_swap events timeline figure.
+        # Hover-only — click navigation lives in the History panel's
+        # paired-diff cards. The live events store is populated by the
+        # slow-update-interval polling callback in DashboardManager.
+        # P2-7 follow-up: the timeline also reads the *loaded snapshot's*
+        # own swap history so a user reviewing a stored snapshot sees
+        # markers tied to that snapshot's training run (spec §4.4),
+        # rendered as a second trace group alongside the live feed.
+        @app.callback(
+            [
+                Output(f"{component_id}-swap-events-graph", "figure"),
+                Output(f"{component_id}-swap-events-count", "children"),
+            ],
+            [
+                Input("dataset-swap-events-store", "data"),
+                Input("loaded-snapshot-swap-events-store", "data"),
+            ],
+        )
+        def render_swap_events_graph(live_store, snapshot_store):
+            return self._render_swap_events_graph_handler(store_data=live_store, snapshot_store_data=snapshot_store)
+
         # Expose for unit tests.
         self._cb_render_session = render_session
         self._cb_queue_control = queue_control
         self._cb_dispatch_control = dispatch_control
+        self._cb_render_swap_events_graph = render_swap_events_graph
         self.logger.debug("Callbacks registered for %s", component_id)
+
+    def _render_swap_events_graph_handler(self, store_data=None, snapshot_store_data=None):
+        """Build the dataset_swap events Plotly figure + the count label.
+
+        Returns ``(figure, count_label)``. The figure carries up to two
+        scatter trace groups:
+
+        * **Live** — events from the slow-update-interval polling of
+          ``GET /api/history/dataset_swaps`` (live training history).
+          Renders as orange diamond markers.
+        * **Snapshot** — events from the currently-loaded replay
+          snapshot's own history, fetched lazily when the active
+          ``replay-player-session`` snapshot_id changes (P2-7 follow-up,
+          spec §4.4 full flavor). Renders as blue circle markers, on a
+          separate y-row so overlap with live markers stays legible.
+
+        Empty in both → minimal "no swaps recorded" annotation. Otherwise
+        the count label tallies each group.
+
+        Read-only — click events are NOT wired here (the History panel's
+        paired-diff cards own the seek-to-snapshot interaction).
+        """
+        live_events = []
+        if isinstance(store_data, dict):
+            live_events = list(store_data.get("events") or [])
+        snapshot_events = []
+        if isinstance(snapshot_store_data, dict):
+            snapshot_events = list(snapshot_store_data.get("events") or [])
+
+        empty_layout = {
+            "height": 130,
+            "margin": {"l": 30, "r": 20, "t": 20, "b": 30},
+            "xaxis": {"title": "", "showgrid": False},
+            "yaxis": {"visible": False, "fixedrange": True, "range": [-1, 1]},
+            "showlegend": bool(live_events) and bool(snapshot_events),
+            "legend": {"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
+            "plot_bgcolor": "rgba(0,0,0,0)",
+            "paper_bgcolor": "rgba(0,0,0,0)",
+        }
+        if not live_events and not snapshot_events:
+            return {"data": [], "layout": {**empty_layout, "annotations": [{"text": "No dataset swaps recorded yet", "xref": "paper", "yref": "paper", "x": 0.5, "y": 0.5, "showarrow": False, "font": {"size": 12, "color": "#888"}}]}}, "0 events"
+
+        traces = []
+        if live_events:
+            traces.append(self._build_swap_trace(live_events, label="Live", y=0.5, color="#f0ad4e", symbol="diamond"))
+        if snapshot_events:
+            traces.append(self._build_swap_trace(snapshot_events, label="Snapshot", y=-0.5, color="#5bc0de", symbol="circle"))
+
+        figure = {"data": traces, "layout": empty_layout}
+
+        parts = []
+        if live_events:
+            parts.append(f"{len(live_events)} live")
+        if snapshot_events:
+            parts.append(f"{len(snapshot_events)} snapshot")
+        total = len(live_events) + len(snapshot_events)
+        count_label = f"{total} event{'s' if total != 1 else ''}"
+        if len(parts) > 1:
+            count_label = f"{count_label} ({' + '.join(parts)})"
+        return figure, count_label
+
+    @staticmethod
+    def _build_swap_trace(events, *, label, y, color, symbol):
+        """Build one scatter trace for the swap-events timeline figure."""
+        xs = []
+        hovers = []
+        for ev in events:
+            ts = ev.get("timestamp") or "unknown"
+            xs.append(ts)
+            before = (ev.get("before_cfg") or {}).get("dataset_type") or "?"
+            after = (ev.get("after_cfg") or {}).get("dataset_type") or "?"
+            arch = ev.get("arch_changes") or {}
+            input_delta = arch.get("input_delta", 0)
+            output_delta = arch.get("output_delta", 0)
+            hidden = arch.get("hidden_preserved", 0)
+            hovers.append(f"<b>{before} → {after}</b><br>" f"{label} · timestamp: {ts}<br>" f"input Δ {input_delta:+d}, output Δ {output_delta:+d}, hidden {hidden} preserved")
+        return {
+            "type": "scatter",
+            "mode": "markers",
+            "name": label,
+            "x": xs,
+            "y": [y] * len(xs),
+            "marker": {"size": 14, "symbol": symbol, "color": color, "line": {"color": "#222", "width": 1}},
+            "hovertext": hovers,
+            "hovertemplate": "%{hovertext}<extra></extra>",
+        }
 
     # ------------------------------------------------------------------
     # Status helpers
@@ -602,11 +872,11 @@ class ReplayPlayerPanel(BaseComponent):
     @staticmethod
     def _error_status(message: str):
         return html.Div(
-            [html.Span("❌ ", style={"color": "#dc3545"}), html.Span(message)],
+            [html.Span("❌ ", style={"color": "var(--danger-color, #dc3545)"}), html.Span(message)],
             style={
-                "color": "#dc3545",
+                "color": "var(--danger-color, #dc3545)",
                 "padding": "8px 12px",
-                "backgroundColor": "#f8d7da",
+                "backgroundColor": "var(--bs-danger-bg-subtle, #f8d7da)",
                 "borderRadius": "4px",
                 "fontSize": "0.85rem",
             },
@@ -638,30 +908,109 @@ class ReplayPlayerPanel(BaseComponent):
 
         Backend response is preferred when present; otherwise we apply
         the user's intended change locally so the UI stays responsive.
+
+        F-CANOPY-056: the proxied response is cascor's envelope,
+        ``{status, data: {snapshot_id, operation, action, result, fsm_state?}, meta}``,
+        where ``result`` is the session's ``state_summary()`` (or stop's
+        ``{status, snapshot_id}``). Overlaying that envelope onto the session
+        reached none of the keys ``render_session`` reads, so every control's
+        result was dropped and a Stop never cleared the session. The envelope
+        is unwrapped, ``result`` is mapped onto the session's own shape, and
+        Stop clears the session whatever the body says.
         """
+        if action == "stop":
+            # Stop terminates the session; clearing the snapshot_id
+            # flips the panel back to idle on the next render. A 200
+            # means cascor has no session left, so no body can keep it.
+            return {"snapshot_id": None}
+
         new = dict(session)
-        if data:
-            # Trust the backend's authoritative state — it includes the
-            # post-action FSM state, time_index, and any auto-advanced
-            # epoch from a play action.
-            new.update(data)
+        payload, enveloped = ReplayPlayerPanel._control_payload(data)
+        result = payload.get("result")
+        if isinstance(result, dict) and result:
+            return ReplayPlayerPanel._apply_control_result(new, payload, result)
+        if payload and not enveloped and "result" not in payload:
+            # A flat session-shaped body (legacy / non-cascor backend):
+            # trust it as the authoritative state.
+            new.update(payload)
             return new
 
         if action == "play":
             new["playing"] = True
         elif action == "pause":
             new["playing"] = False
-        elif action == "stop":
-            # Stop terminates the session; clearing the snapshot_id
-            # flips the panel back to idle on the next render.
-            return {"snapshot_id": None}
         elif action == "seek":
             ti = dict(new.get("time_index") or {})
             ti["current"] = int(params.get("time_index", 0))
             new["time_index"] = ti
         elif action == "speed":
-            new["speed"] = float(params.get("value", SPEED_DEFAULT))
-            new["playing"] = abs(new["speed"]) > 1e-9
+            # Written where render_session reads it: the nested summary on a
+            # cascor-stored session, the top level on a flat one.
+            summary = ReplayPlayerPanel._summary_for_write(new)
+            summary["speed"] = float(params.get("value", SPEED_DEFAULT))
+            new["playing"] = abs(summary["speed"]) > 1e-9
         elif action == "range":
-            new["range"] = [int(params.get("start", 0)), int(params.get("end", 0))]
+            # ``params`` is the outbound request, whose ``end`` is exclusive, so
+            # store it in cascor's own ``{start, end}`` shape.
+            ReplayPlayerPanel._summary_for_write(new)["range"] = {"start": int(params.get("start", 0)), "end": int(params.get("end", 0))}
         return new
+
+    @staticmethod
+    def _summary_for_write(session: Dict[str, Any]) -> Dict[str, Any]:
+        """The dict ``_session_summary`` reads, made writable on ``session``.
+
+        A cascor-stored session nests the summary under ``session``; it is
+        copied so the caller's store dict is never mutated. A flat session is
+        its own summary.
+        """
+        inner = session.get("session")
+        if isinstance(inner, dict):
+            inner = dict(inner)
+            session["session"] = inner
+            return inner
+        return session
+
+    @staticmethod
+    def _control_payload(data: Any) -> tuple[Dict[str, Any], bool]:
+        """Unwrap cascor's success envelope from a /replay/control body (F-CANOPY-056).
+
+        Returns ``(payload, enveloped)``. Unwraps only when the envelope shape is
+        present (a ``status`` key alongside a dict ``data``), matching
+        ``NetworkEditorPanel._envelope_payload``; a non-dict body is empty.
+        """
+        if not isinstance(data, dict):
+            return {}, False
+        inner = data.get("data")
+        if "status" in data and isinstance(inner, dict):
+            return inner, True
+        return data, False
+
+    @staticmethod
+    def _apply_control_result(session: Dict[str, Any], payload: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
+        """Map cascor's post-action ``state_summary()`` onto the stored session (F-CANOPY-056).
+
+        ``result`` is flat: ``{snapshot_id, length, time_index: int, speed, paused,
+        range: {start, end}, weights_available, weight_sampling?}``. The stored
+        session keeps ``time_index`` as a dict (``snapshot_window`` / ``current``),
+        so the integer goes to ``time_index.current`` and never replaces the dict.
+        """
+        summary = ReplayPlayerPanel._summary_for_write(session)
+        if summary is session:
+            # Flat session: copy the summary keys across, but never the integer
+            # time_index or the snapshot_id over the session's own.
+            summary.update({k: v for k, v in result.items() if k not in ("time_index", "snapshot_id")})
+        else:
+            # Nested session: the summary IS a state_summary(), so take it whole.
+            summary.update(result)
+        cur = result.get("time_index")
+        if isinstance(cur, (int, float)) and not isinstance(cur, bool):
+            ti = session.get("time_index")
+            ti = dict(ti) if isinstance(ti, dict) else {}
+            ti["current"] = int(cur)
+            session["time_index"] = ti
+        if "paused" in result:
+            session["playing"] = not bool(result["paused"])
+        fsm = payload.get("fsm_state")
+        if fsm:
+            session["fsm_state"] = fsm
+        return session

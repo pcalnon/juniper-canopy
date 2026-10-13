@@ -237,8 +237,34 @@ class NetworkVisualizer(BaseComponent):
                     style={
                         "marginBottom": "10px",
                         "padding": "10px",
-                        "backgroundColor": "#e3f2fd",
+                        "backgroundColor": "var(--bs-info-bg-subtle, #e3f2fd)",
                         "borderRadius": "4px",
+                        "display": "none",
+                    },
+                ),
+                # F-CANOPY-046: an explicit control for clearing the selection.
+                #
+                # The panel used to promise "(Click elsewhere to deselect)" and
+                # clicking elsewhere did nothing: plotly emits ``plotly_click``
+                # ONLY on a point hit, so a click on empty canvas produces no
+                # event at all, ``clickData`` never changes, and the selection
+                # callback (``prevent_initial_call=True``) never runs. Measured
+                # live: 7 clicks on empty canvas, 0 events. The gesture was never
+                # implemented — only described.
+                #
+                # Ships hidden and is revealed by ``handle_node_selection`` only
+                # while something is selected, so the affordance appears exactly
+                # when it applies and there is no dead button on an empty panel.
+                html.Button(
+                    "Clear selection",
+                    id=f"{self.component_id}-clear-selection",
+                    n_clicks=0,
+                    title="Clear the current node selection",
+                    style={
+                        "marginBottom": "10px",
+                        "padding": "4px 10px",
+                        "fontSize": "12px",
+                        "cursor": "pointer",
                         "display": "none",
                     },
                 ),
@@ -348,13 +374,53 @@ class NetworkVisualizer(BaseComponent):
                 Input(f"{self.component_id}-display-mode", "value"),  # OF-1: Node Graph / Weight Matrix
                 Input(f"{self.component_id}-raw-topology-store", "data"),  # OF-1: Raw topology for heatmap
                 Input(f"{self.component_id}-depth-slider", "value"),  # CAN-020: hierarchy depth filter
-                Input("metrics-panel-metrics-store", "data"),
                 Input("theme-state", "data"),
                 Input(f"{self.component_id}-selected-nodes", "data"),
-                Input("fast-update-interval", "n_intervals"),
                 Input("ws-cascade-add-buffer", "data"),  # D-06: WS cascade_add events trigger topo refresh
             ],
             [
+                # F-CANOPY-039 (EXPERIMENT): ``tabpoll-topology`` demoted Input -> State.
+                #
+                # dash-renderer identifies a pending callback by getUniqueIdentifier
+                # (dash_renderer.dev.js:1715) = its inputs + outputs + state, and NOT the
+                # trigger. So a rebuild triggered by the store and one triggered by a bare
+                # tick are the SAME identity. At :3026 it computes
+                #     eDuplicates = concat(executing, requested) grouped by identity,
+                #                   each group sliced [0:-1]
+                # so when the tick re-requests while the good rebuild is still EXECUTING,
+                # the in-flight one is the duplicate and is passed to
+                # removeExecutingCallbacks. Its response then arrives for a callback no
+                # longer in ``executing`` and is discarded rather than applied.
+                #
+                # That is why the graph never paints: the 5 s tick retires the populated
+                # rebuild every time, and (post-canopy#537) the tick's own invocation
+                # short-circuits to no_update, so nothing repaints in its place. Measured
+                # 0 of 11 with identical deterministic signatures.
+                #
+                # State keeps ``n_intervals`` readable for the P2-1 pulse timing while
+                # removing the trigger -- the same Input -> State demotion F-CANOPY-037
+                # used one layer up.
+                State("tabpoll-topology", "n_intervals"),
+                # F-CANOPY-037: ``metrics-panel-metrics-store`` was an INPUT here — the
+                # Stage 2 "chained store" hazard the F-CANOPY-027 note above flagged and
+                # left open. That global store is rewritten by the 1 Hz ``fast-update-
+                # interval`` poll, so this callback's trigger was re-claimed every
+                # ~1-1.75 s while its own server time is 1.5-5 s: the rebuild could not
+                # finish before it was superseded, and the graph rendered in only 2 of 11
+                # measured live sessions (stats bar stuck at the layout-default "0"s,
+                # ``gd.data == []``). Demoting it to STATE keeps the data — the new-unit
+                # detection below still reads it on every run — while removing the
+                # trigger. The remaining Inputs are the ones that actually mean "the
+                # topology changed": the topology store, the tab-gated 5 s poll (slower
+                # than the 1.5-5 s rebuild, so it cannot starve it) and the WS
+                # ``cascade_add`` buffer.
+                #
+                # NB this is deliberately the fix over "suppress the store's no-op
+                # writes": that lever (``dashboard_manager._update_metrics_store_handler``)
+                # only helps at idle, where the refetch is identical. DURING a run the
+                # store changes legitimately at 1 Hz, so the starvation would survive
+                # exactly when the cascade is growing and the user is watching it.
+                State("metrics-panel-metrics-store", "data"),
                 State(f"{self.component_id}-view-state", "data"),
                 State(f"{self.component_id}-topology-hash", "data"),
                 State(f"{self.component_id}-new-node-highlight", "data"),
@@ -369,11 +435,11 @@ class NetworkVisualizer(BaseComponent):
             display_mode: str,  # OF-1: "node_graph" or "weight_matrix"
             raw_topology: Optional[Dict[str, Any]],  # OF-1: Raw topology for heatmap
             depth_filter: Optional[int],  # CAN-020: hierarchy depth filter (None = no filter)
-            metrics_data: List[Dict[str, Any]],
             theme: str,
             selected_nodes: List[str],
-            n_intervals: int,
             ws_cascade_add: Optional[Dict[str, Any]],  # D-06: WS cascade_add events
+            n_intervals: int,  # F-CANOPY-039: State, not Input (see above) — read, never a trigger
+            metrics_data: List[Dict[str, Any]],  # F-CANOPY-037: State, not Input (see above)
             view_state: Dict[str, Any],
             prev_hash: str,
             current_highlight: Optional[Dict[str, Any]],
@@ -388,10 +454,12 @@ class NetworkVisualizer(BaseComponent):
                 view_mode: View mode ('2d' or '3d')
                 display_mode: Display mode ('node_graph' or 'weight_matrix')
                 raw_topology: Raw weight-oriented topology for heatmap view
-                metrics_data: Historical metrics data for detecting new units
                 theme: Current theme
                 selected_nodes: List of selected node IDs
                 n_intervals: Current interval count for animation timing
+                ws_cascade_add: WS cascade_add buffer (D-06) — a real topology change
+                metrics_data: Historical metrics data for detecting new units. STATE,
+                    not an Input (F-CANOPY-037) — read on every run, never a trigger.
                 view_state: Stored view state (zoom, pan, dragmode)
                 prev_hash: Previous topology hash
                 current_highlight: Current new-node highlight state
@@ -399,18 +467,24 @@ class NetworkVisualizer(BaseComponent):
             Returns:
                 Tuple of updated components including new highlight state
             """
-            import dash
-
-            # Short-circuit: if only the fast-update-interval fired and there's no
-            # active highlight animation, skip the full graph rebuild.
-            try:
-                ctx = dash.callback_context
-                if ctx.triggered and len(ctx.triggered) == 1:
-                    trigger_id = ctx.triggered[0]["prop_id"]
-                    if "fast-update-interval" in trigger_id and not current_highlight:
-                        return (dash.no_update,) * 8
-            except Exception:  # nosec B110 — callback_context unavailable outside Dash request
-                pass
+            # F-CANOPY-039: canopy#537's bare-tick short-circuit lived here and has been
+            # REMOVED, because the demotion above makes it unreachable — ``tabpoll-topology``
+            # is State now, so it can never appear in ``ctx.triggered`` and the guard's
+            # ``tick_only`` branch can never be taken.
+            #
+            # It is worth recording that the guard did not merely fail to help: it made the
+            # failure WORSE. Before it, a bare tick ran a full rebuild that at least computed a
+            # correct figure (the measured "7 responses carrying the graph"). With the guard,
+            # the tick's invocation returned ``no_update`` for all 8 outputs — so it still
+            # retired the in-flight populated rebuild via the renderer's executing/requested
+            # dedup, and then contributed nothing in its place. That is what turned an
+            # intermittent miss into a deterministic never-paint: 0 of 11 sessions, identical
+            # signatures, against 11 of 11 once the tick stopped being a trigger at all.
+            #
+            # The lesson generalises: a server-side ``no_update`` does not save a renderer
+            # slot and does not prevent the invocation. The round trip already happened, and
+            # the invocation had already displaced its predecessor. Suppress the TRIGGER, not
+            # the work.
 
             def _dynamic_graph_config():
                 """Build dcc.Graph config with a timestamped screenshot filename."""
@@ -456,17 +530,43 @@ class NetworkVisualizer(BaseComponent):
             # cache invalidates when the filter changes; run AFTER the empty-
             # topology fast-path so we don't bother filtering an empty topo.
             n_hidden_total = topology_data.get("hidden_units", 0)
-            topology_data, depth_label = self._apply_hierarchy_filter(topology_data, depth_filter, n_hidden_total)
+            # The filter also returns the depth label, discarded here on purpose:
+            # the readout is rendered clientside (F-CANOPY-042) so it follows the
+            # slider instead of waiting on this callback's measured 1.5-31 s
+            # paint. That return value stays the *definition* the clientside rule
+            # transliterates — change one, change both.
+            topology_data, _ = self._apply_hierarchy_filter(topology_data, depth_filter, n_hidden_total)
             current_hash = compute_hash(topology_data)
             n_hidden = topology_data.get("hidden_units", 0)
 
-            # Detect newly added hidden unit from metrics delta
+            # Detect newly added hidden unit from metrics delta.
+            #
+            # M-TOPOLOGY-16: this was a LAST-PAIR check — it compared only
+            # ``metrics_data[-2]`` against ``[-1]``. The rebuild does not run on
+            # every metrics sample, so by the time it does run those two samples
+            # are almost always identical and the addition has scrolled into the
+            # middle of the window. Measured live, with the detector's own
+            # arguments logged from inside the callback:
+            #
+            #   metrics_len=4   last_pair=40->40  window_span=(39, 40)  armed=0
+            #   metrics_len=23  last_pair=17->17  window_span=(0, 17)   armed=0
+            #
+            # The second is the whole defect in one line: a window carrying
+            # SEVENTEEN unit additions, and the glow armed zero times. It was
+            # never flaky in the sense of "sometimes misses" — on this evidence
+            # it essentially never fires.
+            #
+            # Scanning backwards finds the MOST RECENT addition anywhere in the
+            # window, which is the one worth glowing. ``shown_unit`` below is what
+            # keeps that from re-arming forever (see _update_highlight_state).
             newly_added_unit = None
             if metrics_data and len(metrics_data) >= 2:
-                prev_hidden = metrics_data[-2].get("network_topology", {}).get("hidden_units", 0)
-                curr_hidden = metrics_data[-1].get("network_topology", {}).get("hidden_units", 0)
-                if curr_hidden > prev_hidden:
-                    newly_added_unit = curr_hidden - 1  # Index of new unit
+                for _i in range(len(metrics_data) - 1, 0, -1):
+                    prev_hidden = (metrics_data[_i - 1] or {}).get("network_topology", {}).get("hidden_units", 0) or 0
+                    curr_hidden = (metrics_data[_i] or {}).get("network_topology", {}).get("hidden_units", 0) or 0
+                    if curr_hidden > prev_hidden:
+                        newly_added_unit = curr_hidden - 1  # Index of new unit
+                        break
 
             # P2-1: Manage new node highlight state
             new_highlight = self._update_highlight_state(
@@ -547,10 +647,15 @@ class NetworkVisualizer(BaseComponent):
                 Output(f"{self.component_id}-selected-nodes", "data"),
                 Output(f"{self.component_id}-selection-info", "children"),
                 Output(f"{self.component_id}-selection-info", "style"),
+                Output(f"{self.component_id}-clear-selection", "style"),
             ],
             [
                 Input(f"{self.component_id}-graph", "clickData"),
                 Input(f"{self.component_id}-graph", "selectedData"),
+                # F-CANOPY-046: the gesture the panel promised does not exist, so
+                # give the user a control that does. This is an Input, not a
+                # State — the click on it IS the trigger.
+                Input(f"{self.component_id}-clear-selection", "n_clicks"),
             ],
             [
                 State(f"{self.component_id}-selected-nodes", "data"),
@@ -558,8 +663,8 @@ class NetworkVisualizer(BaseComponent):
             ],
             prevent_initial_call=True,
         )
-        def handle_node_selection(click_data, selected_data, current_selection, theme):
-            """Handle node selection via click or box/lasso select."""
+        def handle_node_selection(click_data, selected_data, clear_clicks, current_selection, theme):
+            """Handle node selection via click, box/lasso select, or the clear button."""
             import dash
 
             ctx = dash.callback_context
@@ -578,6 +683,25 @@ class NetworkVisualizer(BaseComponent):
             secondary_color = "#adb5bd" if is_dark else "#666"
             hint_color = "#9ca3af" if is_dark else "#888"
 
+            clear_base = {"marginBottom": "10px", "padding": "4px 10px", "fontSize": "12px", "cursor": "pointer"}
+            clear_hidden = {**clear_base, "display": "none"}
+            clear_visible = {**clear_base, "display": "inline-block"}
+
+            # F-CANOPY-046: the clear button, and the no-op guard.
+            #
+            # ``-selected-nodes`` is a real Input of ``update_network_graph``, and
+            # Dash fires every consumer of a store on ANY write, identical or not
+            # (this is what canopy#542 had to suppress for the topology store). So
+            # writing ``[]`` over an already-empty selection costs a full 1.5-31 s
+            # rebuild for no change — the waste class of F-CANOPY-037 / -039 / -043.
+            # Return ``no_update`` instead. The same guard covers the fall-through
+            # at the bottom of this function, which had been writing ``[]``
+            # unconditionally on every click that did not resolve to a node.
+            if "clear-selection" in trigger:
+                if not current_selection:
+                    return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+                return [], [], hidden_style, clear_hidden
+
             # Handle box/lasso selection
             if "selectedData" in trigger and selected_data:
                 points = selected_data.get("points", [])
@@ -590,35 +714,56 @@ class NetworkVisualizer(BaseComponent):
                             selected_nodes.append(node_id)
 
                     if selected_nodes:
+                        # F-CANOPY-046: no hint here. There is no click gesture
+                        # that clears a BOX selection — clicking a selected node
+                        # toggles only that node, and clicking empty canvas emits
+                        # nothing — so any text describing one would be false. The
+                        # visible "Clear selection" button carries the affordance.
                         info = html.Div(
                             [
                                 html.Strong(f"Selected: {len(selected_nodes)} node(s)"),
                                 html.Ul([html.Li(n.replace("_", " ").title()) for n in selected_nodes[:5]]),
-                                html.Span(
-                                    "(Click elsewhere to deselect)",
-                                    style={"fontSize": "11px", "color": hint_color},
-                                ),
                             ]
                         )
-                        return selected_nodes, info, visible_style
+                        return selected_nodes, info, visible_style, clear_visible
 
             # Handle single click selection
             if "clickData" in trigger and click_data:
                 points = click_data.get("points", [])
                 if points:
                     point = points[0]
-                    text = point.get("text", "")
+                    # F-CANOPY-044: fall back to the edge's ``customdata``.
+                    #
+                    # Edges are drawn TO node centres, so a click aimed at a node
+                    # resolves to an EDGE trace (measured 0 of 7 clicks landing on a
+                    # node trace), and edge points have no ``text`` -- so this guard
+                    # dropped every click and node selection was unreachable. The
+                    # edge traces now carry the endpoint node labels per point, so a
+                    # click on an edge vertex still identifies the node there.
+                    text = point.get("text") or point.get("customdata") or ""
                     if text:
-                        node_id = text.lower().replace(" ", "_")
+                        node_id = str(text).lower().replace(" ", "_")
 
                         # Toggle selection: if already selected, deselect
                         if current_selection and node_id in current_selection:
-                            return [], [], hidden_style
+                            return [], [], hidden_style, clear_hidden
 
-                        # Get node info
-                        curve_number = point.get("curveNumber", 0)
-                        layer_names = ["", "", "Input", "Hidden", "Output"]
-                        layer = layer_names[min(curve_number, 4)] if curve_number >= 2 else "Unknown"
+                        # F-CANOPY-045: derive the layer from the node LABEL, not
+                        # from ``curveNumber``.
+                        #
+                        # This was ``layer_names[min(curve_number, 4)]`` against
+                        # ``["", "", "Input", "Hidden", "Output"]``, which is correct
+                        # only if the node traces are curves 2-4 -- i.e. if exactly
+                        # two traces precede them. With one trace per connection they
+                        # sit at ~1888-1890, and ``min(n, 4)`` is 4 for all three, so
+                        # EVERY node reported "Output". Confirmed live for all three
+                        # node types once F-CANOPY-044 stopped masking it.
+                        #
+                        # The label already encodes the layer ("Hidden 0"), and it is
+                        # the same string the node_id is derived from, so this cannot
+                        # drift from the figure's trace composition again.
+                        layer_word = str(text).split()[0] if str(text).split() else ""
+                        layer = layer_word if layer_word in ("Input", "Hidden", "Output") else "Unknown"
 
                         info = html.Div(
                             [
@@ -626,16 +771,25 @@ class NetworkVisualizer(BaseComponent):
                                 html.Br(),
                                 html.Span(f"Layer: {layer}", style={"color": secondary_color}),
                                 html.Br(),
+                                # F-CANOPY-046: "or elsewhere" removed. Clicking
+                                # the node again DOES deselect it (the toggle
+                                # above), so this half of the hint was true and
+                                # stays; clicking elsewhere never worked.
                                 html.Span(
-                                    "(Click again or elsewhere to deselect)",
+                                    "(Click again to deselect)",
                                     style={"fontSize": "11px", "color": hint_color},
                                 ),
                             ]
                         )
-                        return [node_id], info, visible_style
+                        return [node_id], info, visible_style, clear_visible
 
-            # No valid selection, clear
-            return [], [], hidden_style
+            # No valid selection, clear — but only if there is something to clear.
+            # This return used to fire unconditionally, so a click that resolved
+            # to nothing paid for a rebuild even when the selection was already
+            # empty. See the note on the guard above.
+            if not current_selection:
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return [], [], hidden_style, clear_hidden
 
         @app.callback(
             Output(f"{self.component_id}-selection-info", "style", allow_duplicate=True),
@@ -656,22 +810,31 @@ class NetworkVisualizer(BaseComponent):
                 "border": "1px solid #2c5282" if is_dark else "1px solid #90caf9",
             }
 
-        # CAN-020: clientside slider-bounds + label sync. The slider's ``max``
-        # must track ``topology.hidden_units`` so the user can pick any cascade
+        # CAN-020: clientside slider-bounds sync. The slider's ``max`` must
+        # track ``topology.hidden_units`` so the user can pick any cascade
         # depth, and the container should hide entirely when there are zero
-        # hidden units (no useful filter to apply). The label below the slider
-        # reads "all" when the value is at max (no filter active) and the
-        # explicit count otherwise. Done clientside so we don't need to round-
-        # trip the topology store through the server every time a unit is added.
+        # hidden units (no useful filter to apply). Done clientside so we don't
+        # need to round-trip the topology store through the server every time a
+        # unit is added.
+        #
+        # F-CANOPY-042: this callback used to own ``-depth-label.children`` too,
+        # which is why the label never followed the slider. Its only Input is the
+        # topology store — the slider's value rides here as *State*, read only
+        # when something else fires — so moving the slider recomputed nothing.
+        # And the obvious repair is structurally unavailable: adding
+        # ``Input(-depth-slider, "value")`` here would make the same
+        # component-property both an Input and an Output of one callback, which
+        # Dash rejects at registration as a circular dependency. The label
+        # therefore lives in its own callback below.
         app.clientside_callback(
             """
             function(topology, currentValue) {
                 if (!topology) {
-                    return [0, 0, {marginBottom: "10px", padding: "0 10px", display: "none"}, "all"];
+                    return [0, 0, {marginBottom: "10px", padding: "0 10px", display: "none"}];
                 }
                 var nHidden = topology.hidden_units || 0;
                 if (nHidden === 0) {
-                    return [0, 0, {marginBottom: "10px", padding: "0 10px", display: "none"}, "all"];
+                    return [0, 0, {marginBottom: "10px", padding: "0 10px", display: "none"}];
                 }
                 // Bump max to current hidden-unit count.
                 // Preserve the user-picked value across grow events as long as
@@ -680,12 +843,10 @@ class NetworkVisualizer(BaseComponent):
                 if (v === null || v === undefined || v > nHidden) {
                     v = nHidden;
                 }
-                var label = (v === nHidden) ? "all" : (v + " of " + nHidden);
                 return [
                     nHidden,
                     v,
-                    {marginBottom: "10px", padding: "0 10px", display: "block"},
-                    label
+                    {marginBottom: "10px", padding: "0 10px", display: "block"}
                 ];
             }
             """,
@@ -693,10 +854,43 @@ class NetworkVisualizer(BaseComponent):
                 Output(f"{self.component_id}-depth-slider", "max"),
                 Output(f"{self.component_id}-depth-slider", "value"),
                 Output(f"{self.component_id}-depth-slider-container", "style"),
-                Output(f"{self.component_id}-depth-label", "children"),
             ],
             Input(f"{self.component_id}-topology-store", "data"),
             State(f"{self.component_id}-depth-slider", "value"),
+        )
+
+        # F-CANOPY-042: the depth-filter label, in its own callback so it can
+        # take the slider's value as an *Input*. Two Inputs, because the label
+        # is a function of both operands of the filter: the depth the user
+        # picked and the hidden-unit count it is measured against. A grow event
+        # changes the denominator without the user touching anything.
+        #
+        # The guard below is a transliteration of ``_apply_hierarchy_filter``'s
+        # (see that method) — deliberately, condition for condition, so the two
+        # can be compared by eye. The label must never claim a filter the server
+        # is not applying, and the ``depth <= 0`` arm is the half that was wrong
+        # at rest: the slider ships ``value=0``, the filter reads 0 as "no
+        # filter", and the old rule rendered that as "0 of 40" while all 40
+        # units were on screen. Clientside for the same reason as above, and
+        # because the alternative — routing the label out of the rebuild, which
+        # already computes it — would put a text readout behind that callback's
+        # measured 1.5-31 s paint (F-CANOPY-037 / -039 / -043).
+        app.clientside_callback(
+            """
+            function(depth, topology) {
+                var nHidden = (topology && topology.hidden_units) || 0;
+                if (depth === null || depth === undefined ||
+                    depth <= 0 || depth >= nHidden || nHidden === 0) {
+                    return "all";
+                }
+                return depth + " of " + nHidden;
+            }
+            """,
+            Output(f"{self.component_id}-depth-label", "children"),
+            [
+                Input(f"{self.component_id}-depth-slider", "value"),
+                Input(f"{self.component_id}-topology-store", "data"),
+            ],
         )
 
         self.logger.debug(f"Callbacks registered for {self.component_id}")
@@ -718,6 +912,14 @@ class NetworkVisualizer(BaseComponent):
         The filter is a no-op for topologies with zero hidden units. We never
         mutate the input dict — the input is a Dash store payload that other
         callbacks may also read, and mutation would race.
+
+        **The returned label is the canonical definition** even though the UI
+        renders its own copy: the ``-depth-label`` readout is computed
+        clientside (F-CANOPY-042) so it can follow the slider without waiting on
+        the rebuild, and that JavaScript is a condition-for-condition
+        transliteration of the guard below. The two must agree — a label that
+        says "0 of 40" while this function is returning the unfiltered topology
+        is exactly the defect F-CANOPY-042 recorded. Change one, change both.
         """
         if depth is None or depth <= 0 or depth >= n_hidden_total or n_hidden_total == 0:
             return topology, "all"
@@ -1027,6 +1229,28 @@ class NetworkVisualizer(BaseComponent):
             # Line width based on weight magnitude
             width = min(5, max(0.5, abs(weight) * 3))
 
+            # F-CANOPY-044: carry the ENDPOINT NODE LABELS on the edge itself.
+            #
+            # An edge is drawn TO the node centres, so its vertices sit at distance
+            # zero from the marker a user aims at, and plotly's click hit-test
+            # resolves to the edge rather than to the node -- measured 0 of 7 clicks
+            # landing on a node trace. Edge points had no ``text``, so
+            # ``handle_node_selection``'s ``if text:`` guard dropped every click and
+            # node selection was unreachable.
+            #
+            # ``customdata`` is per-POINT and plotly passes it through on
+            # ``clickData``, so a click on an edge vertex still says which node is at
+            # that vertex. The labels use the SAME ``"hidden_0" -> "Hidden 0"``
+            # form as the node traces (``_create_node_trace``), so the handler's
+            # ``node_id`` derivation is identical either way.
+            #
+            # Why not the alternatives, both tested rather than argued
+            # (``util/ad-hoc/2026-09-02_f044_fix_experiment.py`` in juniper-ml):
+            #   * reordering so node traces come FIRST does NOT work -- with the
+            #     node traces moved to curves 0/1/2, a click on a node still
+            #     resolved to an edge (curve 251). Data order does not break the tie;
+            #   * ``hoverinfo="skip"`` on the edges DOES work, but it removes the
+            #     "Weight: -0.420" tooltip, which is a shipped feature of this layer.
             edge_trace = go.Scatter(
                 x=[x0, x1, None],
                 y=[y0, y1, None],
@@ -1034,6 +1258,11 @@ class NetworkVisualizer(BaseComponent):
                 line={"width": width, "color": color},
                 hoverinfo="text",
                 hovertext=f"Weight: {weight:.3f}",
+                customdata=[
+                    from_node.replace("_", " ").title(),
+                    to_node.replace("_", " ").title(),
+                    None,
+                ],
                 showlegend=False,
             )
             edge_traces.append(edge_trace)
@@ -1200,11 +1429,53 @@ class NetworkVisualizer(BaseComponent):
         if output_weights:
             row_heights.append(max(output_size, 1))
 
+        # F-CANOPY-041: plotly enforces ``vertical_spacing <= 1 / (n_rows - 1)`` and
+        # raises ValueError otherwise — which Dash turns into an HTTP 500, so the
+        # Weight Matrix view did not degrade, it BROKE.
+        #
+        # The old form was a fixed two-branch heuristic (0.08 / 0.04) that ignored
+        # the constraint entirely. One row per hidden unit plus one for the output
+        # weights means 0.04 stops being legal at n_rows = 27, i.e. **26 hidden
+        # units**: at 25 units the limit is exactly 0.0400 and it just fits, at 26
+        # it is 0.0385 and every render raises. Measured live on a 40-unit cascade —
+        # limit 0.0250 against a requested 0.04, a 500 on every poll tick.
+        #
+        # It stayed invisible because the service default ``max_hidden_units`` is 10,
+        # and because F-CANOPY-040 meant this function was never reached with real
+        # data at all. Fixing that gate is what exposed this.
+        #
+        # Clamping to the library's own limit keeps the preferred spacing whenever it
+        # is legal and degrades gracefully — tighter gaps on tall cascades — instead
+        # of failing the request.
+        # F-CANOPY-041b: clamping to plotly's own limit is NOT ENOUGH, and the first
+        # fix (canopy#558) got this wrong in a way that was worse than the bug.
+        #
+        # ``1/(n_rows-1)`` is the value at which the gaps consume the ENTIRE figure.
+        # Plotly's row height is ``(1 - vertical_spacing*(rows-1)) * share``, so at
+        # exactly the limit every row is **zero height**. #558 used
+        # ``min(desired, 1/(n_rows-1))``, which returns exactly the limit for every
+        # n_rows >= 26 — so the HTTP 500 went away and the heatmap rendered 41 trace
+        # objects into 41 zero-height domains: a blank 4,200 px canvas, silently.
+        # Measured on the real function: min row height 0.000000 and total plot area
+        # 0.0000 at 25, 26 and 40 hidden units; even at 24 the plots had only 4% of
+        # the figure.
+        #
+        # A silent blank is worse than a 500: the 500 was at least visible, and
+        # M-TOPOLOGY-03's predicate ("a heatmap trace exists") cannot tell the two
+        # apart, so it passed on the blank.
+        #
+        # Reserve the plot area instead of exhausting it: gaps may take at most
+        # GAP_BUDGET of the figure, leaving the rest for the rows. Below ~8 rows the
+        # preferred spacing is smaller than the budget allows, so short cascades keep
+        # exactly their previous appearance.
+        GAP_BUDGET = 0.30
+        desired_spacing = 0.08 if n_rows <= 5 else 0.04
+        max_spacing = (GAP_BUDGET / (n_rows - 1)) if n_rows > 1 else desired_spacing
         fig = make_subplots(
             rows=n_rows,
             cols=1,
             subplot_titles=subplot_titles,
-            vertical_spacing=0.08 if n_rows <= 5 else 0.04,
+            vertical_spacing=min(desired_spacing, max_spacing),
             row_heights=row_heights,
         )
 
@@ -1565,8 +1836,18 @@ class NetworkVisualizer(BaseComponent):
         Returns:
             Updated highlight state or None
         """
-        # If a new hidden unit was just added, create/reset highlight to that node
-        if newly_added_unit is not None and newly_added_unit < n_hidden:
+        # M-TOPOLOGY-16: ``shown_unit`` is the dedupe memory, and it is what makes a
+        # WHOLE-WINDOW scan safe. The detector now reports the most recent addition
+        # anywhere in the metrics window, so without this the same unit would re-arm
+        # on every rebuild and the glow would never advance or fade. Worse, the
+        # obvious dedupe — "is it already the current highlight?" — does NOT close
+        # the loop: once the highlight fades to None the scan still reports that
+        # unit, and it re-arms forever. So the memory has to OUTLIVE the highlight,
+        # which is why the fade path below returns a marker rather than None.
+        shown_unit = (current_highlight or {}).get("shown_unit")
+
+        # If a genuinely NEW hidden unit was added, create/reset highlight to it.
+        if newly_added_unit is not None and newly_added_unit < n_hidden and (shown_unit is None or newly_added_unit > shown_unit):
             node_id = f"hidden_{newly_added_unit}"
             return {
                 "node_id": node_id,
@@ -1574,6 +1855,7 @@ class NetworkVisualizer(BaseComponent):
                 "state": "active",
                 "start_interval": n_intervals,
                 "fade_start_interval": None,
+                "shown_unit": newly_added_unit,
             }
 
         # No current highlight - nothing to do
@@ -1600,8 +1882,12 @@ class NetworkVisualizer(BaseComponent):
             fade_duration_ms = 2000  # 2 seconds
 
             if elapsed_ms >= fade_duration_ms:
-                # Fade complete, clear highlight
-                return None
+                # Fade complete. Clear the VISIBLE highlight but KEEP ``shown_unit``
+                # (M-TOPOLOGY-16) — returning a bare None here would erase the dedupe
+                # memory, and the whole-window scan would immediately re-arm the same
+                # unit on the next rebuild, glowing it forever in a fade/re-arm loop.
+                # ``node_id`` is None, so _calculate_highlight_properties renders nothing.
+                return {"node_id": None, "state": "done", "shown_unit": current_highlight.get("shown_unit")}
 
         return current_highlight
 
@@ -1622,6 +1908,12 @@ class NetworkVisualizer(BaseComponent):
             return None
 
         node_id = highlight.get("node_id")
+        # M-TOPOLOGY-16: a faded highlight is now a ``{"node_id": None, ...}`` marker
+        # that carries the dedupe memory rather than a bare None, so it reaches here.
+        # It must render nothing. Without this guard the marker would fall through and
+        # emit highlight props for a node id of None.
+        if not node_id:
+            return None
         state = highlight.get("state", "active")
         start_interval = highlight.get("start_interval", n_intervals)
 
@@ -1648,7 +1940,6 @@ class NetworkVisualizer(BaseComponent):
             "opacity": opacity,
         }
 
-    # TODO: this is throwing a logging error
     def _create_new_node_highlight_traces(
         self,
         G: "nx.DiGraph",
@@ -1682,8 +1973,17 @@ class NetworkVisualizer(BaseComponent):
 
         # Edge highlights (draw first, behind node)
         edge_opacity = 0.5 * opacity  # More muted than node
-        for from_node, to_node, _data in G.edges(data=True):
-            # self.logger.verbose(f"Edge Data: {data}")
+        # CLN-CN-12: previously iterated ``G.edges(data=True)`` so that a
+        # per-edge ``self.log_verbose(f"Edge Data: {data}")`` developer-trace
+        # could log every edge dict. That call was an attribute error
+        # (``log_verbose`` does not exist on this class; the correct API is
+        # ``self.logger.verbose(...)``) and was commented out with a TODO
+        # during the b47d55a refactor. Removed entirely because (a) the
+        # commented form was dead code, (b) re-enabling per-edge per-frame
+        # verbose logging from a visualizer hot path is the wrong
+        # ergonomics, and (c) the edge ``data`` dict is not used here —
+        # only the endpoint node IDs matter for hit-testing.
+        for from_node, to_node in G.edges():
             if (from_node == node_id or to_node == node_id) and from_node in pos and to_node in pos:
                 x0, y0 = pos[from_node]
                 x1, y1 = pos[to_node]

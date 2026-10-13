@@ -138,11 +138,11 @@ class TestDashboardManagerInitialization:
     def test_dashboard_manager_registers_default_components(self, minimal_config):
         """Test that DashboardManager registers all default components."""
         dm = DashboardManager(minimal_config)
-        # 15 default components: metrics, candidate_metrics, network, dataset,
+        # 16 default components: metrics, candidate_metrics, network, dataset,
         # decision, about, hdf5_snapshots, replay_player (CAN-015f),
         # network_editor (CAN-015h-5), redis, cassandra, parameters, tutorial,
-        # network_evolution, worker
-        assert len(dm.components) == 15
+        # network_evolution, worker, recurrence_request_preview (W1.2)
+        assert len(dm.components) == 16
 
     def test_dashboard_manager_components_initialized(self, minimal_config):
         """Test that all default components are initialized."""
@@ -291,15 +291,16 @@ class TestDashboardManagerHandlers:
 
     def test_toggle_dark_mode_handler_light_to_dark(self, dashboard_manager):
         """Test dark mode toggle returns dark when current is light."""
-        is_dark, icon = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=False)
+        is_dark = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=False)
         assert is_dark is True
-        assert icon == "☀️"
+        # F-CANOPY-001: the glyph is derived from the flag, not returned by the toggle.
+        assert dashboard_manager._dark_mode_icon(is_dark) == "☀️"
 
     def test_toggle_dark_mode_handler_dark_to_light(self, dashboard_manager):
         """Test dark mode toggle returns light when current is dark."""
-        is_dark, icon = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=True)
+        is_dark = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=True)
         assert is_dark is False
-        assert icon == "🌙"
+        assert dashboard_manager._dark_mode_icon(is_dark) == "🌙"
 
     def test_update_theme_state_handler_dark(self, dashboard_manager):
         """Test theme state handler returns 'dark' when is_dark=True."""
@@ -693,7 +694,7 @@ class TestTrainingButtonHandlers:
             "resume": {"disabled": False, "loading": False, "timestamp": 0},
             "reset": {"disabled": False, "loading": False, "timestamp": 0},
         }
-        result = dashboard_manager._update_button_appearance_handler(button_states=button_states)
+        result = dashboard_manager._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
         assert result[0] is False
         assert "▶" in result[1]
         assert "⏳" not in result[1]
@@ -707,7 +708,7 @@ class TestTrainingButtonHandlers:
             "resume": {"disabled": False, "loading": False, "timestamp": 0},
             "reset": {"disabled": False, "loading": False, "timestamp": 0},
         }
-        result = dashboard_manager._update_button_appearance_handler(button_states=button_states)
+        result = dashboard_manager._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
         assert result[0] is True
         assert "⏳" in result[1]
 
@@ -1238,7 +1239,7 @@ class TestParameterHandlers:
         import dash
 
         result = dashboard_manager._init_params_from_backend_handler(1, {"nn_learning_rate": 0.01})
-        assert result == (dash.no_update,) * 28
+        assert result == (dash.no_update,) * 29
 
     def test_init_params_from_backend_success(self, dashboard_manager, mocker):
         """Test init_params_from_backend fetches from backend when empty."""
@@ -1255,14 +1256,14 @@ class TestParameterHandlers:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(1, None)
-            # 28-tuple: (nn_max_iter, nn_max_epochs, nn_lr, nn_max_hu, ..., nn_output_epochs, nn_optimizer_type, nn_activation_function, applied)
+            # 29-tuple: (nn_max_iter, nn_max_epochs, nn_lr, nn_max_hu, ..., nn_output_epochs, nn_optimizer_type, nn_activation_function, nn_init_output_weights (D-2), applied)
             assert result[2] == 0.02  # nn_learning_rate
             assert result[3] == 15  # nn_max_hidden_units
             assert result[1] == 300  # nn_max_total_epochs
             assert result[5] == "convergence"  # nn_growth_trigger
             assert result[7] == 0.001  # nn_growth_convergence_threshold
-            assert result[27]["nn_learning_rate"] == 0.02
-            assert result[27]["nn_growth_trigger"] == "convergence"
+            assert result[28]["nn_learning_rate"] == 0.02
+            assert result[28]["nn_growth_trigger"] == "convergence"
 
     def test_init_params_from_backend_error(self, dashboard_manager, mocker):
         """Test init_params_from_backend returns no_update on error."""
@@ -1272,7 +1273,7 @@ class TestParameterHandlers:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(1, None)
-            assert result == (dash.no_update,) * 28
+            assert result == (dash.no_update,) * 29
 
     def test_track_param_changes_none_values(self, dashboard_manager):
         """Test track_param_changes handles None values in float comparison."""
@@ -1467,6 +1468,97 @@ class TestHandleTrainingButtons:
             assert action["success"] is False
             assert states["start"]["loading"] is False
 
+    def test_handle_training_buttons_failure_includes_command_and_detail(self, dashboard_manager, mocker):
+        """A rejected command must carry ``command`` + a non-empty ``detail`` so the
+        training-control-outcome-alert callback can name what failed and why
+        (no more silent button bounce). See
+        notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md."""
+        mocker.patch("requests.post", side_effect=Exception("Connection error"))
+
+        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
+            action, _states = dashboard_manager._handle_training_buttons_handler(
+                start_clicks=1,
+                pause_clicks=None,
+                stop_clicks=None,
+                resume_clicks=None,
+                reset_clicks=None,
+                last_click=None,
+                button_states={},
+                trigger="start-button",
+            )
+            assert action["success"] is False
+            assert action["command"] == "start"
+            assert "Connection error" in action["detail"]
+
+    def test_extract_training_error_detail_prefers_json_error_message(self, dashboard_manager):
+        """The structured cascor ``{"error": {"message": ...}}`` body wins, prefixed
+        with the HTTP status (this is the reason cascor#332 made specific)."""
+        resp = MagicMock()
+        resp.status_code = 409
+        resp.json.return_value = {"error": {"message": "Training cannot be started: Training data not provided"}}
+        exc = Exception("409 Client Error")
+        exc.response = resp
+        detail = dashboard_manager._extract_training_error_detail(exc)
+        assert "409" in detail
+        assert "Training data not provided" in detail
+
+    def test_extract_training_error_detail_falls_back_to_text(self, dashboard_manager):
+        """When the body is not the structured JSON shape, fall back to raw text."""
+        resp = MagicMock()
+        resp.status_code = 502
+        resp.json.side_effect = ValueError("not json")
+        resp.text = "Bad Gateway from upstream"
+        exc = Exception("502")
+        exc.response = resp
+        detail = dashboard_manager._extract_training_error_detail(exc)
+        assert "502" in detail
+        assert "Bad Gateway from upstream" in detail
+
+    def test_extract_training_error_detail_bare_exception(self, dashboard_manager):
+        """A transport error with no ``response`` falls back to the exception string."""
+        detail = dashboard_manager._extract_training_error_detail(ConnectionError("connection refused"))
+        assert "ConnectionError" in detail
+        assert "connection refused" in detail
+
+    def test_extract_training_error_detail_never_raises(self, dashboard_manager):
+        """Error surfacing must never itself raise — a response whose .json() and
+        .text both blow up still yields a string (the status)."""
+        resp = MagicMock()
+        resp.status_code = 500
+        resp.json.side_effect = RuntimeError("boom")
+        type(resp).text = property(lambda self: (_ for _ in ()).throw(RuntimeError("text boom")))
+        exc = Exception("500")
+        exc.response = resp
+        detail = dashboard_manager._extract_training_error_detail(exc)
+        assert "500" in detail
+
+    def test_surface_training_control_outcome_none_clears(self, dashboard_manager):
+        """No action yet → clear the surface (return None)."""
+        assert dashboard_manager._surface_training_control_outcome_handler(action=None) is None
+
+    def test_surface_training_control_outcome_success_clears(self, dashboard_manager):
+        """A successful command clears any stale error (return None)."""
+        result = dashboard_manager._surface_training_control_outcome_handler(action={"success": True, "command": "start"})
+        assert result is None
+
+    def test_surface_training_control_outcome_failure_renders_danger_alert(self, dashboard_manager):
+        """A failed command renders a dismissable danger alert naming the command
+        and the backend reason."""
+        result = dashboard_manager._surface_training_control_outcome_handler(action={"success": False, "command": "start", "detail": "HTTP 409: Training data not provided"})
+        assert result is not None
+        assert getattr(result, "color", None) == "danger"
+        assert getattr(result, "dismissable", None) is True
+        # children = [Strong("Start failed. "), Span(detail)]
+        assert "Start failed" in str(result.children[0].children)
+        assert result.children[1].children == "HTTP 409: Training data not provided"
+
+    def test_surface_training_control_outcome_failure_without_detail_has_fallback(self, dashboard_manager):
+        """A failure with no detail still renders an alert with a sensible default."""
+        result = dashboard_manager._surface_training_control_outcome_handler(action={"success": False, "command": "stop"})
+        assert getattr(result, "color", None) == "danger"
+        assert "Stop failed" in str(result.children[0].children)
+        assert "rejected" in result.children[1].children
+
     def test_handle_training_buttons_pause(self, dashboard_manager, mocker):
         """Test handler sends pause command."""
         mock_response = MagicMock()
@@ -1532,7 +1624,7 @@ class TestDashboardManagerMiscMethods:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_unified_status_bar_handler(n_intervals=1)
-            assert len(result) == 9
+            assert len(result) == 11  # Stage 2 + F-CANOPY-025: +training-status-store and +live-switch-gate elements
             assert result[3] == "Running"
 
     def test_update_unified_status_bar_handler_error_status(self, dashboard_manager, mocker):
@@ -1552,8 +1644,8 @@ class TestDashboardManagerMiscMethods:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_unified_status_bar_handler(n_intervals=1)
-            assert len(result) == 9
-            assert result[3] == "Error"
+            assert len(result) == 11  # Stage 2 + F-CANOPY-025: +training-status-store and +live-switch-gate elements
+            assert result[3] == "Backend Error"
 
     def test_update_unified_status_bar_handler_exception(self, dashboard_manager, mocker):
         """Test unified status bar handler handles exception."""
@@ -1561,5 +1653,5 @@ class TestDashboardManagerMiscMethods:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_unified_status_bar_handler(n_intervals=1)
-            assert len(result) == 9
+            assert len(result) == 11  # Stage 2 + F-CANOPY-025: +training-status-store and +live-switch-gate elements
             assert result[3] == "Error"

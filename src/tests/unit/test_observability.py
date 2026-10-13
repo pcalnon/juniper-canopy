@@ -455,7 +455,7 @@ class TestObservabilityShim:
         from juniper_observability.sentry import _strip_sensitive_headers as shared_strip
 
         with patch("sentry_sdk.init") as mock_init:
-            configure_sentry("https://k@o0.ingest.sentry.io/0", "juniper-canopy", "0.4.0")
+            configure_sentry("https://k@o0.ingest.sentry.io/0", "juniper-canopy", "0.5.0")
             kw = mock_init.call_args.kwargs
             assert kw["before_send"] is shared_strip
 
@@ -479,7 +479,7 @@ class TestObservabilityShim:
 
         from juniper_observability import ReadinessResponse
 
-        rr = ReadinessResponse(status="ready", version="0.4.0", service="juniper-canopy")
+        rr = ReadinessResponse(status="ready", version="0.5.0", service="juniper-canopy")
         assert abs(time.time() - rr.timestamp) < 60.0
 
     def test_async_probe_dependency_uses_native_httpx(self):

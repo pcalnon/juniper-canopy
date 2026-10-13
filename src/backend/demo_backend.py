@@ -28,7 +28,7 @@
 #
 #####################################################################################################################################################################################################
 # References:
-#     - juniper-ml/notes/MICROSERVICES-ARCHITECTURE_DEVELOPMENT-ROADMAP.md §5.5
+#     - juniper-ml/notes/JUNIPER_2026-04-20_JUNIPER-ECOSYSTEM_MICROSERVICES-ARCHITECTURE-DEVELOPMENT-ROADMAP.md §5.5
 #
 #####################################################################################################################################################################################################
 # TODO :
@@ -39,7 +39,7 @@
 #####################################################################################################################################################################################################
 
 import logging
-from typing import Any, List, Optional, cast
+from typing import Any, Dict, List, Optional, cast
 
 import numpy as np
 import torch
@@ -70,10 +70,22 @@ class DemoBackend:
     def backend_type(self) -> str:
         return "demo"
 
+    @property
+    def execution(self) -> str:
+        """Execution paradigm — demo streams per-epoch like cascor (A1-iii)."""
+        return "live"
+
     # --- Training control ---
 
-    def start_training(self, reset: bool = True, **kwargs: Any) -> ControlResult:
-        return cast(ControlResult, self._demo.start(reset=reset))
+    def start_training(self, reset: bool = True, start_fresh: bool = False, **kwargs: Any) -> ControlResult:
+        # N3 / Q4 / cascor C5: demo mode has no cascor ``start_fresh`` body field,
+        # so a fresh start maps onto DemoMode's reset path (clears epoch/metrics
+        # history for a clean run). ``start_fresh`` OR the legacy ``reset`` flag
+        # drives it; ``start_fresh=False`` with ``reset=False`` continues the
+        # current demo run (retaining history) — the Q4 use-case-1 default. The
+        # demo FSM now auto-resets from a terminal (COMPLETED/FAILED) state, so a
+        # continue restart from a converged demo run is no longer refused.
+        return cast(ControlResult, self._demo.start(reset=bool(reset or start_fresh)))
 
     def stop_training(self) -> ControlResult:
         self._demo.stop()
@@ -113,6 +125,13 @@ class DemoBackend:
                 "monitoring_active": status_name == "STARTED",
                 "input_size": network.input_size if network else 0,
                 "output_size": network.output_size if network else 0,
+                # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 / Issue #3 Phase 1 —
+                # demo parity for the cascor pending-dataset surface; drives
+                # the canopy banner without a dedicated poll.
+                "pending_dataset": getattr(self._demo, "_pending_dataset_config", None),
+                # §4.10: which dataset the simulator holds, in cascor's ``current_dataset``
+                # shape so ``main._backend_dataset_selection`` reads every backend the same way.
+                "current_dataset": self._current_dataset(),
             }
         )
         # Include training params from training_state if available
@@ -122,6 +141,24 @@ class DemoBackend:
                 if k in ts and k not in state:
                     state[k] = ts[k]
         return cast(StatusResult, state)
+
+    #: The stamp every generator-built demo dataset carries in its ``source`` key.
+    _GENERATOR_SOURCE_PREFIX = "generator:"
+
+    def _current_dataset(self) -> Optional[Dict[str, Any]]:
+        """The simulator's dataset identity, read from its ``source`` stamp (§4.10).
+
+        ``generator:<name>`` names a generator (``spiral`` for both spiral builders); any other
+        label -- an imported upload -- is a dataset whose identity canopy cannot name, so it
+        reads ``{"dataset_type": None}``, never ``None``: something IS loaded.
+        """
+        dataset = getattr(self._demo, "dataset", None)
+        if not dataset:
+            return None
+        source = dataset.get("source") if isinstance(dataset, dict) else None
+        if isinstance(source, str) and source.startswith(self._GENERATOR_SOURCE_PREFIX):
+            return {"dataset_type": source[len(self._GENERATOR_SOURCE_PREFIX) :] or None}
+        return {"dataset_type": None}
 
     def get_metrics(self) -> MetricsResult:
         return cast(MetricsResult, self._demo.get_current_state())
@@ -271,6 +308,11 @@ class DemoBackend:
         self._demo.regenerate_dataset(n_samples=n_samples, n_spirals=n_spirals, noise=noise, n_rotations=n_rotations)
         return self.get_dataset()
 
+    def regenerate_dataset_from_generator(self, generator: str, n_samples: int = 200) -> Optional[DatasetResult]:
+        """Load a JuniperData generator's dataset (xor/circles/moon/…) as the active dataset."""
+        self._demo.regenerate_dataset_from_generator(generator=generator, n_samples=n_samples)
+        return self.get_dataset()
+
     def get_decision_boundary(self, resolution: int = 50) -> Optional[DecisionBoundaryResult]:
         network = self._demo.get_network()
         if network is None:
@@ -313,8 +355,55 @@ class DemoBackend:
     # --- Parameters ---
 
     def apply_params(self, **params: Any) -> ApplyParamsResult:
-        self._demo.apply_params(**params)
+        result = self._demo.apply_params(**params)
+        if isinstance(result, dict):
+            return cast(ApplyParamsResult, result)
         return cast(ApplyParamsResult, {"ok": True, "data": params})
+
+    # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 / Issue #3 Phase 1 — demo parity for
+    # the cascor pending-dataset surface (cascor #242). Same wire shape as the
+    # service adapter so main.py's /api/stage_dataset and /api/cancel_pending_dataset
+    # routes don't need to special-case demo.
+
+    def stage_dataset(self, **canopy_params: Any) -> Dict[str, Any]:
+        return self._demo.stage_dataset(**canopy_params)
+
+    def cancel_pending_dataset(self) -> Dict[str, Any]:
+        return self._demo.cancel_pending_dataset()
+
+    def get_pending_dataset(self) -> Dict[str, Any]:
+        return self._demo.get_pending_dataset()
+
+    # Phase 2 P2-4 (Issue #3): demo parity for the experimental-functions gate.
+    # Demo mode tracks the toggle locally so the UI can be exercised without
+    # cascor — but no actual live-swap happens (P2-5 / P2-6 will gate behind
+    # demo-mode awareness).
+
+    def get_experimental_functions(self) -> Dict[str, Any]:
+        return self._demo.get_experimental_functions()
+
+    def set_experimental_functions(self, enabled: bool) -> Dict[str, Any]:
+        return self._demo.set_experimental_functions(enabled)
+
+    # Phase 2 P2-5 (Issue #3): demo parity for the Live Dataset Switch.
+    # Demo regenerates its synthetic dataset on swap so the UI works
+    # end-to-end without cascor; no actual cascade-correlation swap
+    # happens (demo has no real network to resize).
+
+    def swap_dataset_live(self, **canopy_params: Any) -> Dict[str, Any]:
+        return self._demo.swap_dataset_live(**canopy_params)
+
+    def cancel_swap_dataset_live(self) -> Dict[str, Any]:
+        return self._demo.cancel_swap_dataset_live()
+
+    # Phase 2 P2-7 (Issue #3): demo parity for the dataset_swap event feed.
+
+    def get_dataset_swap_events(self, since: Optional[str] = None) -> Dict[str, Any]:
+        return self._demo.get_dataset_swap_events(since=since)
+
+    def get_snapshot_dataset_swaps(self, snapshot_id: str) -> Dict[str, Any]:
+        """P2-7 follow-up: per-snapshot swap history (cascor #259)."""
+        return self._demo.get_snapshot_dataset_swaps(snapshot_id=snapshot_id)
 
     # --- Lifecycle ---
 

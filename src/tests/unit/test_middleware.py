@@ -126,11 +126,21 @@ class TestSecurityMiddleware:
         assert "/v1/health/ready" in EXEMPT_PATHS
         assert "/" in EXEMPT_PATHS
         assert "/api/health" in EXEMPT_PATHS
-        assert "/docs" in EXEMPT_PATHS
-        assert "/openapi.json" in EXEMPT_PATHS
-        assert "/redoc" in EXEMPT_PATHS
+        # APD-DATA-024: the documentation surface is deliberately NOT exempt, and the
+        # ABSENCE is what is pinned -- a re-add would silently republish the schema on
+        # any deployment that also relaxed _docs_enabled, and only an assertion catches it.
+        assert "/docs" not in EXEMPT_PATHS
+        assert "/openapi.json" not in EXEMPT_PATHS
+        assert "/redoc" not in EXEMPT_PATHS
 
     @pytest.mark.unit
     def test_exempt_path_prefixes(self):
         """Verify the exempt path prefixes contain expected entries."""
         assert "/dashboard" in EXEMPT_PATH_PREFIXES
+        # Bug 3 (2026-05-10, juniper-ml IMAGE_BUILD_BUGS): /metrics must be
+        # exempt as a prefix so the deploy stack's Prometheus can scrape it
+        # without an API key. Prefix-form is required because the metrics
+        # ASGI sub-app is mounted at /metrics, which 307-redirects to
+        # /metrics/ (and may add sub-paths in future prometheus_client
+        # versions). Matches cascor + data conventions.
+        assert "/metrics" in EXEMPT_PATH_PREFIXES

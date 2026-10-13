@@ -122,6 +122,24 @@ def _ensure_canopy_metrics() -> dict:
                 "juniper_canopy_demo_mode_active",
                 "Whether demo mode is currently active (0 or 1)",
             ),
+            # X7 slice 1c: what the status cache last concluded about cascor. One
+            # gauge per class, each 0 or 1, rather than an integer enum -- an
+            # alert reads ``...{status_class="unreachable"} == 1`` without having
+            # to know which number means what, and a renamed class breaks the
+            # query loudly instead of silently shifting an ordinal.
+            #
+            # Registered here but only OBSERVABLE once metrics are switched on:
+            # ``settings.metrics_enabled`` defaults False and gates both the
+            # middleware and the /metrics mount (main.py:229/460), and /metrics
+            # additionally sits behind the trusted-IP allowlist. Enabling that
+            # pair is PR 3, so this is a channel that exists rather than one that
+            # is watched -- design 5.6 says so rather than assuming otherwise.
+            "backend_status_class": register_or_reuse(
+                Gauge,
+                "juniper_canopy_backend_status_class",
+                "Status cache verdict for the cascor backend (1 for the active class, 0 otherwise)",
+                ["status_class"],
+            ),
             # METRICS-MON R2.2.5 / seed-05: inbound-frame validation counter.
             # Bumped from cascor_service_adapter._relay_loop when an inbound
             # frame fails validation against the canonical envelope schemas
@@ -330,6 +348,21 @@ def set_demo_mode_active(active: bool) -> None:
         active: Whether demo mode is currently active.
     """
     _ensure_canopy_metrics()["demo_mode_active"].set(1 if active else 0)
+
+
+def set_backend_status_class(status_class: str) -> None:
+    """Publish the status cache's current verdict (X7 slice 1c).
+
+    Sets the named class to 1 and every other known class to 0, so the series never
+    shows two classes true at once -- a gauge left at 1 after the state moved on is
+    exactly the stale-green failure this slice exists to remove.
+
+    Args:
+        status_class: One of ``ok`` / ``unreachable`` / ``indeterminate``.
+    """
+    gauge = _ensure_canopy_metrics()["backend_status_class"]
+    for known in ("ok", "unreachable", "indeterminate"):
+        gauge.labels(status_class=known).set(1 if known == status_class else 0)
 
 
 def inc_unrecognized_ws_frame(type_label: str, endpoint: str) -> None:

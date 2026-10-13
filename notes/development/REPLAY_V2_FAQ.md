@@ -5,6 +5,44 @@
 **Project**: Juniper Canopy
 **Tracks**: CAN-015g (Replay V2 — per-epoch weight history)
 
+> **Status note, 2026-09-24: the status line above, and the weight answers, the g-3 and g-7
+> related-work notes and the glossary below, describe the design, not what runs today.**
+>
+> - **A cascor session renders, and its ends are right** (F-CANOPY-059, canopy#694; canopy#697).
+>   `range` arrives as a dict `{"start", "end"}` and `render_session` no longer indexes it as a
+>   list. That `end` is exclusive and `time_index.snapshot_window.end_epoch` is a history length,
+>   while the scrubber and the range slider are inclusive. Before canopy#697 a chosen range
+>   skipped its last frame, both sliders offered one index cascor clamps away, and a session paint
+>   re-queued a control because those slider values are Inputs of `queue_control`. Contract:
+>   [replay index runbook](../../docs/AGENTS_REFERENCE.md#replay-index-contract).
+> - **Cascor's session rules around the player** (2026-09-24 ledger). A replay starts paused at
+>   its first frame and advances on Play. While it is open, cascor refuses training, a new
+>   network, and restore, resume and retrain, and it refuses Stop Training. **Reset Training**
+>   ends the replay and also discards the run's metrics and counters, not its data. Save a
+>   snapshot first: a replay loads the snapshot's network in place of the live one, and neither
+>   Reset nor Stop puts the old one back. The curl under
+>   [Verifying everything wired correctly](#verifying-everything-wired-correctly) reads
+>   `.data.session.weights_available` and `.data.session.weight_sampling`, and its POST starts a
+>   replay, so the same warning applies to it. Step 3 of that
+>   procedure (the `last sample` readout) stays empty, because no weight sample reaches the
+>   page (next bullet).
+> - **No replay weight reaches the page** (F-CANOPY-057 in the same ledger). The g-3
+>   emitter never reached cascor's `main`. Its PR, cascor#190, merged into its stacked base branch 13
+>   minutes after that branch had itself landed on `main` as cascor#189, and nothing merged the branch
+>   again. So cascor's `_ReplaySession._emit_frame` attaches no `weights` block. canopy's metrics relay
+>   also rebuilds each payload without the key, so it would drop one. The buffer therefore stays empty
+>   during a replay, as would the `last sample` readout if it were on screen, and the Network Evolution
+>   weight-norm section stays hidden.
+> - **The consumers are wired** (g-7): Decision Boundary and Network Evolution read the buffer. Passages
+>   below that say they are not yet wired, or that their rendering has not shipped, predate g-7.
+> - **The drain is gated** (canopy#676). It runs only once the page has started a replay.
+> - **A Stop clears the session.** A successful Stop clears the session and so parks the drain
+>   (F-CANOPY-056, fixed in code; F-CANOPY-059, which kept the Stop off screen, was fixed before it). A
+>   reload or a successful model select, which rebuilds the tab bar, does the same. No writer clears
+>   the buffer itself on Stop or on a new Replay.
+> - **The CPU answer is superseded.** Before it was gated, the 500 ms drain cost an idle page about a
+>   third of its response latency: two in-page A/B runs measured 42% and 32%.
+
 ---
 
 ## What this doc covers
@@ -18,7 +56,7 @@ why decision-boundary playback "lags" the metric scrubber.
 
 For implementation roadmap and design rationale see the parent plan
 at
-[`juniper-ml/notes/PHASE_6E_DEFERRED_CAN-015GH_DESIGN.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/PHASE_6E_DEFERRED_CAN-015GH_DESIGN.md).
+[`juniper-ml/notes/JUNIPER_2026-05-04_JUNIPER-ECOSYSTEM_PHASE-6E-DEFERRED-CAN-015GH-DESIGN.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/JUNIPER_2026-05-04_JUNIPER-ECOSYSTEM_PHASE-6E-DEFERRED-CAN-015GH-DESIGN.md).
 
 ---
 
@@ -238,7 +276,7 @@ window._juniperWsDrain.drainReplayWeights();
 ```bash
 # Confirm cascor is emitting the V2-shape events
 curl -s -X POST http://localhost:8200/v1/snapshots/<id>/replay \
-  | jq '.data.weights_available, .data.weight_sampling'
+  | jq '.data.session.weights_available, .data.session.weight_sampling'
 ```
 
 If `weights_available` is `false` here, no amount of canopy

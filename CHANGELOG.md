@@ -11,6 +11,2904 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The recurrence model's version is shown (W1.7, display half; F-C8).** canopy#722 made the version the service
+  reports, but `refresh_model_versions` had no production caller. Now the lifespan asks a configured recurrence
+  service at startup, and a selection of the recurrence model asks again while its backend is live. Both lookups run
+  in the background (`asyncio.to_thread`), and a refresh in flight is not repeated, so no page, selection or read
+  waits on the service. `GET /api/selection` and `POST /api/model/select` gain an optional `version`, present only
+  when a service reported one. The sidebar's Active line shows it: `Active: Recurrence (LMU) · version 0.5.0`.
+  Tests: `src/tests/regression/test_recurrence_version_display.py` (20). The displayed version comes from a fake
+  service, the selection answers while the lookup is blocked, and the lifespan starts the refresh and abandons an
+  unfinished one at shutdown.
+- **Regression suites harvested from the Cursor flood-3 test PRs** (canopy#699, #701, #704, #707, #715,
+  #718, #719, #720, #724, #727, #728): 15 new test files over the replay echo, shape and control-result
+  guards; the recurrence 4xx-detail and status-bar cut bounds; version lookup, `Retry-After` and the
+  restored model; the LMU dataset-spelling refusal and dataset-schema falsy seeds; the stage-payload and
+  restage falsy edges; the image credential scan and serve-check driver; and the open-PR budget alarm,
+  sequence-safety label hatch and post-merge verdict shells. Each was re-run on `main` and
+  mutation-checked against the code it pins, and corrected where the head was wrong: #715 replaced
+  `time.monotonic` / `time.sleep` globally without restoring them, which failed five unrelated tests on
+  every CI leg; #704 pinned the 401/403 text that #722 replaced. Test-only.
+- **Operator runbook for the Snapshots Replay tab index contract (docs for canopy#697).**
+  Cascor's range `end` is exclusive and `snapshot_window.end_epoch` is a history length; the
+  scrubber and range slider are inclusive. `render_session` writes those slider values, and
+  they are Inputs of `queue_control`, so without its equality guard every paint would queue a
+  control; since #697 the guard returns `dash.no_update`. Canonical page:
+  [AGENTS_REFERENCE.md § Replay index contract](docs/AGENTS_REFERENCE.md#replay-index-contract).
+  Pins: `src/tests/unit/frontend/test_replay_range_end_and_echo.py` (13 tests, landed with
+  #697). `notes/development/REPLAY_V2_FAQ.md` no longer says the player shows no session
+  against cascor (F-CANOPY-059 was fixed in canopy#694), and its `curl` check now reads
+  `.data.session.weights_available` and `.data.session.weight_sampling`.
+- **Operator runbooks for a refused recurrence fit, the in-sample regression card, and the
+  recurrence key, rate limit, restored model and service version** (documenting canopy#702 and
+  canopy#722). `docs/AGENTS_REFERENCE.md` § Recurrence fit refusal and in-sample scores covers the
+  4xx `detail` suffix (300 characters; a validation `input` is omitted), the 5xx omission, the
+  status-bar hover (480 characters), and the in-sample card. § Recurrence key, restored model, and
+  service version covers the 401/403 remedy that names `JUNIPER_CANOPY_RECURRENCE_API_KEY` and
+  `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`, the 429 `Retry-After` wait, `restored` counting as a
+  model, and the service-reported model version. Pointers in `docs/REFERENCE.md`,
+  `docs/DEVELOPER_CHEATSHEET.md` (procedures, the three recurrence variables, troubleshooting
+  rows), `docs/QUICK_START.md` (Issues 11 and 12), `docs/USER_MANUAL.md`,
+  `docs/DOCUMENTATION_OVERVIEW.md`, and the testing guides. Documentation only.
+- **Operator runbook for a Start refused because the staged dataset is wider than the network
+  (F1, F2).** The behaviour shipped in canopy#681. This documents the `[start_fresh_required]`
+  alert, why a cascor that lacks the marker gets no second wording, what **Start fresh** keeps
+  (applied parameters, snapshots) and discards (the model, retained metrics and history), and the
+  confirm order (re-stage, apply parameters, then `POST /api/train/restart`). Canonical section:
+  `docs/AGENTS_REFERENCE.md` § Start-fresh refusal (F1, F2); operator steps in `docs/USER_MANUAL.md`
+  and `docs/QUICK_START.md`; test commands in `docs/testing/`.
+- **Operator runbook for the sidebar model summary (X11; documents canopy#680).** `nn-model-summary`
+  says **Active** only after a round-trip names a `backend` that serves the selection; first paint and
+  a failed `GET /api/selection` read `backend status unknown`. Canonical section:
+  `docs/AGENTS_REFERENCE.md` § Sidebar model summary (X11); pointers in `docs/REFERENCE.md`,
+  `docs/DEVELOPER_CHEATSHEET.md`, `docs/QUICK_START.md` (Issue 14) and `docs/USER_MANUAL.md`.
+- **CI/CD documentation for the image serve-and-version gate, the Claude Code workflow, and Dependabot
+  floors versus the lockfile regen.** `docs/ci_cd/CICD_REFERENCE.md` gains § Container image
+  (`publish-image.yml`, `util/check_image_serves.py`) and § Claude Code workflow (`claude.yml`);
+  `docs/ci_cd/CICD_MANUAL.md` gains the matching runbooks and rewrites § Runbook: Dependabot lockfile automation:
+  Dependabot's floor edit lands in `conf/requirements_ci.txt`, while `lockfile-update.yml` compiles
+  `pyproject.toml` with `--upgrade`. `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`'s install pattern now
+  matches `ci.yml`, which installs `pyproject.toml` extras and not `conf/requirements_ci.txt`
+  (since canopy#650).
+- **The publish path asserts that the image serves, and that it is the version it is tagged**
+  (`util/check_image_serves.py`, new; `publish-image.yml`). The existing checks cover what the image
+  contains and that `juniper_canopy` imports. Neither can see a stale version. The worker's 0.5.0 and
+  0.6.0 images imported fine while their package reported `0.4.0`, and cascor's 0.11.0 stamps
+  `meta.version: "0.6.0"` on every enveloped response. The script starts the image as deployed, with
+  its own `CMD`. With no backend reachable, the dashboard runs in demo mode and still serves
+  liveness. It requires liveness on :8050, plus one version across the installed metadata,
+  `juniper_canopy.__version__` and the `/v1/health` body. On a release, that version is the one in
+  the **tag**. An absent `__version__` fails: the ecosystem's class-2 sweep once scored that shape as
+  a pass. The check runs on the PR arm against the image just built, and on the publish path against
+  each pushed digest before the digest is exported. It passes the published `juniper-canopy:0.8.1`.
+  The script is the same one the four other image repos carry.
+  `src/tests/unit/test_check_image_serves.py` (new, 22 tests) needs no Docker. This is item 5 of the
+  juniper-ml container-registry rollout handoff.
+- **Stage, live-swap and set-params requests now carry the dashboard's `nn_model`, and a stale or
+  incompatible request fails closed (FR9; the `nn_model` mirror clause of canopy#368).**
+  `current_nn_model` is server state, while `model-selection-store` is per-tab memory. A second
+  tab, or one opened before another client changed the model, holds a stale selection, and a
+  request made under it used to land on whichever backend was live. For example, a stale CasCor
+  tab could stage a rank-2 dataset into the recurrence backend, which failed only at *fit* time.
+  - `nn_model` is an **optional** field on both `StageDatasetRequest` and `SetParamsRequest`.
+    #368's own guardrail says a field absent from a request model is silently dropped, so the key
+    had to exist before anything could be checked.
+  - `/api/stage_dataset`, `/api/live_dataset_swap` and `/api/set_params` answer:
+    - **409** when the mirror names a model other than the server's selection;
+    - **422** for an unknown model;
+    - **422** on staging or live-swap when the dataset is known and that model cannot use it.
+  - A request without the key behaves exactly as before, so older clients and `curl` are
+    unaffected.
+  - The key is a routing field. It never reaches a backend, and it is kept out of the
+    applied-params store the dirty tracker reads.
+  - The sidebar's Apply Dataset and Apply Parameters send it, and so do the live-swap button and
+    the restart modal's re-stage and parameter apply. Each of those reads `model-selection-store`
+    as State, so a stale tab's swap or edited restart is refused before anything moves.
+    `/api/train/restart` itself carries no model identity, so a restart with nothing edited sends
+    no mirror and is not checked. The server accepts the key's absence.
+  - `src/tests/regression/test_request_nn_model_mirror.py`, mutation-checked at four sites.
+- **The selection survives a page reload: both selectors now hydrate from the backend (design
+  PR 2, §4.10; guardrails G7 and Y3).** The selection had no read side on either axis.
+  `model-selection-store` is memory-scoped and seeded with the default model, while
+  `current_nn_model` lives in the server — so every reload showed the seed over whatever was
+  running. With Recurrence selected over an unconfigured service, the sidebar read *"Active:
+  CasCor"* and left Start enabled against a selection the server then refused (Y3). The dataset
+  dropdown showed its layout default over whatever the backend had staged or loaded, which files a
+  benchmark result against the wrong dataset.
+  - **`GET /api/selection`** is new. It returns the recorded model in `POST /api/model/select`'s
+    shape, plus the backend's dataset: `pending` (it wins, because Start consumes it), `loaded`,
+    `none` or `unknown`.
+  - **Every backend reports `current_dataset`.** cascor carries it on `/v1/training/status` since
+    juniper-cascor#676, and `ServiceBackend` passes it only when cascor sent it, so an older cascor
+    reads *unknown*, not *nothing*. The recurrence backend records the dataset of its latest fit.
+    The demo simulator reads its dataset's `source` stamp, which the two spiral builders now set too.
+  - **At mount, `select_model` hydrates the model stores**, as their only writer. The gate then
+    gates the hydrated dataset against the hydrated model.
+    - The gate's `params-init-interval` Input is **removed**. It scheduled a second first-paint
+      pass against the seed model beside the hydrated one. The renderer's dedup let the hydrated
+      pass win in the end, but a seed pass that had already completed painted a state gated against
+      the wrong model first — the option list greyed for CasCor on a Recurrence reload.
+    - Its first-paint pass now comes from the hydration's store write, which happens on every mount,
+      read failure included, so N7's availability gate still applies at first paint.
+  - `⊥`-at-mount (OQ-N2) is **not** part of this change. Sources that name nothing the dropdown can
+    show keep the layout seed until it lands, because D-N10 requires this hydration first.
+  - `src/tests/regression/test_selection_reachability_guardrails.py` gains **G7**, asserted through
+    the real route and real backends as well as the registered callbacks. It also gains the **Y3**
+    read-side guardrail, which the design's §5 table lacked. Mutation-checked at four sites.
+- **The dataset selector mounts at `⊥` instead of a seeded `spirals` (OQ-N2 / D-N13).** The owner
+  accepted `⊥`-at-mount on 2026-09-02, on the condition that the hydration above land first
+  (D-N10). With that in place, the first interaction is an explicit choice, and `⊥` appears only
+  when it is true. What the mount lands on now depends on what the backend reports:
+  - **pending / loaded, nameable**: that dataset (G7).
+  - **none**: `⊥`. The backend holds nothing, and nothing is invented for it.
+  - **loaded but unnameable** (an unseeded generator another client staged, or raw inline data):
+    `⊥`, plus an informational notice naming what the backend holds. A silent `⊥` over a busy
+    backend would read as "nothing is loaded".
+  - **unknown** (a cascor that predates juniper-cascor#676, or a failed read): falls back to the old
+    default. `⊥` there would disable Start *and* Apply Dataset after every reload over a backend
+    that may be staged and ready — exactly the regression D-N10 exists to prevent. A failed read
+    now writes an explicit `unknown` block, so the gate can tell it apart from "holds nothing".
+  - **demo mode** still lands on spirals, because the simulator holds spirals, not because of a
+    seed.
+  - The restart modal's dropdown loses its seed too (it was overwritten on every open anyway), and
+    its `enabled[0]` fallback is recorded in code as a deliberate exception to OQ-6 (owner ruling,
+    2026-09-22).
+  - Mutation-checked: re-seeding the layout, dropping the unknown fallback, a failed read writing
+    `None`, and suppressing the unnameable notice each fail a test.
+
+- **Generator loads run `juniper_data_client.validate_npz_contract` as an ADVISORY second check**
+  (#559; owner ruling 2026-09-22). `regenerate_dataset_from_generator` now hands every downloaded
+  artifact to the shared contract validator before its own rank probe dispatches it. For a 3-D
+  artifact the validator checks sequence rules canopy's install never did: that a `t` / `dt`
+  channel is present, that `dt >= 0` with `dt[:, 0] == 0`, that `t` and `dt` agree, and that
+  masks are binary and correctly shaped. A violation is logged at WARNING, naming the source and
+  the rule, and **the install proceeds exactly as before**. The validator fails closed, and a
+  legacy `X_full`-only artifact makes it raise `KeyError`, while the ecosystem contract is
+  "tolerate `*_full`, never require it". So it reports and never gates. Any exception it raises
+  is caught, whatever the type, including an `ImportError` from a client too old to have the
+  helper. The rank probe stays the gate, and the comment above it no longer claims that the
+  helper is absent from the pinned client, a claim that has been false since the 0.5.0 floor.
+  `src/tests/unit/test_npz_contract_advisory.py` covers a violation that is reported and still
+  installs, a legacy artifact that is reported and still installs, an unexpected error that
+  never blocks the load, a client without the helper, and a valid artifact that logs nothing.
+  The unit lane runs without juniper-data-client (`src/tests/conftest.py` injects a stub module),
+  so the tests drive the wrapper through a faithful fake of the helper.
+  `test_the_fake_agrees_with_the_real_helper` holds the fake to the real one wherever the client
+  is installed, and skips, saying why, where it is not. Eight of the ten cases fail against the
+  pre-change tree. The other two are the negative control and the agreement check, and neither
+  exercises canopy code.
+
+### Changed
+
+- **The registry's availability and task-type comments match what juniper-data ships, and the recurrence
+  seed carries a gate note (W1.11, the canopy comment half).** The plan is juniper-ml's
+  `notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md`.
+  `src/model_registry.py` said `equities` and `equities_seq` are unavailable in the deployed container
+  because juniper-deploy pins juniper-data 0.15.0. The pin has been 0.16.0 since juniper-deploy#230; that
+  image carries `yfinance` (juniper-data#421), and juniper-deploy#231 gave the container its outbound
+  network, so both are available there. The vocabulary comment now says where `equities_seq` is
+  `regression`: from generator 6.0.0 (juniper-data#437, X8), on juniper-data `main` and in its releases
+  from 0.17.0. Releases through 0.16.0 still declare `classification`. The gate note records that
+  `compatible()` reads canopy's own label, never juniper-data's, so the pair passes the gate under
+  either. juniper-deploy#245's smoke completed the fit against published juniper-data 0.16.0 on
+  2026-10-08 without reaching the gate, because it staged without `nn_model`. The same stale pin claim
+  is corrected in three test docstrings (`src/tests/regression/test_dataset_generator_contract.py`,
+  `src/tests/unit/test_model_registry.py`), and the X8 test constant's comment gains the release
+  boundary. Comments only: no behaviour or assertion changed.
+- **The recurrence regression card says its numbers are in-sample (W0.7, the label half of plan
+  findings F-S5 and F-SCI3).** The plan is juniper-ml's
+  `notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md`.
+  `POST /v1/train` scores the fit on the training split it was fitted on. The card's title in
+  `MetricsPanel._build_oneshot_result` read
+  `Recurrence (LMU) — final regression metrics`, which looks like a held-out score. It now reads
+  `Recurrence (LMU) — in-sample (train split) regression metrics`, over a muted caption:
+  *Computed on the training split the fit saw; not a held-out score.* No number changes. The
+  service now returns `metrics_scope: "in_sample"` on that response (juniper-recurrence#190), and
+  the adapter already ignores a response key it does not know, so canopy needs no change for it.
+  A new test in `src/tests/unit/test_recurrence_service_adapter.py` pins that tolerance.
+  `src/tests/unit/test_recurrence_oneshot_result.py` gains 6 tests, 4 of which fail on the parent;
+  the other 2 check that the numbers and the awaiting placeholder are unchanged.
+
+### Fixed
+
+- **The top status bar applies its periodic responses again, and the metrics store's poll no longer evicts
+  itself in chains (F-CANOPY-055, F-CANOPY-058, F-CANOPY-068).** Both polls are now paced by request/ack.
+  Each feeder's only Input is a request store, written by a clientside pacer on the poll's existing
+  Interval, and each feeder echoes the request's `seq` into an ack store on every return path. The pacer
+  asks again only once the ack has caught up, or once the outstanding request is past its stale bound:
+  `POLL_PACER_STALE_MS` (30 s) or three times the longest round trip the page has seen on that poll,
+  whichever is longer, capped at 120 s. Each round trip is a lower bound (to the last pacer run that still
+  saw the request unanswered), so a throttled background tab cannot inflate it. On the fix's own verify leg,
+  on a host loaded by other work, requests stayed in flight up to 17.3 s, which a fixed 30 s would have
+  cleared by under 2x. Because it waits for the ack, the pacer never re-requests a feeder while its
+  request is in flight,
+  except for that deliberate stale re-issue. Two other paths can still re-request one, each costing at most
+  one response with no chain: the renderer's initial call after a live/one-shot model switch rebuilds the
+  tab container, and a pacer write that lands during that call.
+  - **F-CANOPY-055.** `update_unified_status_bar` rode `fast-update-interval` (1 s) directly. Its wire latency
+    had a median of 1.16 s (0.21–3.08 s), plus the renderer's queue, so each response was still unprocessed
+    when the next tick's request evicted it: 0 of 36 applied on the census, and status, phase, step, hidden
+    units and latency held their layout defaults for the life of the page. The Live Dataset Switch gate
+    computed in the same feeder could not land either.
+  - **F-CANOPY-058.** canopy#613's `running=` guard on `metrics-store-interval` is removed. The renderer
+    released it from `completeJob()` for an evicted request's late completion too, so any re-enable that
+    let the next request be made before the in-flight response landed could start a chain of evictions.
+    Two 25-minute census runs on `main` found 29 of 611 responses evicted, in runs of up to 11 and 34.8 s.
+    The display mode, the feeder's second Input until now, is now State of the feeder and an Input of the
+    pacer, compared by value, and a mode change reaches the handler as one even when its own request is lost (not when a raising handler acks it with
+    `no_update`; the next request is then a tick). Its mid-flight change
+    evicted the fetch in a synthetic app with this wiring; it was not observed in mid-request on canopy.
+    The full-history modulus (`FULL_HISTORY_POLL_TICK_MODULUS`, 5) now counts requests rather
+    than ticks of the guarded Interval, so `full` / `hidden_units` refetch on every fifth request
+    (expected every ~5–10 s; not measured).
+  - **F-CANOPY-068.** The strand watchdog is removed, with `METRICS_STORE_STRAND_TIMEOUT_MS`.
+    **Correction to the `[0.8.0]` entry**, which says it re-enabled the interval "once it has been
+    continuously disabled" for 30 s. It could not do that. It sampled `disabled` every 5 s, and its clock
+    reset only on a sample that found the lane enabled or the Apply clamp held, so it measured how long
+    every sample had found the lane disabled, not how long the lane had been. It fired 13 and 15 times in
+    the two runs, about 31 and 36 an hour, every time mid-fetch, with the lane enabled for 11–15 s of the
+    30 s before each fire, and 7 of those fires evicted a response. (That its samples kept phase with the
+    feeder's ~4.9 s cycle is inferred from a replay, not measured.) A request that never gets a response is
+    now re-issued by its own age, which measures progress, not samples of a prop.
+  - The gate is again the only writer of `metrics-store-interval.disabled`, and a completion can no longer
+    re-enable a lane under the CAN-000 Apply clamp. Both pacers ride clamped lanes.
+  - **One cost.** A failure outside a feeder's own `try` (a non-OK reply from Dash or a middleware, or a
+    network failure) lands no ack, so that lane waits out its stale bound, at least 30 s. canopy#613's guard
+    retried the metrics store on the next tick after a non-OK reply, and the status bar's 1 s lane retried
+    on the next tick.
+  - Tests: `src/tests/unit/frontend/test_f055_f058_f068_request_ack_pacer.py`. It pins the wiring and the
+    acks on every return path, runs the registered pacer under node, and simulates 10 idle minutes of a
+    healthy lane whose cycle is near 5 s: no request made in flight, none stale. The same simulation of the
+    old guard and watchdog fires falsely. `test_poll_gating.py` now requires one writer per `disabled` prop
+    and no `running=` guard, and `test_poller_budget.py` counts the paced feeders against their pacers'
+    lanes.
+  - Evidence: juniper-ml `notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phases 8,
+    9 and 11.
+- **`TestA422DetailReachesTheOperator` no longer reads the previous test's WARNING.** A failing recurrence
+  fit logs its WARNING after the state flips, outside the lock, so a test that waited only for
+  `is_training_active()` could end while its fit thread was about to log, and the record landed in the
+  next test's `caplog` (main's own macOS CI failed this way at #702, #708 and #711). An autouse fixture in
+  `src/tests/unit/backend/test_recurrence_backend.py` now joins every `recurrence-fit` thread after each
+  test. Test-only.
+- **A recurrence fit whose reply times out is followed, not failed, and a busy 409 names its holder (W1.5,
+  canopy half; F-C4, F-CON1, F-CON2).** Plan: juniper-ml
+  `notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md`; the service half is
+  juniper-recurrence#192. A fit that outlived the adapter's 300 s read timeout used to be recorded `failed`
+  (`RecurrenceServiceTimeoutError`). The service cannot cancel a fit, so it kept fitting, often to success, and
+  answered the next Start with a 409 that named nobody.
+  - Every `POST /v1/train` now sends `X-Request-ID: juniper-canopy-<uuid4 hex>`, which the service records as the
+    operation's `requested_by`.
+  - After a read timeout (only `httpx.ReadTimeout` means the request arrived) the backend stays `training`, with
+    the phase `fitting (upstream)`. It reads `GET /v1/training/status` every 5 s for up to 30 minutes. A read that
+    fails outright is tried again; three in a row settle the fit as `unknown`.
+  - The fit is `trained` only when the status names canopy's request as the operation that produced the model the
+    service holds. `trained` alone, a `restored` model, or a service without operation identity (0.5.0) never
+    count. It is `failed`, worded as its own error, when the service says it failed. Otherwise it is `unknown`:
+    `/api/status` gains `outcome_unknown: true`, and the status bar reads `Unknown — …` in amber, not `Stopped`.
+  - A busy 409's object `detail` is parsed into `RecurrenceTrainInProgressError.holder`. The message names the
+    holder's kind, `operation_id`, `busy_since`, `requested_by` and `dataset_id` after a remedy. The published
+    0.5.0's string detail reads exactly as before.
+  - A fit's `operation_id` is kept and reported on `/api/status`. Canopy calls neither `/v1/predict` nor
+    `POST /v1/model/snapshots`, so it has nowhere to send `expect_operation_id` yet.
+  - Runbook: `docs/AGENTS_REFERENCE.md` § Recurrence fit identity, timeouts, and one caller per service, which links
+    the service's own "One caller per service" section rather than repeating it. Also `docs/api/API_REFERENCE.md`,
+    `docs/USER_MANUAL.md` (item 10) and `docs/DEVELOPER_CHEATSHEET.md`.
+  - Tests: `src/tests/unit/test_recurrence_operation_identity.py` (58, including the four races) and
+    `src/tests/unit/backend/test_recurrence_backend_upstream.py` (19), over a fake service shaped after #192
+    (`src/tests/fixtures/recurrence_service_fake.py`). `util/ad-hoc/2026-10-08_w15_w17_mutation_check.py`
+    catches 19 of 19 mutations across both items.
+- **The wheel again carries `outbound_errors`, which `main` imports.** canopy#631's
+  `py-modules` list was not updated when #685 added `src/outbound_errors.py` and wired it into
+  `main`, `status_cache`, the cascor adapter and the recurrence backend. `packages.find` does not
+  collect a bare `src/*.py`, so a wheel built from `main` failed `import main` with
+  `No module named 'outbound_errors'` — the same shape as the 0.5.0–0.8.0 wheels, and invisible
+  to the image, which runs from `PYTHONPATH=/app/src`. `publish.yml`'s import smoke imports `main`,
+  so it would have stopped the next release at the build job. `outbound_errors` is now a
+  `py-module` and a target of `util/wheel_import_smoke.py`. `adapter_validation` stays out: nothing
+  imports it. `demo_mode` stays out of the bare smoke: it needs torch.
+  `src/tests/unit/test_wheel_import_smoke.py` pins both lists, the cwd guard, and that a module
+  resolved from the checkout is a failure.
+- **A recurrence fit sends the registry seed plus what the operator edited, and only parameters the
+  generator declares. A preview above Start shows the request (W1.2; plan findings F-C2, F-C3).** The
+  plan is juniper-ml's
+  `notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md`
+  (v1.4.1). **Owner ruling R7 is still open.** This applies its recommended default pending the
+  ruling, as the wave-1 PRs did for R2, R3 and R8. The alternatives touch one function,
+  `backend/recurrence_request.shape_staged_ref`.
+  - **F-C2.** The schema-driven form renders every field, and Apply posts every rendered value. An
+    untouched `equities_seq` form therefore staged seven keys beside the seed, and the fit request
+    carried all of them: `start_date`, `purchase_date`, `basis_price_field`, `week52_window`,
+    `normalize_features`, `max_symbols: 14` and `lookback: 64`. Under R7 the seed is the base. A
+    form value is sent only when it differs from what the form showed for that field: the seed's
+    value where the seed sets the key, juniper-data's default otherwise. An edited field wins over
+    the seed. Nothing in the form records "edited", since Dash inputs carry no dirty flag, so it is
+    read from the value. A field set back to what the form showed is not sent, which asks
+    juniper-data for exactly that value.
+  - **F-C3.** `nn_dataset_elements` / `nn_dataset_noise` became `n_samples` / `noise` for every
+    generator. No sequence generator declares either. The restart modal re-stages them for every
+    dataset type, which is how they reached one. **juniper-data did not refuse them, contrary to the
+    plan's expectation.** Its params models keep pydantic's default `extra` handling and drop unknown
+    keys, both on `main` (`462da218`) and at v0.16.0 (measured: `EquitiesSeqParams(n_samples=40,
+    noise=0.1, …)` constructs, and `n_samples` is absent from `model_dump()`). So the operator's
+    value vanished downstream while canopy reported it staged. Only declared parameters are
+    forwarded now, on the staged path and the Start-body path alike. A generic field is never sent
+    over a key the seed sets.
+  - **The declaration** is `dataset_schema.DECLARED_PARAM_DEFAULTS`: names and defaults for the six
+    rank-3 generators. It is a dated snapshot, as `KNOWN_UPSTREAM_GENERATORS` is, because canopy does
+    not depend on juniper-data and the test env's copy is 0.6.0. The snapshot was captured from
+    juniper-data `462da218` by `util/ad-hoc/2026-10-08_capture_sequence_generator_schemas.py`, which
+    also wrote `src/tests/fixtures/juniper_data_sequence_generator_schemas.json`, the exact
+    `GET /v1/generators` schemas. The field set and defaults are identical at v0.16.0. A rank-3 seed
+    without a declaration fails a test. A parameter juniper-data adds is withheld with a WARNING at
+    Start and named in the preview.
+  - **The preview.** `POST /api/recurrence/effective_request` returns the body the next Start would
+    send. It is computed by the same code Start runs, and it is read-only. The new
+    `frontend/components/recurrence_request_preview.py` shows it above Start for a one-shot model. It
+    lists where the request came from, the edited fields and the staged keys not sent. It refreshes
+    on events only, never on an interval; a clientside edge detector keeps the 5 s banner poll from
+    dispatching it. The preview and the Start both log the body at INFO with sorted keys. The JSON
+    the real adapter posts is pinned to the preview's body by `httpx.MockTransport`.
+  - `start_training` now reads the pending hyperparameters under its lock. It used to copy them
+    before taking it, while `apply_params` writes them inside it.
+  - Tests: `src/tests/regression/test_recurrence_staging.py` (+10: the plan's three, kept separate,
+    plus seven for the preview route and the restart-modal path).
+    `src/tests/unit/test_recurrence_request.py` (new, 68: the declaration against the capture,
+    including every `equities_seq` field; the rules one at a time; the body against the real
+    adapter). `src/tests/unit/frontend/test_recurrence_request_preview.py` (new, 18). One manifest row
+    in `src/tests/ui_contract/control_manifest.py`. `test_operator_edits_override_the_seed` asserted
+    `"n_samples": 40` for `equities_seq`, which was F-C3 itself. It now asserts the key is absent;
+    the rest of the test is unchanged. The component inventories count 16 components, the new panel
+    included: `src/tests/unit/frontend/test_dashboard_manager.py`,
+    `src/tests/unit/frontend/test_dashboard_manager_coverage.py` and
+    `src/tests/integration/test_dashboard_enhancements.py`. The hand-built manager in
+    `src/tests/unit/frontend/test_meta_parameters_layout.py` gains the panel's mock.
+  - `util/ad-hoc/2026-10-08_w12_mutation_check.py` puts each pre-change behaviour back at one site,
+    one arm at a time, on a copy of the tree. All 17 arms fail the tests they name, including the
+    pre-change merge (F-C2), the pre-change translation (F-C3), a preview that ignores the staged
+    dataset, and a declaration missing one `equities_seq` field (the plan's risk row). The unmutated
+    control runs 119 tests, the three files plus the harness's binding probe. 118 pass, and the
+    opt-in juniper-data source check skips, because the harness clears `JUNIPER_DATA_SRC`.
+- **A refused recurrence request now says what to do, and a restored model counts as a model (W1.6;
+  plan findings F-C5, F-C6, F-C7).** The plan is juniper-ml's
+  `notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md`
+  (v1.3.0). All three changes are in `src/backend/recurrence_service_adapter.py`.
+  - **401 / 403 (F-C5).** The remedy said `check recurrence_api_key`. That is the setting's Python
+    name, and no operator can set it. The message now reads
+    `… — set JUNIPER_CANOPY_RECURRENCE_API_KEY or JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE to a key the service accepts`,
+    still followed by the service's `detail`. This replaces the remedy the W0.5 entry below says the
+    401 / 403 branches kept.
+  - **`restored` (F-C6).** juniper-recurrence `main` reports a third `GET /v1/training/status` state:
+    a model loaded from a snapshot, with `restored_from` naming the snapshot. `RecurrenceStatus` gains
+    `restored_from` and a `model_present` property, true for `trained` and `restored` alike
+    (`MODEL_PRESENT_STATES`). Nothing else in canopy reads the service's status states. The backend's
+    `trained` belongs to its own fit state machine and is never fed from that route, and no UI mapping
+    reads the enum, so the property is the one place the rule lives, ready for W1.5's status poll. The
+    published 0.5.0 never sends `restored`, and its replies parse with `restored_from=None`.
+  - **429 (F-C7).** A rate-limited request raised the generic `RecurrenceServiceError`. It now raises
+    `RecurrenceServiceRateLimited`, a subclass, whose message carries the reply's `Retry-After` before
+    the detail:
+    `recurrence service error 429 on POST /v1/train — retry after 30 s: Rate limit exceeded. Try again in 30 seconds.`
+    `retry_after` holds the value as sent and survives pickling. To carry it in `args`,
+    `RecurrenceServiceError.__init__` now forwards any values a subclass appends (`*extra`). A plain
+    error still has exactly three.
+    An HTTP-date is shown as sent. The value is flattened and bounded to 64 characters. A 429 without
+    the header keeps the plain wording, so the existing 429 assertions hold unchanged.
+    `outbound_error_text` passes the message to `completion_reason` as is, as it does any answer with
+    a status code, so the backend needs no change.
+  - **The status bar's failure tooltip bound rises from 400 to 480 characters**
+    (`DashboardManager._FAILURE_REASON_TOOLTIP_MAX_CHARS`). The 401 / 403 wording grew from 90 to 174
+    characters, and `test_the_tooltip_holds_every_reason_the_adapter_can_build_uncut` exists to fail
+    exactly when that happens. A new test holds a 429 with its wait to the same bound.
+  - Checked against the real service as well as the mocks.
+    `util/ad-hoc/2026-10-05_recurrence_wire_contract_probe.py` builds juniper-recurrence's app in
+    process and drives canopy's adapter through the service's own middleware. It covers a wrong key, a
+    third request at 2 per minute, and a snapshot restore. Before this change the 429 was a
+    `RecurrenceServiceError` and `restored` had no `restored_from`. After it, the run produces the
+    messages and state above.
+  - Tests: `src/tests/unit/test_recurrence_service_adapter.py` (+22, `TestW16AuthRestoredRateLimit`;
+    two assertions that pinned the old remedy verbatim now pin the new one verbatim),
+    `src/tests/unit/backend/test_recurrence_backend.py` (+2, the real adapter's 401 and 429 reaching
+    `completion_reason`) and `src/tests/unit/frontend/test_completion_reason_status_bar.py` (+3).
+- **The registry no longer claims the recurrence model is version 0.1.0 (W1.7; plan finding F-C8).**
+  `src/model_registry.py` seeded the recurrence model with `version="0.1.0"` while the service it
+  names was 0.5.0. canopy has no package edge to the service that could keep such a constant true,
+  so the seed's version is now blank, and the version comes from the service.
+  - `RecurrenceServiceAdapter.service_version()` reads the `version` in `GET /v1/health`'s body when
+    there is one. The plan expected one there, but juniper-recurrence 0.5.0's body is
+    `{"status": "ok"}`, and the service mounts no `GET /`. So the version comes from `info.version` on
+    `GET /openapi.json`, which FastAPI fills from the `version=__version__` the service passes to
+    `create_app`. That route is open under juniper-service-core 0.5.0 and authenticated under 0.7.0,
+    and the adapter sends its key either way.
+  - `refresh_model_versions(version_sources, *, models=MODELS)` is one registry refresh. It asks each
+    source at most once and returns the specs with the answers baked in, so reading the result never
+    touches the network. It never raises for a version: a source that fails, times out or names no
+    version yields `unknown (version lookup failed)` (`SERVICE_VERSION_UNAVAILABLE`), with a WARNING
+    that names the failure. A model with no source keeps its spec.
+  - **No surface renders a model's version yet.** Nothing read `ModelSpec.version` before this change
+    either: not the model table, not the picker, not `/api/selection`. Wiring a refreshed registry into
+    one of them is the display half the plan leaves open.
+  - **The dependency floor is a documented contract floor, not a pin.** canopy imports no
+    `juniper_recurrence_client`; it speaks the REST contract through its own adapter. A
+    `juniper-recurrence-client` requirement would install a package nothing imports, would constrain
+    nothing canopy runs, and has no `[service]` extra to live in, since canopy has none. The floor is
+    `RECURRENCE_SERVICE_CONTRACT_FLOOR = "0.5.0"` in the adapter, and `docs/api/API_REFERENCE.md`
+    § Recurrence Service Contract (Recurrence Mode), new, names it. A test pins the two together.
+  - Tests: `src/tests/unit/test_recurrence_service_adapter.py` (+15, `TestServiceVersion`) and
+    `src/tests/unit/test_model_registry.py` (+15, `TestRefreshModelVersions`).
+  - `util/ad-hoc/2026-10-05_w16_w17_mutation_check.py` covers both entries. It puts each pre-change
+    behaviour back at one site, one arm at a time, on a copy of the tree. All 16 arms fail the tests
+    they name. The unmutated control passes all 239 tests: the four touched test files plus the
+    harness's import-binding probe.
+- **A failed recurrence fit now says why: the service's 422 `detail` reaches the log,
+  `completion_reason` and the status bar (W0.5; plan finding F-C1).** The recurrence service
+  answers a bad dataset with HTTP 422 and a JSON body such as
+  `{"detail": "invalid dataset: X_train has non-finite values (NaN/Inf)"}`. canopy dropped that
+  text at every hop. The adapter kept it only as `body=` on the exception, and
+  `outbound_error_text` passed on a message that did not contain it. The backend logged
+  `recurrence fit failed: recurrence service error 422 on POST /v1/train`, and the status bar showed
+  `Failed — recurrence service error 422 on POST /v1/train`.
+  - `RecurrenceServiceAdapter._parse` (`src/backend/recurrence_service_adapter.py`) appends a 4xx
+    body's `detail` to the message as `…: <detail>`. That covers the generic 4xx branch and the
+    409 and 401/403 branches, which keep their wording and their `check recurrence_api_key`
+    remedy. A string detail is used as is. A FastAPI validation list becomes `loc -> msg` pairs
+    joined by `; `, without the echoed `input`. Anything else is `str()`-ed. Whitespace is
+    collapsed and the detail is bounded to 300 characters. A non-JSON body, or JSON without a
+    usable `detail`, leaves the message unchanged, and `body=` still holds the raw response text.
+    Reading the detail never raises. A body nested deeply enough that the JSON decoder raises
+    `RecursionError`, which is not a `ValueError`, still produces the same typed error and message.
+  - **A 5xx detail is never appended.** On a 5xx the recurrence service relays its own
+    upstream's exception text. juniper-recurrence's `map_data_error` answers a juniper-data client
+    failure with `502 data fetch failed: {exc}`, and juniper-data-client 0.5.0 words a refused
+    header as `Request failed: … in header value: ' <key>'`. A padded juniper-data key on the
+    service would therefore reach `completion_reason`, which an anonymous caller can read. That is
+    the transport text #683 keeps from callers, relayed one hop. A 5xx message stays as it was:
+    status code, method and path.
+  - `outbound_error_text` (`src/outbound_errors.py`) is unchanged. A status-bearing error is the
+    upstream's answer and passes as `str(exc)`, which now includes a 4xx detail. A transport
+    failure carries no status code and is still named by its type only, so the #683 guarantee holds.
+    `docs/api/API_REFERENCE.md` § Upstream Failures now states what the recurrence answer carries.
+  - `RecurrenceBackend._run_fit` logs `recurrence fit failed (status=<code>): <message>`. The
+    WARNING carries the status code, the method, the path and the detail.
+  - The status bar keeps its 120-character label. When the label has to cut a failure reason, the
+    status text renders as a `Span` whose `title` holds the whole reason, so hovering shows the part
+    the cut dropped. The tooltip is bounded at 400 characters, which fits the adapter's longest
+    wording plus a 300-character detail. A reason the label already holds gets no tooltip. Every
+    other state still renders a plain string, and the callback's outputs are unchanged.
+  - Tests: `src/tests/unit/test_recurrence_service_adapter.py` (+34),
+    `src/tests/unit/backend/test_recurrence_backend.py` (+4),
+    `src/tests/unit/frontend/test_completion_reason_status_bar.py` (+18) and
+    `src/tests/unit/test_outbound_errors.py` (+6). `TestA422ReachesTheStatusBar` drives the whole
+    chain: a real adapter over an `httpx.MockTransport`, the real backend, the real `/api/status`
+    route and the real status-bar builder. 37 of the 62 fail on the parent. The other 25 are
+    controls that pin behaviour this change must keep: a body with no usable `detail`, a body the
+    JSON decoder cannot handle, a 5xx detail that relays a refused key, and a reason short enough
+    for the label. The 7 5xx pins also fail when the adapter appends a 5xx detail, which is what
+    makes them guards.
+- **The replay player's range plays its last frame, its sliders stop at the last frame, and its own
+  renders no longer send control requests (follow-ups to F-CANOPY-059 and F-CANOPY-056).**
+  - cascor's range end is exclusive (`set_range`: `[start, end)`), while the range slider is
+    inclusive. `queue_control` now sends the slider's upper value plus one, and `_session_range`
+    shows cascor's `end` minus one. Before, a chosen range never played its last frame.
+  - cascor's `snapshot_window.end_epoch` is the history length, not the last index.
+    `_session_window` now ends that window at `end_epoch - 1`, so the scrubber and the range slider
+    no longer offer a position cascor clamps away. The legacy `window` shape already held the last
+    index and is unchanged.
+  - `render_session` writes the scrubber, speed and range values, and those are `queue_control`'s
+    Inputs. So every session write sent a control request whose result wrote the session again.
+    This is the `can015-replay-player-control-loop` cycle in `test_f048_replay_cycle.py`, which F-059
+    and F-056 had kept unreachable. `queue_control` now ignores a value equal to what the session
+    already shows.
+  - The local fallback stores a range in cascor's `{start, end}` shape.
+  - `src/tests/unit/frontend/test_replay_range_end_and_echo.py` is new, with 13 tests; 9 of them fail
+    on the parent. Fixtures that encoded the old off-by-one are corrected:
+    - `test_f059_replay_range_dict.py`, `test_f056_replay_control_envelope.py` and
+      `test_replay_player_panel.py`: the expected values.
+    - `test_replay_player_panel_gate_coverage.py`: the outbound end.
+    - `test_p2_wave_batch_a.py`: a window whose `end_epoch` disagreed with its `length`.
+- **Against cascor, the replay player's controls take effect, and Stop ends the session
+  (F-CANOPY-056, P1).** canopy's `/replay/control` proxy passes cascor's envelope through unchanged,
+  `{status, data: {…, result}, meta}`. `_merge_session` overlaid that envelope onto the session, and
+  none of the keys `render_session` reads sits at its top level. So play, pause, seek, speed and
+  range never reached the session, and the sliders were written back to their stale values. A Stop
+  kept the session, because its clearing branch ran only for an empty body, so the weight drain kept
+  running until a reload or a model select. `_merge_session` now unwraps the envelope and maps
+  cascor's `result` (`state_summary()`) onto the stored session: the integer `time_index` goes to
+  `time_index.current`, `paused` sets `playing`, and the summary keys go to `data.session`, where
+  `render_session` reads them. Any successful Stop clears the session. The local fallback for
+  `speed` and `range` now writes to `data.session` too. `src/tests/unit/frontend/test_f056_replay_control_envelope.py`
+  (new, 19 tests) drives the registered `dispatch_control` with each action's envelope as cascor's
+  route builds it and renders the result. Its 9 control tests fail on the parent. Not yet driven
+  against a live cascor.
+- **Against cascor, the replay player shows its session again (F-CANOPY-059, P0; a regression from
+  canopy#532).** cascor serves the replay `range` as a dict, `{"start": …, "end": …}`, at
+  `data.session`. canopy#532 read it there but indexed it as a list, so `render_session` raised
+  `KeyError: 0` on every session cascor served. The Replay tab stayed at "No active replay session"
+  with no control on screen, and cascor stayed in REPLAYING. The only exit was the sidebar's Reset
+  Training. The new `ReplayPlayerPanel._session_range` accepts the dict, the legacy list or nothing,
+  and clamps the result to the snapshot window. `src/tests/unit/frontend/test_f059_replay_range_dict.py`
+  (new) runs the registered callback on the payload the E2E ledger's Phase 1 measured live. It raises
+  `KeyError: 0` on the parent. canopy#532's fixture in `test_p2_wave_batch_a.py` was labelled
+  "the exact shape measured off the running service" while it typed the range as a list. It now uses
+  cascor's dict shape and says what it is. This fix exposes F-CANOPY-056, which F-059 had masked:
+  control results still never reach the session.
+- **A Start refused because the staged dataset is wider than the network now says how to proceed
+  (F1).** cascor cannot widen a network on a plain Start, which continues the current network.
+  - Since juniper-cascor#687, cascor refuses such a Start **before** loading anything, and
+    opens its message with `[start_fresh_required]`.
+  - The alert now names the remedy and the two controls that apply it: **Stop & Restart with new
+    dataset** and **Start fresh**. The pending banner stays up, because the dataset stays staged.
+    The alert also says the results shown are still the previous run's.
+  - It stays until dismissed, because it carries an instruction. Every other Start failure keeps
+    the generic alert.
+  - Before, the alert showed cascor's raw `_pad_dataset_for_network: … resize the network first`.
+    By then cascor had already switched the loaded dataset, so the page showed the previous run's
+    results under the new dataset's name (juniper-ml's A-N2 run, F1). `equities` (15 features)
+    and `mnist` (784) hit this against any 2-feature network.
+  - There is no fallback for an older cascor. It consumed the staged dataset before refusing, so
+    the banner the alert points at was gone.
+- **The restart modal called Start fresh "functionally a clean stack launch" (F2).** Since
+  juniper-cascor#685, a start-fresh carries the applied parameters onto the rebuilt network, so
+  the parameters edited in the modal survive it (owner ruling 2026-09-24). A clean launch would
+  have reset them to the engine defaults.
+  - The toggle label and both help texts now say the parameters carry over.
+  - Against a cascor older than #685 the edits are still dropped, and the text is then wrong.
+  - `src/tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py` covers both entries.
+    It pins the marker literal, and it checks that the controls the alert names exist under
+    those labels.
+- **The sidebar said "Active: CasCor" before anything had asked the backend (X11).**
+  `_selection_is_live` answers `True`, `False` or `None`, and the model summary rendered `None`
+  exactly like `True`. So the first-paint seed read *"Active: CasCor"* before any read. A mount
+  whose `GET /api/selection` failed kept that text too, so the "Active" claim came from the one
+  path that had just failed to reach the backend.
+  - Following the owner's ruling of 2026-09-24, an unknown liveness now reads **"Selected: CasCor
+    (Cascade-Correlation) · backend status unknown"**. "Active" requires a round-tripped payload
+    whose backend serves the model. A lifecycle note such as `· coming soon` still comes first.
+  - The failed-read path now writes that text instead of leaving the summary alone, so the summary
+    follows the key store's fallback to the default model.
+  - Start gating is unchanged, because unknown is still not disagreement. The `False` state still
+    names the backend that is really running.
+  - `TestX11UnknownLivenessIsNotActive` in
+    `src/tests/regression/test_selection_reachability_guardrails.py`, mutation-checked at five
+    sites against the full unit lane.
+- **A model swap could strand the dashboard on a tab that no longer exists (Y4).** A one-shot model
+  rebuilds the tab bar without the five cascade-only tabs, and the active-tab restore guarded only
+  "no saved tab" and "saved equals shown". Measured in headless chromium: on Network Topology, a
+  swap to a one-shot model left **no** tab highlighted and **zero** visible panes; a reload with a
+  persisted cascade tab restored it at mount and was stranded the same way once the rebuild landed.
+  The restore now reads the rendered tabs as an Input. It never restores a tab that is not rendered,
+  keeps the shown tab when it is, and otherwise falls back to the first rendered tab (Training
+  Metrics). The reset lives in the existing restore writer, so it adds no `active_tab` writer. The
+  app has **three** such writers, not the two the source-level test counts:
+  `hdf5_snapshots_panel`'s replay hand-off is the third.
+- **Whether a selection control was greyed out was decided by the reason-string helpers, not by
+  `compatible()` (Y8).** `gated_dataset_options` disabled an option when `dataset_reason` returned
+  a string, and the model table disabled a Select when `model_reason` did. Both helpers
+  re-implemented all three compatibility axes, so the load-bearing predicate had three independent
+  expressions. `disabled` is now `not compatible()` on both surfaces, and the helpers only choose
+  the wording, with a generic phrase for an axis they do not name, so a greyed control can never
+  read `None`. A universal test pins `disabled == not compatible()` and reason-iff-disabled over
+  every pair of the production registry and of a synthetic registry that fails each axis alone. The
+  production registry alone cannot see a dropped temporal axis, because every shipped rank-3 model
+  is Δt-aware.
+- **The model table's Select button carried its reason only in `title=` (Y7, model-table half).**
+  Each row's compatibility cell now has a deterministic id derived from the model key, and the
+  row's Select points at it with `aria-describedby`, as
+  `JUNIPER_2026-09-02_JUNIPER-CANOPY_SELECTION-REACHABILITY-DESIGN.md` §4.3 (juniper-ml) specifies.
+  The accessible description is therefore the rendered reason. The control is now an `html.Button`
+  carrying the class string `dbc.Button` rendered, because dbc 2.0.4's `Button` rejects `aria-*`
+  props. The reason is no longer repeated in `title=` on a disabled Select: Bootstrap gives
+  `.btn:disabled` `pointer-events: none`, so that tooltip could never show. Enabled Selects keep
+  their hover hint.
+- **An idle dashboard spent about a third of its response latency on a timer with nothing to do:
+  the replay weight drain, a 2 Hz timer, ran on every tab for the life of the page.**
+  `replay-player-panel-weight-drain` drains the CAN-015g replay-weight ring buffer. It ran on no
+  tab gate, and every tick was a store update, which re-runs the page's selectors, plus a clientside
+  callback that found nothing. Today it always finds nothing. cascor's replay frames carry no
+  weights: `_emit_frame` adds none, and `weights_at` has no production caller. canopy's metrics relay
+  also rebuilds each payload without that key. So no replay weight reaches the page. The page's
+  main thread sits at ~0.1% idle, so the timer's cost came straight out of response delivery. An
+  in-page A/B on an idle page parked the timer and compared each window with its two neighbouring
+  baselines (juniper-ml `util/ad-hoc/2026-09-23_canopy_timer_park_ab.py`, two runs in opposite
+  orders). It cut the median response-delivery latency by **42% and 32%**. A live check of this
+  build (`ce78e0de`) against `3a6dea95`, its parent at the time (`2026-09-23_idle_cuts_live_check.py`),
+  was less clear. One cuts window
+  beat both of its neighbours, and the other was 1.5–2.7% slower than both, so the check scored the
+  latency inconsistent. An earlier check of the same change, built on canopy#670's branch, scored
+  it consistent.
+  - **The drain now ships disabled** and runs only once this page has started a replay. A new
+    clientside callback, the only writer of its `disabled`, enables it when
+    `replay-player-session` holds a `snapshot_id`. The snapshots panel writes the session on POST
+    `/replay`.
+  - **Against cascor it then runs until the page reloads, or until a successful model select
+    rebuilds the tab bar.** A Stop does not clear the session. `_merge_session` clears
+    `snapshot_id` only when the stop response is empty, and the proxied cascor envelope never is,
+    so the old id survives the overlay. That is an existing defect, F-CANOPY-056 in the juniper-ml
+    E2E evidence ledger (`notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`).
+    Against cascor the player's Stop is not on screen anyway: the player never shows a session, because its render
+    raises on cascor's `range` (F-CANOPY-059, same ledger). This change neither causes nor fixes
+    either.
+  - **Nothing a user sees changes.** No replay weight reaches the page (F-CANOPY-057 in the same
+    ledger). The Decision Boundary consumer also ignores replay weights without a session, and the
+    JS ring buffer is capped at 100 entries, so a paused drain cannot grow it.
+  - **The metrics panel's own 1 Hz `-update-interval` is removed.** No callback took it as an
+    Input. Its measured effect alone was nil (−1.6%), so this is hygiene. Its period setting
+    (`update_interval` / `JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS`) is still parsed and still
+    drives nothing, exactly as before, and the two docs rows now say so.
+  - New `src/tests/unit/frontend/test_idle_dispatch_cuts.py` fails CI on any `dcc.Interval` in the
+    built app that no callback consumes. It also pins the drain's gate: one writer, clientside, from
+    the session, and no primary writer of the session that could hold it. It runs the gate under
+    node. 7 of its 9 tests fail on the parent; the two premise pins hold on both.
+  - **Left alone, with a reason:** the training-state store's `/api/state` rewrites that change
+    only `timestamp`, the third cut the ledger listed. The rewrite is the clock of the "Phase
+    Duration" readout, which computes elapsed time at callback time. Suppressing it would freeze
+    the readout whenever the state is otherwise static, so it needs its own design.
+- **The entry above merged before its review's third round was applied. A comment and a test
+  message still tied the weight drain to a "replay session" that a Stop does not end, and comments
+  and docs described a weight emitter that never reached cascor's `main`. The new Interval tests crashed, instead of
+  refusing, on an Interval with no id, and one of them also on a pattern-matching id.** canopy#676's
+  commit message says its review ran "two rounds; prose corrections only". It ran three, and rounds
+  1 and 2 each changed test code. The message also says the comments claiming cascor emits weights
+  were corrected; one was not. And it says that after a replay the drain "runs until the page
+  reloads, as it always ran before"; a successful model select also ends it. Its "live check of this
+  build against its parent" and "half of the page's steady-state ticks" were loose too (round 3's
+  finding 4); their copies in the tree are fixed below. The juniper-ml E2E evidence ledger has the
+  record
+  (`notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phase 9).
+  - `replay_player_panel.py`: the gate comment said the drain is disabled "unless a replay session
+    exists". It keys on a stored `snapshot_id`, which a Stop against cascor does not clear
+    (F-CANOPY-056). So once a replay starts, the drain runs until the page reloads, or until
+    a successful model select rebuilds the tab bar and re-mounts the session Store empty. The entry
+    above said "until the page reloads" and missed the second path; it is corrected in place, and so
+    is the same sentence in the drain's comment. The entry's "live check of this build against its
+    parent" now names the pair.
+  - `ws_dash_bridge.js`: the drain comment no longer cites a "g-3 emitter" for the weight blocks,
+    and the buffer comment's "Each carries…" has its antecedent back. `replay_forward.py`'s module
+    docstring said cascor's g-3 emitter produces the weight payloads it decodes. None does
+    (F-CANOPY-057): cascor's `_emit_frame` sets no weights. It now says the module has no live input
+    yet.
+  - `docs/USER_MANUAL.md` said weight samples stream during playback; it now says none reach the
+    page. `notes/development/REPLAY_V2_FAQ.md` described the weight stream as shipped, said a Stop
+    clears the buffer, and called the drain's CPU cost negligible. It gains a dated status note above
+    its answers instead of a rewrite; the note also records that against cascor the player shows no
+    session at all (F-CANOPY-059).
+  - `test_idle_dispatch_cuts.py`: `_dead_intervals` refuses, by name, an Interval with no id (the
+    check raised `KeyError`) or a pattern-matching id. The sibling tests look ids up through two
+    helpers that accept both shapes; a dict id made the old set comprehension raise `TypeError`.
+    Three new tests pin the check itself, including that it reports every unconsumed Interval and
+    only an `n_intervals` Input counts as a consumer. A fourth pins the id lookups the wiring tests
+    use. A mutant that drops either refusal, reverts either helper, makes the check report nothing, or
+    counts as a consumer another property, a State, an Output writer or an id matched by substring
+    (`fe` in `fed`) fails one of them. The gate's rule test is renamed to what it tests. The module
+    docstring's "half of the page's steady-state ticks" now says the two timers fired 3.0 of the 6.6
+    ticks per second the layout's enabled Intervals nominally fire (45%, by the static census, which
+    leaves out the one-shot `params-init-interval`).
+- **The replay controls never applied: play, step, start, end, the speed buttons and the slider
+  did nothing on any page load (F-CANOPY-048).** `handle_replay_controls` (Input
+  `replay-slider.value` → Output `replay-state.data`) and `update_replay_ui` (Input
+  `replay-state.data` → Output `replay-slider.value`) formed a cycle across two callbacks.
+  dash-renderer promotes a requested callback only when none of its Inputs, less its own Outputs,
+  lies in the downstream closure of any pending callback, itself included (`getReadyCallbacks`,
+  `dash_renderer.dev.js:1633-1665`, dash 4.2.0). Each covered its own Input through the other, so
+  neither was ever ready, and the circular-dependency breaker (`:3064`) fires only when nothing
+  else at all is pending, which canopy's pollers never allow. Measured live: all three replay
+  callbacks in `requested` in 6471 of 6471 samples, and zero `replay-state` writes across ten
+  clicks.
+
+  Fixed by merging the two into one callback that reads and writes `replay-slider.value`. Its own
+  Outputs are exempt from its readiness check (`differenceBasedOnId`, `:1661`), and its own writes
+  never re-trigger it (`:2972`). Each control's effect is unchanged, checked against verbatim
+  copies of both old callbacks. The merge also removes a defect the lock was hiding. A chain
+  started by `replay_tick` or by a metrics-store write reached the old controls callback through
+  the slider write without being pruned, and its slider branch would have paused playback on
+  every tick. Dispatch is now on the exact triggering component id, over every entry of
+  `ctx.triggered`, so a click the renderer merged behind a refresh still applies.
+
+  **The condition this depended on:** `metrics-store.data` was an Input of the merged callback, so
+  it was not ready while that store's primary writer `update_metrics_store` (or
+  `update_display_mode`, upstream of it) was pending. That poll is `running=`-gated and leaves
+  gaps. A primary writer pending at every renderer pass would have locked the controls again. The
+  old controls callback had those same two blockers, through the slider. F-CANOPY-054 (below)
+  removed the condition: the controls callback is now clientside and reads the store as State. The
+  new
+  `src/tests/unit/frontend/test_f048_replay_cycle.py` also fails CI on any Input-graph cycle
+  across two or more distinct callbacks anywhere in the built app. Canopy never runs the dev-tools
+  check that would have caught this. Two pre-existing cycles are exempted by name, CAN-016a tab
+  restore/stamp and the CAN-015 replay-player control loop. Both close through `allow_duplicate`
+  outputs, so neither is a readiness deadlock.
+- **Pausing a metrics replay did not hold: a late tick restored `playing` with the interval off,
+  so the label stuck at ⏸ and nothing moved (F-CANOPY-054).** After F-CANOPY-048 the replay state
+  had two writers, each a server round trip away: the merged controls callback, and `replay_tick`,
+  an `allow_duplicate` writer that computed the next state from the State read when its request was
+  sent. With the page's response-delivery latency at ~5 s against a 250–1000 ms tick, a tick was
+  in flight whenever the user paused. The pause disabled the interval, so no later tick evicted
+  that one, and its response — computed from `playing` — landed after the pause.
+
+  Moving only the tick clientside, the direction first recorded, does not fix it. The server
+  controls callback read `replay-state.data` as an Input, so every clientside tick re-requested it,
+  and dash-renderer drops an in-flight request whenever a new request of the same callback arrives
+  (the requestedCallbacks observer's `wDuplicates` step). Every click made during playback would
+  have been evicted. A clean room (juniper-ml
+  `util/ad-hoc/2026-09-23_f054_replay_tick_cleanroom.py`, verdicts fixed before the first run, 3
+  runs a shape) scored the old shape pause-undone 3/3, the tick-only shape click-dropped 3/3, and
+  this one pause-held 3/3, with the pause applied within 58 ms.
+
+  Fixed by running the whole block in the browser, with **one** clientside callback as the only
+  writer of `replay-state`. It handles the eight controls, the slider and the tick, and renders the
+  slider, the position and the play label from the state it just computed. A clientside callback
+  has no in-flight window: once it runs, nothing lands between its read and its apply, so nothing
+  computes from a stale state. `replay_tick`, the play-label callback and
+  `MetricsPanel._handle_replay_controls_handler` are removed. One click of each control has the old
+  effect, checked under node against a verbatim copy of the old handler over the whole grid.
+  - **Events come from values, not from triggers.** Clientside callbacks share the renderer's 12
+    execution slots, so a request can still lose its trigger BEFORE it runs. A request waiting in
+    `prioritized` is replaced by the next tick's request of the same callback, and only requests
+    still in `requested` merge their changed-prop ids. With trigger-only dispatch, review lost the
+    pause 3/3 under forced slot saturation and 2 of 12 under a dynamic load (juniper-ml
+    `reports/e2e-canopy-2026-09-02/consensus/2026-09-23_validator_reports_round1.md`, Lane B). So
+    the state records each button's count as of its last applied click (`clicks`) and the slider
+    value this callback last wrote (`slider_w`), and anything above those is applied at the next
+    run, before that run's own triggers. A lost pause now applies at this callback's next run to
+    get a slot (seconds, under sustained contention) instead of never.
+  - **A trigger alone applies nothing.** A button applies exactly its unapplied clicks. A run can
+    apply a click from its count after the click wrote `n_clicks` and before the click's own
+    request ran; the first revision also applied every trigger at least once, so that request
+    applied the click again, undoing the pause or stepping two rows (juniper-ml
+    `…/2026-09-23_validator_reports_round2.md`, Lane B2). For the same reason, a slider trigger
+    carrying the value this callback last wrote is not a seek: re-read, it can land one row low.
+    The cost (round 3): a real drag that lands exactly on that value does not pause the replay.
+    The value is a whole number only at row 0, the last row, or a row where the max divides
+    100 × row.
+  - **Several pending play clicks toggle once,** as stock Dash does for a merged double click: a
+    lost pause followed by the user pausing again pauses, where counting by parity would cancel
+    the two. It only helps when both are pending in one run; a repeat made after the pause
+    applied, but before the page shows it, still toggles back.
+  - **A cleared slider number box is not a seek.** dcc.Slider sends `NaN` when its box is cleared;
+    the state keeps its index and the slider is written back.
+  - **`metrics-store.data` is now State.** The store's primary writer is pending most of the time,
+    and dash-renderer holds a callback while any of its Inputs is downstream of a pending one, so
+    the controls waited on every poll. Now no pending callback holds back their readiness
+    (`test_nothing_pending_can_hold_the_replay_controls`, on the built app). A ready run can still
+    wait for an execution slot; "Events come from values" above covers what that can lose. A
+    refill re-renders
+    the "/ max" half of the position through a second clientside callback. The position is two
+    spans, and only the controls write the index, so a refill that runs in the same renderer pass
+    as a click cannot overwrite the click's index with a stale one. The slider thumb catches up on
+    the next control or tick, because nothing else may write the slider this callback reads as a
+    seek.
+  - **Ticks are counted.** The renderer merges queued requests of one callback, and `n_intervals`
+    is read at execution, so the state records the last count it consumed (`tick_n`, an optional
+    key) and a tick advances by the difference.
+  - **The end of the replay stops the interval.** `replay_tick` set `stopped` and left the
+    interval running: a server round trip a second, and two refreshes, until the next click.
+  - `src/tests/unit/frontend/test_f054_replay_block_clientside.py` is new. It covers wiring on the
+    built app, a source backstop that runs without node, and the registered JavaScript executed
+    under node, including lost clicks and seeks, a cleared slider box, a grown history, and a click
+    applied from its count that its own request must not apply again. Every test fails on the
+    parent. Each textual mutation of the fix is caught by a behavioural test, not only by the
+    source pins.
+  - Sixty replay tests are removed from `test_metrics_panel_handlers.py` (38) and
+    `test_metrics_panel_helpers_coverage.py` (22). Forty-seven, in seven classes, never called
+    production code: they re-implemented the logic inline and asserted on their own copy. Twelve
+    guarded their body with `if func := callbacks.get(...)` and would have passed silently once the
+    callbacks were gone; one looked the merged callback up directly. The tests in
+    `test_f048_replay_cycle.py` that exercised the Python handler moved to the new file and run on
+    the JavaScript; that file keeps the F-CANOPY-048 graph invariants.
+
+- **Re-staging from the restart modal dropped a seeded generator's params, so equities 422'd.**
+  `_restage_dataset` sent the typed spiral fields and never the registry seed. Confirming an
+  edited dataset in the modal therefore sent `equities` without `symbols`, and a default
+  deployment refuses the whole 503-name universe against the symbol cap. It also sent `mnist`
+  without `flatten`. It now sends the seed as `nn_dataset_params`, exactly as Apply Dataset does.
+  The modal renders no schema-driven params, so a custom list applied earlier from the sidebar
+  is not carried: the modal re-stages what it displays. Found, and reproduced on `main`, by
+  the registry-repair pass (canopy#665). Mutation-checked: without the seed, five of the new
+  `TestRestageDataset` cases fail. Two stale comments in the same file still said the gate
+  *snaps*; since canopy#652 it clears.
+- **The live dataset swap dropped a seeded generator's params too, and sent the spiral fields for
+  every generator.** The swap built its own body: the four typed spiral fields whatever the
+  generator, and never `nn_dataset_params`. A swap to `equities` therefore lost `symbols` and a
+  swap to `mnist` lost `flatten`, the restart-modal defect above on the third path that stages a
+  dataset. Apply Dataset and the swap now build one body, in `_dataset_stage_payload`: the
+  registry seed and the rendered schema fields for a non-spiral generator, the typed fields for
+  spiral. The swap's callback reads the schema-driven fields as State, as `apply_dataset` does.
+  `src/tests/regression/test_staging_paths_send_one_payload.py` pins the two bodies equal for every
+  dataset type, and pins the seed itself, because parity alone still passes when the shared builder
+  loses the seed on both paths. Mutation-checked at six sites, that one included.
+- **The `unknown` availability state could never fire for the outage it was built for.**
+  `/api/dataset/generators` caught a juniper-data failure and answered HTTP 200 with four
+  built-in demo generators carrying no `available` flag, so an outage and an answer were
+  indistinguishable to every caller. The dashboard therefore read availability as *known*,
+  and `is_generator_available`'s fail-open default reported `equities_seq` selectable
+  against a service that was not running. The route now reports `upstream_unavailable`
+  (attempted and did not answer), which the dashboard translates to *unknown*. Deliberately
+  false when juniper-data is unconfigured: that is demo mode, where the built-in four are
+  the offering and availability is known.
+- **`test_multiple_clients_receive_state_on_connect` failed on about 7% of runs locally, and
+  could not see a dropped connect-time `state`.** The Scheduled Tests lane went red on
+  2026-09-22 (run 35694265700, 3.13 leg) with *"initial_status was not received before
+  state"*. The `/ws/training` handler unicasts `connection_established` → `initial_status` →
+  `state`, strictly in that order. But `connect()` adds the socket to the broadcast set
+  (`websocket_manager.py:381`) before the handler awaits `offload(backend.get_status)`
+  (`main.py:830`), a thread hop since X7 slice 1a (#567). A demo `metrics` + `state` broadcast
+  queued during that hop is delivered first, and the test helper took the first `state` it
+  saw for the connect-time one. Reproduced at 22/300, 22/300 under pinned CPU contention and
+  21/300 on a re-run. Every failing session's full wire order was `connection_established >
+  metrics > state > initial_status > state`: nothing dropped, only a broadcast delivered
+  early. With a synchronous `get_status` (the pre-#567 shape) patched in locally the rate was
+  0/300, which pins the hop as the window.
+
+  Not a product defect. The handler's own order never broke, and the one in-repo consumer
+  (`ws_dash_bridge.js`) registers no `initial_status` handler and treats `state` as
+  latest-wins. `docs/api/API_REFERENCE.md` claimed `initial_status` precedes steady-state
+  messages; it now states the real contract. The test fixture tags every
+  `WebSocketManager.broadcast` frame (test-only; production payloads are untouched). The
+  helper skips tagged frames and asserts the exact unicast order, which makes it deterministic
+  (0/300, 0/300 contended, 400/400 across 25 passes of the whole file) and strictly stronger.
+  With the handler's connect-time `state` deleted, the old helper still passed, because the
+  next broadcast `state` stood in for it; the new one fails, as it does for a dropped
+  `initial_status` or a `state` sent before it. An instrument guard fails if the tag stops
+  reaching the wire. The file's other two classes (eight tests, the helper's own regression
+  pins among them) had no `integration` marker, so every CI lane deselected them; they now
+  run.
+- **The WS keepalive tests asserted that the loop ticked fast enough, not that it ticked.**
+  Both `TestWebSocketKeepalive` tests (`test_main_import_and_lifespan.py`) slept a fixed
+  0.05 s against a 0.01 s interval and required two pings, two of five expected ticks. A
+  runner that stalls the event loop for a few tens of milliseconds fails them: reproduced at
+  2/400 on one saturated core (`assert 1 >= 2`). They now poll until the condition holds or a
+  5 s deadline passes, stop early if the task ends, and assert that it is still running. A
+  loop that does not repeat, or that dies on a broadcast error, fails with a message that says
+  so. `test_concurrent_broadcast_from_thread_delivers_all` (`test_async_sync_boundary.py`) had
+  the same shape (a fixed 0.5 s, then `call_count >= 15`) and gets the same bounded poll.
+  After: 0/400 and 0/100 on the saturated core. No production constant changed;
+  `HEALTH_DEADLINE_SECONDS` is untouched (canopy#649).
+- **A conflict notice claimed to have cleared a dataset that was never selected.** With the
+  dataset at `⊥`, any gate re-fire rendered *"none is not compatible with CasCor
+  (Cascade-Correlation), so it was cleared"* — the literal string `none` from
+  `_dataset_label(None)`, describing a state change that did not occur. Reachable since the
+  OQ-6 ratification made `⊥` a state the gate clears into. `⊥` is no longer treated as a
+  conflict; a genuine conflict still clears and still names the real dataset.
+- **Registry and test prose still described the dataset snap that the OQ-6 ratification deleted.**
+  `model_registry.py` said seed order "decides which dataset the operator lands on when they pick
+  Recurrence". Since canopy#652 the sidebar gate clears a stranded dataset to `⊥` instead. Order
+  still decides two things: the order the dropdown offers, and the restart modal's fallback, which
+  keeps its `enabled[0]` swap by owner ruling. The registry comment and six test comments and
+  docstrings now say that, rather than that order no longer matters.
+- **G11 was enforced by listing names, and the constant it cited did not exist.** The registry
+  pointed at `UNBOUNDED_IMPORT_GENERATORS`, which occurred nowhere else in the repository, and no
+  test iterated `DATASET_TYPES`, so a new seed with unbounded `default_params` passed every test.
+  `SEEDED_GENERATOR_BOUNDS` now classifies every seeded generator: either bounded by its own
+  defaults, with the reason, or importing an unbounded universe, with the `default_params` keys
+  that bound it. `TestG11EverySeedIsBounded` fails on an unclassified seed, and on an import whose
+  seed does not pin a bounding key to a bounded value.
+- **No test required a seed to be trainable by any model.** juniper-data emits a `structured` task
+  type (juniper-data#402) that no `ModelSpec` accepts, so a `structured` seed would be greyed out
+  under every model. The test that appeared to guard this checked only that the sidebar hint was
+  not `None`, and the hint for such a seed is the string "no compatible models". A per-seed test
+  now requires a compatible model, and the hint test rejects the warning string.
+- **Nothing pinned that canopy never sends `allow_truncation`, and since juniper-data 0.15.0 an
+  explicit `false` refuses.** juniper-data#418 made the flag a tri-state, so `false` now returns 422
+  on any shortfall (an over-cap universe, or unresolvable fundamentals) even where the deployment
+  opted in. The form already withheld the field. The registry seed, which bypasses the form's
+  filter by design, and the Apply, one-shot Start and restart-modal bodies were unpinned.
+  `TestNoPathSendsAPartialDataStance` now covers each of them for every seed. The shortfall prompt,
+  which sends `true`, is the one deliberate sender. An equities test that accepted a seeded
+  `allow_truncation: true` in place of a `symbols` list no longer does.
+- **The `equities` seed's evidence was re-measured at generator 5.0.0.** It had been measured at
+  3.0.0 and marked stale. At 5.0.0 (juniper-data 68c3cd7), on the service path, the seed generates
+  X_train (15877, 15), X_val (1986, 15) and X_test (1982, 15) with no non-finite values. The matrix
+  has 15 columns because 4.0.0 dropped `adj_close`. CasCor fits it, recruiting 4 units. The
+  `equities_seq` seed now generates 15,557 windows of (64, 15); its LMU fit was not re-measured.
+  `KNOWN_UPSTREAM_GENERATORS` was re-checked against juniper-data main and is unchanged at 16.
+
+- **The Candidate Metrics panel never applied a store write after mount, so during a live candidate
+  phase its badge read `Inactive` while `/api/state` said `Training` (F-CANOPY-053, provisional id).**
+  `fetch_training_state` writes `candidate-metrics-panel-training-state-store` and
+  `-pool-history-store` off the panel's own `candidate-metrics-panel-update-interval`. Measured on
+  `9bffaba1` with the candidates tab open: every response carried a new store value (**27 of 27** at
+  idle, **34 of 34** across a live candidate phase), the wire round trip was ~30 ms, and requests
+  never overlapped on the wire — yet the renderer held **one** store value across 20–27 reads, while
+  a positive control (`metrics-panel-training-state-store`) changed 10 times in the same kind of run.
+  The status badge, phase, pool size, epoch progress, pool details and the pool-history cards were
+  all frozen at their mount values. It is F-CANOPY-035's mechanism on the next panel over: the tick
+  re-requested the callback under the same `getUniqueIdentifier` before the previous response was
+  applied, so dash-renderer evicted the `watched` entry (`dash_renderer.dev.js:3027`) and discarded
+  the response on arrival (`:2698`).
+
+  **Landing is period-bound, measured directly.** Writes landed / issued across three live runs were
+  **0 / 225** at 1000 ms, **5 / 39** at 4000 ms and **23 / 24** at 10000 ms, so the panel now polls
+  at `CANDIDATE_STATE_POLL_INTERVAL_MS` (10 s). Two supporting changes stop the store churning.
+  First, a payload that differs from the store only in its per-call `timestamp`, or in
+  `stale_age_seconds` during an upstream outage, returns `no_update`. The store rides as its own
+  writer's State, as in F-CANOPY-039. Second, a failed fetch now holds the last good state instead
+  of writing `{}`, which the badge rendered as `Inactive`.
+
+  **Deliberately not #613's `running=` guard.** A guard's release writes a *fixed* value from
+  `completeJob()` after every run, including the 204 this callback answers on page load and on every
+  other tab. This lane is tab-gated, so a guard on `disabled` would write `False` right after the
+  CAN-000/tab gate wrote `True` and keep the poller running on a hidden tab: F-CANOPY-027, back.
+  An evicted request's release would also reopen the clock while its successor is in flight. The gate
+  stays the only writer of this interval's `disabled`, and a registry-wide test now fails any
+  `running=` guard that writes a tab-gated lane's `disabled`. The cost is a candidate-panel refresh
+  of up to 10 s plus apply latency. That the renderer now applies the writes is a live property,
+  which the unit tests cannot show.
+
+### Security
+
+- **canopy picks up the two shared security patches**: `requirements.lock` moves
+  `juniper-observability` 0.4.0 -> 0.4.1 and `juniper-service-core` 0.7.0 -> 0.7.1, and nothing
+  else. observability 0.4.1's `configure_sentry`, which canopy calls, no longer sends frame-local
+  variables to Sentry, and they could hold the real API key. service-core 0.7.1 fixes `APIKeyAuth`
+  and `FailedAuthThrottle`; canopy's own copies live in `src/security.py`, so that pin is
+  consistency with the sibling services. The lock was regenerated with `--upgrade-package` for the
+  two packages only (60 pins; the freshness gate's constraint-mode resolution reproduces them).
+- **`APIKeyAuth` now carries the blank-key filter and the non-short-circuiting compare that its
+  sibling copies carry (APD-ECO-008).** `src/security.py` is the fourth copy of the ecosystem's
+  `APIKeyAuth`. `validate` used `any(hmac.compare_digest(...))`, which stops at the first match,
+  so the number of comparisons depended on where the matching key fell. It now walks every key, as
+  juniper-data does and as juniper-cascor and juniper-service-core do on `main`. The fix is
+  unreleased in juniper-service-core: the 0.7.0 wheel that `requirements.lock` pins still ships
+  `any(...)`. The constructor also kept blank entries, which all three siblings drop; now it drops
+  them too.
+
+  **Behaviour change: a whitespace-only `CANOPY_API_KEY` environment variable now DISABLES auth.**
+  It used to enable it. Only the env var reaches this case, because `get_secret` strips a secret
+  *file*, and an empty key was already treated as unset. The boot-time posture check already
+  classified such a key as absent and logged "running OPEN"; that log line is now true. What
+  opens is the posture canopy documents for no key at all:
+
+  - **Every key-gated route now serves anyone who can reach the port. This is the largest thing
+    that opens.** A key of ASCII spaces and tabs enabled auth on a key no caller could present:
+    both uvicorn parsers, h11 and httptools, strip an all-space or all-tab `X-API-Key` to an empty
+    value. So `SecurityMiddleware` refused every caller, with a key or without, on every route
+    outside its exempt sets. Those routes now answer exactly as they do with no key configured. A
+    sweep of `app.routes` on `48074653` (the commit #660 merged onto) and on `3a6dea95` (#660)
+    counts **56** key-gated (method, path) pairs. A keyless request to each got 401 before and
+    reaches its handler after. **27** of them change state, among them `/api/set_params`,
+    `/api/model/select`, `POST /api/admin/experimental_functions`, `/api/dataset/generate` and
+    both dataset imports, `/api/stage_dataset`, `/api/live_dataset_swap`,
+    `PATCH /api/v1/network/weights`, `/api/v1/network/hidden-units`, snapshot restore, resume,
+    retrain and replay, and `/api/remote/*`. All **26** parameterless GETs went from 401 to 200.
+    The exempt sets (`/`, the health routes, `/dashboard`, `/metrics`) and the browser surface
+    (`/api/csrf`, `/api/train/*`, next bullet) are not in these counts.
+    `util/ad-hoc/2026-09-23_blank_api_key_route_sweep.py` reproduces the figures. The claim that no
+    caller could present the key holds for every `str.strip()` character except U+00A0/U+0085, and,
+    under h11 only, U+001C–U+001F. Measured on uvicorn 0.49.0 with raw socket bytes (the same
+    script's `header-probe`): both parsers strip an all-space or all-tab value to empty and refuse
+    U+000B and U+000C with a 400, and CR and LF end the header line. httptools, canopy's default
+    parser, also refuses U+001C–U+001F. h11 passes them, and under h11 a key of those authenticated
+    normally. U+00A0 and U+0085 pass both parsers, but `hmac.compare_digest` raises `TypeError` on
+    non-ASCII text, so every keyed request got a 500. No other `str.strip()` character can arrive,
+    because Starlette decodes header bytes as latin-1. All of these keys now count as no key too.
+  - **The browser control surface loses its Origin/CSRF gate.** While auth was enabled, a keyless
+    `/api/train/*` request had to pass the Origin allowlist and a CSRF token under the default
+    flags; with `browser_control_auth_enabled` off, it needed the key outright. With auth disabled,
+    `require_browser_control_auth` returns before either check, so all six state-changing
+    `/api/train/*` POSTs accept a cross-site POST, and `/api/csrf` stops refusing disallowed
+    origins.
+  - **With `JUNIPER_CANOPY_WS_AUTH_ENABLED=true`** (SEC-06, default false), every WebSocket
+    connection used to be refused, because no bearer token could match a blank key. Now any bearer
+    token is admitted.
+  - **Not an exposure, before or after:** the WebSocket `?api_key=` query parameter is decoded but
+    never trimmed, so it could present the whitespace key. That gained nothing, because all three
+    WebSocket routes already admit a keyless connection (`allow_browser_auth=True`) behind the same
+    Origin and CSRF gates.
+
+  Only a launch with a whitespace-only `CANOPY_API_KEY` env var and `JUNIPER_CANOPY_REQUIRE_AUTH`
+  false (canopy's code default) reaches this configuration. Under `true`, the boot still fails with
+  `AuthPostureError` unless `JUNIPER_SKIP_AUTH_POSTURE_CHECK` bypasses the check. juniper-deploy
+  supplies the key through `CANOPY_API_KEY_FILE`, which is stripped, and its secured compose
+  service defaults `JUNIPER_CANOPY_REQUIRE_AUTH=true`, so no deploy profile reaches it.
+
+  Startup now logs a distinct WARNING when the key is set but blank. It is emitted once per
+  process, after `configure_logging` has run, through the system logger, so it carries its level
+  and format, lands in `logs/system.log`, and reaches Sentry when a DSN is configured. It follows
+  the posture check whichever way that check goes. When the boot proceeds, it comes right after the
+  check. When `JUNIPER_CANOPY_REQUIRE_AUTH=true` makes the check refuse to start, it follows the
+  check's CRITICAL, which says no key is configured. It is then worded for a refused boot: the blank
+  key counts as no key, and canopy refuses to start. The refusal propagates unchanged. (#678 logged
+  nothing on that path, because the posture call raised before the report was reached; the #678
+  follow-up fixed that.) The secret is read at import, before logging is configured, so the read only
+  records which source was blank, and the lifespan reports it. The WARNING names that source,
+  `CANOPY_API_KEY` or the file named by `CANOPY_API_KEY_FILE`, and gives the remedy for it.
+  `CANOPY_API_KEY_FILE` wins whenever it names an existing file, so a blank file beside a real
+  `CANOPY_API_KEY` also disables auth, as it did before #660, and the remedy there is the file. The
+  WARNING never includes the value.
+
+  This entry supersedes the message of commit `3a6dea95`, which predates #660's correction: that
+  message still says the WebSocket `?api_key=` fallback "could still present" the key, and it
+  names only "One real behaviour change".
+
+- **A padded `CANOPY_API_KEY` no longer leaks into the logs, and the blank-key rule reaches the
+  key's two other readers (#678 follow-up).**
+  - **The leak predates #660.** A key with leading whitespace or a line break is not blank, so it
+    ENABLES auth, exactly as set. The dashboard's server-side self-calls sent it as `X-API-Key`.
+    `requests` refuses such a value, and its `InvalidHeader` message quotes the whole value. 54 of
+    the 64 self-call sites log that text or return it, and several show it in a dashboard alert. So
+    the real key reached `logs/*.log`, the console and, when a Sentry DSN is configured, Sentry
+    Logs. `CANOPY_API_KEY=" leaked-key-XYZ123"` logged `Selection hydration read failed (Invalid
+    leading whitespace ... ' leaked-key-XYZ123')` at WARNING.
+    - `frontend/internal_api.py` now leaves off any key `requests` refuses to send. It asks
+      `requests` itself, so no self-call can raise that error. The fix is in the one helper every
+      self-call uses, not in the 54 sites, so a new site cannot reopen the leak.
+    - Auth stays enabled on such a key as set. The self-calls are now refused instead, and a refusal
+      carries nothing of the key.
+    - `util/ad-hoc/2026-09-24_self_call_error_text_census.py` lists all 64 sites.
+  - **Boot WARNs once about a padded key.** It uses the system logger, beside the blank-key
+    WARNING. The key is not stripped and the boot is not refused, because either would change which
+    key authenticates. No HTTP header carries such a key reliably: uvicorn's parsers drop a value's
+    leading spaces and tabs, h11 also drops its trailing ones, and a header cannot hold a line break.
+  - **Boot WARNs when `CANOPY_API_KEY_FILE` names no existing file.** It was ignored silently,
+    exactly as if unset, so a typo in the path fell through to `CANOPY_API_KEY` without a word. The
+    WARNING names the variable and never the path it holds. An operator who confuses the two
+    variables puts the key itself there.
+  - **A whitespace-only `CANOPY_API_KEY` env var now also serves the interactive docs, and its
+    self-calls send no key.** Both readers used the raw value.
+    - `_docs_enabled` kept `/docs`, `/docs/oauth2-redirect`, `/openapi.json` and `/redoc` at 404.
+    - The self-calls sent the whitespace key, which `requests` refuses, so every one failed although
+      auth was off.
+    - Both now apply `APIKeyAuth`'s blank rule. The blank-key WARNING's "exactly as with no key
+      configured" is now true of every reader.
+    - **The four docs routes now answer 200 to anyone who can reach the port**, as they do with no
+      key.
+  - **Tests.**
+    - `src/tests/regression/test_blank_api_key_warning_boot.py` now also boots canopy in a fresh
+      interpreter: a real `import main` with the key set, the real lifespan, and canopy's own
+      `logs/system.log`. Its in-process tests rebuild the auth singleton themselves. So a `main.py`
+      that built `APIKeyAuth` without `get_api_key_auth()` passed the whole CI lane (6866 tests),
+      while real uvicorn logged no blank-key line anywhere. That mutant now fails.
+    - A second fresh boot, with a padded key and a missing key file, drives eight real dashboard
+      handlers under five padded keys. No log record from any logger carries the key, and nor do the
+      log files, the console or the handlers' results.
+    - Unit tests: `src/tests/unit/frontend/test_internal_api_key_rules.py` (new),
+      `src/tests/unit/test_security.py` and `src/tests/unit/test_secrets_util.py`, including the new
+      `secrets_util.resolve_secret_detail`. The `get_secret` test now asserts literal values.
+
+- **Outbound keys are checked where they are read, and no transport error or compare frame can leak a
+  secret (#683 validation).** The independent validation of juniper-canopy#683 found two HIGH secret
+  exposures and two LOW gaps. The owner ruled on 2026-09-24: "Fix everywhere now".
+  - **A padded outbound key leaked, to an anonymous caller.** canopy sends three keys as `X-API-Key`:
+    juniper-cascor's (`JUNIPER_CASCOR_API_KEY`, falling back to `JUNIPER_DATA_API_KEY`), juniper-data's
+    (`JUNIPER_CANOPY_JUNIPER_DATA_API_KEY`, then `JUNIPER_DATA_API_KEY`) and the recurrence service's. All
+    three were read raw. An HTTP client refuses a value with padding, a line break or a non-ASCII character,
+    and its refusal quotes the value: `requests`' `InvalidHeader`, httpx's `Illegal header value b'...'`,
+    websockets 17.1's `invalid X-API-Key header: ...` (websockets 16.0 sent it raw instead, line breaks
+    included). canopy logged that text at ERROR on every status-refresher tick, Sentry received it, and canopy
+    returned it in API bodies. With canopy auth enabled, a keyless CSRF mint and a `POST /api/train/start`
+    from an allowlisted Origin answered a 409 whose `detail` held the cascor key.
+    - `secrets_util.get_outbound_secret` now reads each key and refuses a value that is not printable ASCII
+      other than space (`0x21`-`0x7E`), the union of the three clients' rules. It refuses a space or tab
+      inside a key too, which the clients would carry. A refused value is treated exactly like an empty one:
+      the next variable in the order applies, or no key is sent. Boot logs one WARNING per variable, naming
+      it and never its value or a path, through the system logger. The keys `settings` reads at import are
+      reported right after the auth-posture check, and the cascor key right after `create_backend` reads it.
+    - Handed no key, every juniper client reads the same variables itself (`api_key or
+      os.environ.get(...)`), raw, so a refused key came straight back. `secrets_util.bind_outbound_key`
+      switches that fallback off at canopy's five construction sites: the cascor REST client, both cascor
+      WebSocket streams and both juniper-data clients. **Behaviour change:** canopy is now the only reader
+      of its outbound keys, so a blank `*_API_KEY_FILE` that shadows a real env var now sends no key, as
+      canopy's precedence says. The client library used to fall back to the env var.
+    - **What a caller reads about a failed outbound call is the upstream's answer or the exception's
+      type, never its transport text** (`outbound_errors.outbound_error_text`). This covers the cascor
+      adapter's `{"error": ...}` envelopes, the Start, pause, resume and reset 409s and their WebSocket
+      acknowledgements, the `/api/status` envelope's `error`, `/api/stream_health`'s
+      `last_disconnect_reason`, a failed recurrence fit's `completion_reason`, and the 500 details of the
+      snapshot create, replay, resume and retrain routes and the network-mutation routes. An exception that
+      carries an HTTP status is the upstream's answer, so its text passes: cascor's 409 `Training data not
+      provided` and a 422's field errors still reach the UI, as PR-B2, N4 and CAN-015h surface them.
+      Anything else is named by type, for example `JuniperCascorConnectionError`. The full text still goes to
+      canopy's logs, where it can no longer hold a key.
+  - **One anonymous request wrote the real `CANOPY_API_KEY` into Sentry.** `APIKeyAuth.validate` ran
+    `hmac.compare_digest` on two `str`, which raises `TypeError` for non-ASCII input, and both uvicorn
+    parsers pass `X-API-Key: \xa0`. The request was a 500, and Sentry's event recorded the comparing frame's
+    locals, among them `candidate`, the real key. `validate` now compares UTF-8 bytes (`surrogatepass`, so
+    every `str` encodes) and refuses a key that is not a `str`. Such a header is a 401. A WebSocket
+    presenting one as `X-API-Key` or `?api_key=` is closed 4001, and as a bearer token 1008, as any wrong
+    key is. canopy's two other `str` compares get the same fix:
+    - **The rate limiter's `X-Canopy-Internal` compare.** With rate limiting on, it runs on the key-exempt
+      `/api/csrf` and `/api/train/*` too, so an ANONYMOUS caller could force the 500. A keyed caller's 500
+      recorded that caller's key.
+    - **The CSRF store.** It compares against every session's token, so a keyless non-ASCII `X-CSRF-Token`
+      recorded another session's live token (`stored_token`, a name the SDK's scrubber does not filter).
+      A `/ws/control` first frame whose `csrf_token` is not a `str`, or is non-ASCII, raised there too. The
+      handler's catch-all then filed it as `malformed_auth`, and it is now an ordinary `invalid_token`.
+
+    The markers juniper-ml's `tests/test_service_fork_drift.py` requires are kept. canopy
+    configures Sentry only through `juniper_observability.configure_sentry`. In juniper-observability
+    0.4.0, the release canopy's lock pins, that leaves `include_local_variables` at the SDK default, `True`.
+    juniper-ml#2086 turns it off in the shared package and strips any frame `vars` that still reach
+    `before_send`, but no release carries that yet. Until one does, any unhandled exception during a keyed
+    request can record the caller's key. The rate-limiter 500 recorded it through the ASGI `scope` a frame
+    held: the scope's `headers` list carries `x-api-key`, and the scrubber, which filters a local named
+    `api_key`, does not reach into that list. This change removes the three 500s that a caller could trigger
+    at will, but not that class.
+  - **`_docs_enabled` is now the auth handler's own answer** (`not get_api_key_auth().enabled`). #683
+    re-derived the blank rule there, with its own read and its own strip, and one sample pinned it. A copy
+    that stripped only ASCII whitespace, or ignored `CANOPY_API_KEY_FILE`, passed. No behaviour changes.
+  - **The padded-key WARNING names `CANOPY_API_KEY_FILE` when the file supplied the key.** A key file is
+    stripped at both ends, so only a line break inside the key can pad it, and the WARNING hard-coded
+    `CANOPY_API_KEY` and that variable's advice. It now has one wording per source, as the blank-key WARNING
+    does, and the comment claiming that only the env var can be padded is corrected.
+  - **Tests.**
+    - `src/tests/unit/test_outbound_keys.py` (new) pins the rule, the report, the binding against the real
+      client classes, and canopy's call sites.
+    - `src/tests/unit/test_outbound_errors.py` (new) pins the describer, every adapter site, and the proxy
+      routes. A static census asserts that no `except` handler in the adapter builds caller-visible text any
+      other way.
+    - `src/tests/regression/test_outbound_secret_leaks_boot.py` (new) boots canopy in fresh interpreters
+      against a local fake upstream. No request, log record, log file, console line or API body carries a
+      padded key, and the anonymous Start answers without it. A non-ASCII presented key is a 401 or a 4001.
+      The docs follow the auth switch for a real env key, a real key file and every blank key, NBSP-only
+      included.
+    - `src/tests/unit/test_security.py::TestNoSecretCompareCanRaiseOverHttp` (new) drives each of the three
+      compares over HTTP, through canopy's own `SecurityMiddleware` with the rate limiter on. A non-ASCII
+      `X-API-Key` is a 401. A non-ASCII `X-Canopy-Internal` on anonymous `/api/csrf` gets a 200 and no
+      exemption. A non-ASCII `X-CSRF-Token` gets a 403. The spy test on `validate` now asserts one
+      comparison per key, with the match first and both sides as bytes, so a `break` after the match fails it.
+    - `src/tests/unit/test_phase_b_pre_b_csrf.py`: a `/ws/control` first frame whose `csrf_token` is an int,
+      a list, a dict or non-ASCII is closed 1008 as `invalid_token`.
+    - Existing tests that asserted a transport failure's text now assert its type, and those that model
+      cascor's answer now give the exception its HTTP status.
+    - `util/ad-hoc/2026-09-24_683_validation_leak_probes.py` (new) keeps the validator's probes: the client
+      libraries, the six padded-key boots, the anonymous Start, four Sentry cases under real uvicorn, the
+      key-file WARNING and the docs switch. Run against #683's head, every leak reproduces. Run against this
+      change, none does.
+    - `util/ad-hoc/2026-09-24_683_validation_mutation_check.py` applies 44 mutations to copies of the
+      tree, and every one is caught. They include the validator's M2 and M3, and they put the pre-fix code back
+      at one site of each kind.
+- **The WS-silent poll-liveness UI test no longer inherits a run that is about to converge** (test-only;
+  `src/tests/ui/test_ws_silent_poll_liveness.py`). `_ensure_running_run` accepted any RUNNING run. On
+  CI the demo converges about 31 epochs after a start, and the run the test inherited already held
+  26-27 epochs. It produced no further epoch inside the 12 s window, so every later poll correctly
+  answered `<no_update>` and `test_metrics_store_polls_on_long_lived_tab_with_ws_silent` failed with
+  "poll starved". That happened
+  twice on main at `0035253a` on 2026-10-03, and before that on canopy#636 and canopy#651 (canopy#637's
+  shape). A live run past epoch 10 (`_MAX_INHERITED_EPOCH`) is now restarted with Reset then Start. That
+  is the path the module's other four tests already took, and they passed in both failing runs. The
+  mid-test keep-alive in `test_poll_resumes_rest_when_ws_goes_stale` passes `max_inherited_epoch=None`,
+  so it never restarts a live run whose history it is about to read.
+
+## [0.8.1] - 2026-09-15
+
+### Added
+
+- **`util/wheel_import_smoke.py`, wired into `publish.yml` before TestPyPI.** It installs
+  the built wheel into a fresh venv, changes to an empty directory so nothing resolves out
+  of the checkout, and imports all 27 shipped packages and modules that a bare install can
+  import — failing the publish if any is missing. It also refuses to run from the
+  repository root, where `juniper_canopy/` would be imported from the checkout and the
+  defect would be invisible. `backend.service_backend` and `demo_mode` are deliberately
+  excluded: they need the `juniper-cascor` and `demo` extras, and a guard that cries wolf
+  is a guard someone deletes.
+
+### Changed
+
+- **`arc_agi`'s unseeded reason no longer cites a declaration that has since changed.** It recorded
+  that upstream declared `task_type='classification'` over a grid-to-grid `y`. juniper-data#402 added
+  a third task type and moved `arc_agi` to `'structured'`, so the producer no longer fabricates an
+  `n_classes` of 900 by argmax, and no model's `supported_task_types` contains `'structured'` — the
+  incompatibility is now explicit rather than incidental. Comment only; canopy never reads the wire
+  value, which `TestX8TaskTypeDivergenceIsDeliberate` records (`GeneratorInfo` omits `task_type`).
+
+### Fixed
+
+- **The published wheel omitted ten top-level modules that thirteen of its own shipped
+  files import, so `pip install juniper-canopy` produced a package whose dashboard could
+  not be imported.** Every release from **0.5.0** onward:
+
+  ```
+  $ python -c "import frontend.dashboard_manager"     # only the wheel on the path
+  ModuleNotFoundError: No module named 'canopy_constants'
+  ```
+
+  `[tool.setuptools.packages.find]` collects **packages** — directories carrying
+  `__init__.py`. Each bare `src/<name>.py` is a top-level **module**, which that mechanism
+  never collects and which needs a `py-modules` entry; there was none. `canopy_constants`
+  and `settings` are each imported by **13 of the 49 shipped `.py` files**. The sdist was
+  no better: it carried **zero** of the twenty, and shipped `pyproject.toml` alongside
+  them, so rebuilding from source reproduced the same wheel.
+
+  **`py-modules` alone does not fix it, and fails silently.** It resolves against
+  `package-dir`, which this project never set, so a build with `py-modules` and nothing
+  else succeeds and emits a wheel containing **none** of the nineteen. `package-dir` now
+  points the empty-string root at `src`, with an explicit entry for `juniper_canopy`
+  because it lives at the repository root rather than under `src/` — without that entry
+  the build fails outright on `package directory 'src/juniper_canopy' does not exist`.
+  Measured across four candidate configurations against real builds; this is the only one
+  that ships 19/19 modules and keeps all five packages.
+
+  Nineteen modules ship: the twelve reachable from the shipped packages, plus the seven
+  `main` pulls in. `adapter_validation` is excluded because nothing imports it.
+
+  **Nothing in the pipeline could have caught this.** `twine check` reads metadata and the
+  README, never code. `pip check` reads the dependency graph, never importability — it
+  passes on a wheel that cannot import itself. And the TestPyPI verification step's
+  `from juniper_canopy import __version__` passes on **all four** broken wheels, because
+  that one module always shipped. The container never noticed either: `Dockerfile` copies
+  `src/` in and sets `PYTHONPATH=/app/src`, so the running service resolves these from
+  source and shadows site-packages. The deployed image was healthy throughout; only the
+  artifact on PyPI was broken.
+
+- **Y1 — every page mount under the recurrence backend returned a 500.**
+  `GET /api/admin/experimental_functions` calls `backend.get_experimental_functions()`
+  unconditionally, and the Dash layer reads that gate on **every mount**. `RecurrenceBackend`
+  implemented neither it nor `set_experimental_functions`, so the attribute lookup raised
+  `AttributeError`, the route's `except Exception` caught it, and the operator got
+  `{"error": "Internal server error", "error_id": ...}` with a 500 — on a healthy backend, for a
+  question whose honest answer is simply "no".
+
+  The root cause is that **`BackendProtocol` never declared either method.** The requirement was a
+  de-facto contract that `ServiceBackend`, `DemoBackend` and `demo_mode` happened to satisfy and
+  the fourth backend did not, so nothing checked it. Both are now declared on the protocol, and a
+  regression test asserts **every** backend implements the surface — the next backend added cannot
+  reintroduce this class of gap silently.
+
+  `RecurrenceBackend` now answers, and the read and the write answer **differently on purpose**:
+
+  - **read → `{"enabled": False}`.** Not an error. The gate is a cascade-correlation concept and is
+    genuinely closed here, which is exactly the F2.10 safe default the route's own docstring
+    describes ("no Live Switch affordance until we can confirm"). Returning `ok: False` would trade
+    a 500 for a 502 on every mount — a quieter lie, not a fix.
+  - **write → `{"ok": False, "error": ...}`.** A toggle that cannot be honoured must not report
+    success. The route maps this to a 502 carrying the reason, and the Dash layer reconciles to the
+    returned state (N6: fail closed and *say so*; N9: a control that cannot be honoured is refused
+    at the control, not discovered later).
+
+  The route itself is deliberately unchanged. Adding a `getattr` fallback there would paper over
+  the next missing implementation instead of failing the new protocol test.
+
+- **The three-partition split plumbing rendered as generator *content* parameters, on 13 of the 14
+  selectable dataset types.** `INFRASTRUCTURE_FIELDS` excluded `train_ratio` / `test_ratio` /
+  `shuffle` / `seed` / `use_cache` — the split plumbing of a **two**-partition world. The
+  three-partition contract added `sizing_mode`, `val_percent`, `test_percent` and `val_ratio`, and
+  the set silently stopped covering its own subject. Measured against juniper-data's real schemas:
+  **all 16 upstream generators leaked at least one** (9 leaked all four, 7 leaked `val_ratio`
+  alone), and 6 selectable datasets rendered all four controls.
+
+  These were not inert. `_collect_generator_params` drops only `None` and `""`, so a rendered value
+  is posted on **every Apply** — an operator adjusting what looked like a dataset knob was silently
+  reshaping the train/val/test split that cascor and juniper-data own. `val` is the in-loop split
+  and `test` is touched once; a form that lets the split be edited beside `n_samples` invites
+  exactly the selected-on-test confusion the data contract warns against.
+
+  All four are now excluded. Re-measured after the fix: **0 of 16 generators leak**, and content
+  params are untouched. Includes the second half of the same defect — `sizing_mode` rendered as a
+  **free text box**, because its schema emits `type: string` with no `enum`, so a typo became a 422
+  from juniper-data rather than an unselectable option. Excluding the field removes that control
+  entirely; there is no separate fix. A regression test now asserts **no** generator renders a split
+  field, so the next contract change that adds one fails loudly instead of leaking quietly. #630.
+
+## [0.8.0] - 2026-09-11
+
+### Added
+
+- **The registry's `default_params` now reach the cascor path, and `equities` is seeded — the last
+  generator that was blocked rather than merely unvalidated (design §12).** #616 recorded that
+  `equities` generates and trains fine given three params but that canopy could not deliver them.
+  This removes that blocker at its cause.
+
+  **The cause was that `default_params` only ever reached one of the two model tiers.** Its two
+  production consumers were `_resolve_oneshot_start_body_handler` (gated on
+  `model_class == "one_shot"`) and `dataset_ref_from_staged` — both recurrence.
+  `_apply_dataset_handler` built the cascor staging payload from the rendered form alone, so a
+  rank-2 dataset that *needed* params could not be expressed: `equities`' `symbols` key is an
+  array, and `_field_from_property` deliberately does not render arrays. Every Apply sent bare
+  defaults and 422'd. The constant's own docstring had been calling the registry "the single
+  source of truth" throughout.
+
+  **Both halves were needed.** `_apply_dataset_handler` now seeds the payload from the registry
+  and lets the form override it — the same order the recurrence path already used — so unrendered
+  keys travel. And `apply_seeded_defaults` overlays the seed onto the *rendered* controls, because
+  otherwise a key that is both seeded and rendered gets posted back at its **schema** default on
+  the next Apply, silently undoing the seed; the operator would also be shown one value while a
+  different one was sent.
+
+  **This is a no-op for every cascor-compatible seed shipped today** — all seven carry
+  `default_params={}`, so their payloads are byte-identical, asserted in
+  `test_an_unseeded_dataset_is_unchanged`.
+
+  `equities` is seeded with the three keys, each measured against a live juniper-data and a real
+  `CascadeCorrelationNetwork` fit: `symbols` (bare defaults are **refused** — 503 names over a cap
+  of 14), `fundamentals_fill="drop"` (the `"nan"` default leaves non-finite columns), and
+  `normalize_features=True` — new, and absent from the rank-3 sibling's seed, because equities'
+  columns are raw market quantities: unnormalised the first output pass reports a loss of
+  **5.83e+21** against **0.2511** normalised. Train top-1 is ~0.52 either way, so accuracy alone
+  would not have caught it. As seeded: (15799, 16), zero non-finite in any split, 3 units
+  recruited, loss 0.2511 → 0.2491 in 1.2s.
+
+  It needs juniper-data's `equities` extra, absent from that lockfile, so it renders greyed with a
+  reason in the container — the availability gate doing its job (§12.5), not a broken seed.
+
+- **Two rank-2 datasets — `gaussian` and `checkerboard` — closing the cascor half of the generator
+  gap (design §12).** Both validated the way §12.4 requires, and for a rank-2 seed that means
+  against **cascor**, not the LMU: generated through juniper-data to an NPZ artifact, then fitted
+  with `CascadeCorrelationNetwork`.
+
+  | dataset | X_train | units recruited | loss first → last | train top-1 | fit |
+  |---|---|---|---|---|---|
+  | Gaussian Blobs | (100, 2) | 1 | 0.0231 → 0.0016 | **1.000** | 0.4s |
+  | Checkerboard | (200, 2) | 1 | 0.2499 → 0.2498 | 0.515 | 3.0s |
+  | Checkerboard @ `n_samples=2000` | (1400, 2) | **8** | 0.2496 → 0.2418 | 0.5425 | 2.2s |
+
+  **Checkerboard's default size is worth knowing about.** At juniper-data's own default — 200
+  samples over a 4×4 grid, ~12 per cell — CasCor recruits a single unit and sits at chance with a
+  loss flat to four decimals. At `n_samples=2000` it recruits eight and the loss actually moves.
+  The dataset is fine; 200 samples is simply too thin to recruit against. `n_samples` is a rendered
+  schema field, so raising it is an operator action rather than a code change.
+
+  Neither seed carries `default_params`, matching the five incumbents: neither imports an external
+  universe, so the G11 restatement does not bind them. Both are numpy-only and declare no
+  `is_available` hook upstream, so they are available in every deployment. Being rank-2 they join
+  cascor's component and leave recurrence's untouched, so the compatibility graph still has exactly
+  two connected components — §12.2 again, asserted in `test_compatible_datasets_resolver_over_seeds`
+  rather than argued.
+
+  cascor needed no change: its `StageDatasetRequest.dataset_type` `Literal` already admitted
+  `gaussian` and `checkerboard`, and it already carries a typed `n_squares` knob for the latter. It
+  was canopy that never offered them.
+
+- **Five rank-3 sequence datasets, so the LMU has something to train on in the container it
+  actually ships in (design §12).** `multi_sine`, `mackey_glass`, `irregular_sine`, `ar_p` and
+  `delay_product` join the dataset dropdown. Each was validated the way §12.4 requires — generate,
+  then actually fit, observed once — rather than counted:
+
+  | dataset | X_train | Δt | generate | fit | r² |
+  |---|---|---|---|---|---|
+  | Multi-Sine | (1574, 32, 1) | regular | 0.00s | 0.10s | **1.000** |
+  | Mackey-Glass | (1574, 32, 1) | regular | 0.00s | 0.11s | **0.9999** |
+  | Irregular Sine | (1574, 32, 1) | irregular | 0.00s | 0.11s | **0.9918** |
+  | AR(p) | (1574, 32, 1) | regular | 0.01s | 0.10s | 0.043 |
+  | Delay Product | (1574, 32, 1) | irregular | 0.00s | 0.10s | 0.004 |
+
+  Zero non-finite values in any split, and **~0.1s end to end against a 300s train timeout** — four
+  hundred times faster than `equities_seq`, which takes 40.5s and scores r² −0.004.
+
+  **The point is not the count.** `equities_seq` was the LMU's only compatible dataset, and
+  `yfinance` is absent from juniper-data's `requirements.lock`, so in the deployed container it is
+  `available=false` — meaning selecting "Recurrence (LMU)" produced §4.7's *"No dataset is
+  available for this model"* and nothing else. These five are numpy-only and declare no
+  `is_available` hook upstream, so they are available in every deployment, and three of them are
+  signals the LMU demonstrably learns.
+
+  **Order is load-bearing.** They precede `equities_seq` in the registry because
+  `_gate_dataset_options_handler` snaps to the first compatible *and available* entry, so this is
+  what decides where an operator lands when they pick Recurrence. That is now `multi_sine`, and it
+  is asserted rather than left to chance.
+
+  `task_type="regression"` matches juniper-data's own declaration for all five, so unlike
+  `equities_seq` (the X8 divergence) these introduce no vocabulary disagreement. All five are
+  rank-3, so cascor still rejects them and the compatibility graph keeps exactly two connected
+  components — §12.2's "adds no deadlock surface", now asserted in
+  `test_compatible_datasets_resolver_over_seeds` rather than argued.
+
+  They carry **no** `default_params`, which is correct rather than an omission. G11 as the design
+  words it ("every seeded generator has bounded `default_params`") fails on the five incumbent 2-D
+  seeds and would fail on these too; measurement shows the unbounded axis is never generator
+  *parameters* but the size of an imported universe. `model_registry.py` records the restatement,
+  and the rule is enforced where it bites — the equities guard added in #610.
+
+- **`UNSEEDED_GENERATORS` — G10: an unseeded generator is now distinguishable from a forgotten
+  one.** Ten of juniper-data's sixteen generators were simply absent from the dropdown with nothing
+  recording whether that was a decision. Each remaining exclusion now carries its reason, checked
+  by `TestG10EveryUpstreamGeneratorIsSeededOrNamed` (which also refuses a reason too thin to act
+  on). Two are worth reading:
+
+  - **`arc_agi`'s rank is parameter-dependent**, which `DatasetTypeSpec.ndim` cannot express.
+    `flatten_pairs=True` (the default) gives rank-2 `(n, pad_to²)`; `False` gives rank-3
+    `(n, pad_to, pad_to)`. It is a plain boolean, so the schema-driven params panel *renders* it —
+    an operator could flip a dataset canopy statically declares `ndim=2` into rank-3 output, which
+    is compatible with nothing. §12.3 asked only that its rank be "confirmed before seeding"; the
+    answer is that it does not have one.
+  - **`csv_import` cannot be called with defaults at all** (`file_path` is required), confirming
+    §12.3 item 4's judgement that it is an import path rather than a peer generator.
+
+  `KNOWN_UPSTREAM_GENERATORS` is a dated snapshot taken by executing juniper-data's registry, not
+  an import — canopy has no version contract with that library and the copy in its test env is
+  0.6.0, old enough to predate `equities_seq`.
+
+- **The partial-data contract's three-way prompt — the last unbuilt piece of the contract.** When a
+  Start is refused because juniper-data could not produce the staged dataset in full (cascor leaves
+  the staged config in place for exactly this retry), a modal now puts the owner's three options to
+  the operator and requires an affirmative choice: **accept** the broken rows and continue, **drop**
+  them and continue, or **fail** the load — which cancels the staged change and deselects the
+  dataset (`⊥`) so Start and Apply stay gated until another is chosen. Accept and drop re-stage
+  the config cascor still holds with `allow_truncation=true` and the chosen `incomplete_rows`
+  through the existing `/api/stage_dataset` route, then Start again; the outcome rides the
+  existing `training-control-action` store, so a second refusal renders through the same alert
+  and — if it is another shortfall (drop can empty a universe) — re-opens the prompt.
+
+  The prompt fires on **both** transports (the Phase D clientside WS/REST path and the server-side
+  handler) because both write the outcome into that store; the clientside JS now also carries
+  `detail_full` (4000 chars) beside the alert's 300-char `detail`, so the producer's own sentence —
+  which symbols, how many rows — survives to the modal. It recognises the refusal by cascor#633's
+  machine-readable token `[dataset_shortfall_refused]`, and by the fixed sentence for a cascor that
+  predates it; an outage ("juniper-data fetch failed: …") carries neither and never opens it.
+
+  **A run on partial data is now marked where the operator looks**: `dataset_shortfall` is carried
+  through `normalize_status` (the whitelist was the one place it was lost — canopy already polls
+  cascor's status route at 1 Hz, so no new poller), the status bar appends `· partial data` in
+  every state (progress while it runs, result when it completes), and the Network Info panel opens
+  with cascor's own one-sentence summary, which names who accepted the shortfall.
+
+  **Two form defects fixed on the way.** The schema-driven sidebar rendered juniper-data's
+  `allow_truncation` checkbox and `incomplete_rows` select as ordinary inputs, so an unticked box
+  sent an **explicit `allow_truncation: false` on every equities apply** — which cascor#624
+  honours over its own deployment default, turning the operator's silence into a refusal and
+  stripping the remedy from the failure message — while a ticked one pre-answered a question the
+  contract says must be asked when the shortfall happens. Both are now `PARTIAL_DATA_POLICY_FIELDS`,
+  excluded from the form; the prompt owns them, and a default apply sends neither (option 3).
+
+  Found by the round-37 handoff validation in juniper-ml. Not in this change: an equities request
+  at canopy's defaults (`start_date` 2000, `fundamentals_fill="nan"`) is refused by cascor#630's
+  NaN guard *after* the shortfall is accepted, so exercising the prompt end-to-end on equities
+  needs a later `start_date` or a fill policy — a separate finding, recorded in that handoff.
+
+- **`publish-image.yml` -- the dashboard container image is published to GHCR on every `v*`
+  release** as a multi-arch manifest (`linux/amd64` + `linux/arm64`, native runners, no QEMU),
+  tagged `X.Y.Z` / `X.Y` / `latest`, pushed by digest with tags written exactly once by the merge
+  job. Wave 2 of the container-registry rollout (juniper-ml
+  `notes/JUNIPER_2026-09-05_JUNIPER-ECOSYSTEM_CONTAINER-REGISTRY-PUBLISHING-PLAN.md`); template
+  `juniper-cascor-worker/.github/workflows/publish-image.yml`. The PR arm builds both arches and
+  pushes nothing; its `paths:` filter covers everything the Dockerfile copies (`src/`,
+  `juniper_canopy/`, the `conf/` files), so a change to any image input is built before it merges.
+  Not a required status check.
+
+### Changed
+
+- **`equities` stays unseeded, and its recorded reason was wrong.** The G10 entry added in #612
+  said to seed it "with the same treatment `equities_seq` received (canopy#610), not before". That
+  prescription cannot be carried out, and measuring it is what showed why.
+
+  The treatment itself transfers and then some. `equities` needs **three** params, not two: an
+  explicit `symbols` list (at bare defaults juniper-data refuses it — the 503-name universe exceeds
+  the deployment cap of 14, exactly as its sequence sibling did), `fundamentals_fill` away from its
+  `"nan"` default, and — new, and absent from the sequence sibling — `normalize_features=True`.
+  That third one matters enormously: equities' feature columns are raw market quantities, and fed
+  to CasCor unnormalised the first output pass reports a loss of **5.8e+21** against **0.2511**
+  normalised, twenty-two orders of magnitude apart. With all three set it trains cleanly (3 units,
+  loss 0.2511 → 0.2491, train top-1 0.524 — the honest ceiling for next-day direction, not a
+  defect).
+
+  **The blocker is that canopy cannot deliver those params on the path a rank-2 dataset takes.**
+  `dataset_default_params` is a recurrence-only concept: its only two production consumers are
+  `_resolve_oneshot_start_body_handler` (gated on `model_class == "one_shot"`) and
+  `dataset_ref_from_staged`. `_apply_dataset_handler` builds the cascor staging payload from the
+  rendered form alone, and `symbols` is an **array**, which `_field_from_property` deliberately does
+  not render. A seeded `equities` would therefore send bare defaults and 422 on every Apply —
+  shipping the gap somewhere less visible, which is the outcome §12.4 exists to prevent. The entry
+  now records that, and names the two ways out (decide how the cascor path carries registry
+  defaults, or make an array-valued param settable) rather than prescribing a treatment that has
+  nowhere to travel.
+
+### Fixed
+
+- **The metrics store never advanced past its shipped empty default, so the main metrics plot, the
+  candidate loss plot and every replay index control rendered their "no data" placeholder through
+  entire live runs (F-CANOPY-035).** The writer was not broken. Measured on a live leg with a cascor
+  fixture at 52 units and 66 metrics rows: **55 responses in 90 s, every one HTTP 200 carrying the
+  full 66-row payload, store length 0 throughout** — and the store filled within ~3 s of the trigger
+  being stopped, in two independent runs.
+
+  **The cause is in dash-renderer, not in canopy's wiring.** Read from the unminified bundle that
+  ships in `JuniperCanopy1` (`dash_renderer.dev.js`, dash 4.2.0): a deferred callback enters
+  `watched` when its fetch is initiated (`:2676`), and on resolution it must **still** be there
+  (`:2698`) or the observer returns and the result is discarded; `:3027` concatenates `requested`
+  **last** when computing the duplicate set, so a newly requested invocation **evicts** the in-flight
+  one. `getUniqueIdentifier` (`:1715`) hashes one callback's **own** inputs, outputs and state, so
+  only this callback's own re-request can evict it — never a sibling on the same lane. Riding
+  `fast-update-interval`, `update_metrics_store`'s ~1.5 s round trip was re-requested every 1.0 s, so
+  every response was evicted before it could be applied. Same family as F-CANOPY-039, different
+  failure point: F-039's lifecycle completes and dies at `RemoveExecuting`; this one never reaches a
+  terminal list at all.
+
+  **The fix is at the trigger, in two halves that are each insufficient alone.**
+  `update_metrics_store` gets its own `dcc.Interval` (`metrics-store-interval`, period
+  `METRICS_STORE_POLL_INTERVAL_MS`), because a guard on the *shared* lane would instead have silenced
+  the other nine fast-lane callbacks for ~60% of every second; and
+  `running=[(Output("metrics-store-interval", "disabled"), True, False)]` stops that clock for exactly
+  the duration of each fetch, because a dedicated lane alone would still re-request over itself
+  whenever the round trip exceeds the period. `running=` sits next to three parameters documented as
+  background-only and does **not** carry that restriction — `dash/_callback.py` passes it through with
+  no `background` gate. The new interval is registered in the gated-interval set, so the CAN-000 apply
+  clamp still silences it exactly as before.
+
+  **The measured cost, stated rather than buried.** The effective cadence goes from a nominal 1 Hz
+  *delivering nothing* to ~5.5–7.3 s *delivering*. `FAST_UPDATE_INTERVAL_MS` is deliberately
+  untouched: `network_visualizer.py` derives the cascade-add glow timing from it. During live training
+  the WS append path owns the store at full speed and this poll short-circuits on `ws_live` without
+  fetching, so the slower cadence applies only to the stale-stream backstop. (#613)
+
+- **That `running=` guard never released on a network failure, stranding the metrics poll for the life
+  of the page.** The renderer restores a `running=` guard from `completeJob()`
+  (`dash_renderer.dev.js:925-932`), which runs on every HTTP *outcome* — 200, non-OK, prevent-update —
+  but a request that never produces a response at all lands in `handleError` (`:987-998`), which
+  dispatches `updateResourceUsage` and rejects **without** calling it. A canopy restart, a connection
+  reset or a browser offline moment therefore left `disabled = true` with nothing to clear it: the
+  metrics store stopped updating until a tab change or an apply-clamp release happened to re-enable
+  it. (#613 asserted this could not happen, citing `:1038`/`:1113` — real error-path dispatches, but
+  inside `_handleWebsocketCallback`, a transport this callback never takes.)
+
+  Repaired with a clientside watchdog on the **existing** slow lane — no new poller, per the
+  F-CANOPY-027 rule — which re-enables the interval once it has been continuously disabled for
+  `METRICS_STORE_STRAND_TIMEOUT_MS` (30 s, ten times the worst round trip ever measured on this
+  callback). It bounds the outage rather than making recovery fast, because fast recovery would
+  reopen the eviction window above. It short-circuits while `apply-in-flight` is set and resets its
+  timer then, so the CAN-000 apply clamp — which legitimately holds this interval disabled for a
+  whole apply — is not defeated. `metrics-store-interval.disabled` consequently carries two
+  registered writers, and that exception is pinned in the poll-gating tests rather than left to a
+  commit message.
+
+  Also corrected here: `FULL_HISTORY_POLL_TICK_MODULUS`'s comment still described "one full fetch per
+  ~5 s at the 1 s fast interval", but #613 changed the tick it counts. `n` is now
+  `metrics-store-interval.n_intervals`, which advances once per *completed round trip*, so
+  full-history refetch went from ~5 s to **~27–37 s**. The constant is left at 5 deliberately: a full
+  fetch is up to 10k rows, which lengthens the round trip, which lengthens the self-clocked period, so
+  the two constants interact and no full-mode round trip has been measured. Documented rather than
+  re-tuned blind. (#614)
+
+- **The Candidate Training Loss plot rendered on roughly a third of page loads — the same eviction,
+  one callback downstream (F-CANOPY-052, re-disposed as F-CANOPY-035's own mechanism).** The rest of
+  the time it showed zero traces **and** zero annotations: not the
+  `create_empty_plot("No candidate data available")` placeholder but the `dcc.Graph` mount default,
+  a state neither of `update_loss_plot`'s two return paths can produce — so the callback's output was
+  never reaching the component at all.
+
+  `update_loss_plot` took `{component_id}-training-state-store` as an **Input**.
+  `fetch_training_state` writes that store off the panel's own 1000 ms interval and returns
+  unconditionally on both branches while the candidates tab is active, and `/api/state` carries a
+  per-call `timestamp` — two consecutive GETs differ in exactly that key — so the written value is
+  genuinely different every tick and the no-op-write suppression that protects other stores cannot
+  bite. One `getUniqueIdentifier`, re-requested at ~1 Hz, evicted at `:3027` and discarded at
+  `:2698`: #613's mechanism on the next callback. Its headline argument is what obscured this —
+  "`getUniqueIdentifier` hashes one callback's own inputs/outputs/state, so siblings cannot evict it"
+  is true, and the corollary that *the same callback re-triggered by its own other Input is the same
+  identity* was never run on the neighbour.
+
+  Fixed by demoting the Input to State — the trigger, not the work; the F-CANOPY-039 precedent, whose
+  topology rebuild went 0/11 → 11/11 on exactly this change. A server-side guard would not help: by
+  the time a handler can return `no_update`, the round trip has happened and the eviction is already
+  booked. Nothing is lost by the demotion — `state` feeds only the fallback branch, which exists for a
+  backend that supplies `epochs`/`losses`/`phases`, and F-CANOPY-035 established that `/api/state`
+  never carries those keys in any lane. Measured with one variable (`setProps` on the panel interval's
+  `disabled` and nothing else): **1 of 3 renders with the tick running, 3 of 3 with it stopped**, with
+  zero loss-plot responses on the wire on every non-render against 79–88 naming other outputs in the
+  same windows. (#618)
+
+- **An unavailable dataset said it was unavailable and nothing about what would fix that, while
+  the producer had been publishing exactly that string all along.** `dataset_schema.py`'s comment
+  asserted that `/v1/generators` "carries `available: bool` but not the install hint (that reaches
+  the client only in the create-time 501 body)". That stopped being true at juniper-data's **W-4**:
+  `GeneratorInfo.install_hint` is a first-class field on that response, and its own docstring gives
+  the reason — without it `available: false` *"says a generator cannot run and nothing at all about
+  what would fix that, so a preflight has nowhere to send an operator"*.
+
+  canopy was hand-maintaining reworded duplicates of that string for **two** generators (`mnist`,
+  `arc_agi`) and falling back to a bare "unavailable in this deployment" for everything else —
+  including both equities seeds, which are precisely the ones an operator hits, since the
+  `equities` extra is absent from juniper-data's lockfile. Seeding `equities` (#621) made that the
+  common case rather than a corner.
+
+  The reason is now **derived from the wire**: a generator the producer published a hint for needs
+  an optional extra and says so, with no per-generator string on canopy's side. The curated map
+  survives only as the pre-W-4 fallback — a juniper-data that sends no hint at all — and the
+  generic phrase only when neither speaks.
+
+  **The split matters.** The dropdown option keeps a short phrase, because it shares its line with
+  the dataset name; the params panel, which has room, now renders the producer's hint **verbatim**
+  (`unavailable_hint`) so the operator gets the actual `pip install` command where they are looking
+  when they find the control disabled. Re-wording it there would put canopy straight back into
+  maintaining a string it does not own.
+
+- **The `equities_seq` seed could not generate, and once it could, it could not fit — so the one
+  pair this arc exists to make work had still never trained.** canopy#601 made
+  `(recurrence, equities_seq)` selectable and honestly gated; canopy#607 made it stageable. Neither
+  could reveal that pressing **Start** never produced a dataset. Two independent defects, in the
+  registry seed, each fatal at a different stage, both measured against juniper-data on 2026-09-09:
+
+  1. **`max_symbols` is a cap that REFUSES, not a truncator.** The seed carried
+     `{"max_symbols": 5}`, and juniper-data compares that against the *requested* universe — the
+     bundled 503 names — then raises `InputTooLargeError` → **HTTP 422** unless `allow_truncation`
+     is set. Every Start failed in 0.0s. The seed's own comment described this key as capping "the
+     ~500-symbol juniper-data default", which is what it looks like and not what it does.
+     juniper-ml's `tests/test_equities_symbol_cap_operator.py` already names the trap in as many
+     words — *"`max_symbols` alone does not save a default-universe cell"* — and warns off the
+     `allow_truncation` escape, because enabling it deployment-wide opts everything into silent
+     prefix cuts. The seed now pins an explicit five-name `symbols` list, the remedy that test
+     prescribes and that `juniper-recurrence/bench` already used.
+  2. **`fundamentals_fill` defaults to `"nan"`, and the LMU refuses non-finite input.** With the cap
+     cleared, generation succeeded and `LMURegressor.fit` then died on `ValueError: u must be
+     finite`. `X_train` came back **9.1% non-finite** — and `X_val` and `X_test` entirely clean, so
+     any check that sampled the held-out splits saw a healthy dataset. The affected columns are
+     exactly `EQUITIES_FEATURE_COLUMNS[7]`, `[8]` and `[15]`: `total_shares`, `market_cap` and
+     `days_since_report`. The seed now pins `fundamentals_fill="drop"`. Note the schema calls these
+     values "pre-2009 missing", but that is not the whole story and a later start date is **not** a
+     substitute: `start_date="2010-01-01"` still yields 299,808 non-finite cells.
+
+  Measured on the repaired seed: generate 0.9s, fit 39.6s, 15,476 training windows of `(64, 16)` —
+  **40.5s against the 300s train timeout**. `drop` was chosen over `zero` on evidence (fit 39.6s vs
+  77.3s, r² −0.004 vs −0.034) and because `zero` invents market caps for the model to fit against.
+  An r² near zero is the honest outcome for next-day equity returns rather than a defect — it is
+  also why this seed demonstrates little, and why the §12 synthetic rank-3 generators are the
+  better showcase for the LMU.
+
+  **Guards added, because canopy had none.** `TestEquitiesSeedIsGenerableAndFinite`
+  (`src/tests/regression/test_dataset_generator_contract.py`) fails any equities-family seed that
+  leans on the default universe or leaves `fundamentals_fill` at `"nan"`, and refuses to pass
+  vacuously if the seed is ever renamed out of the family. `dataset_default_params` now returns a
+  **deep** copy: it returned `dict(...)`, which was sufficient while every seeded value was a
+  scalar, but the new `symbols` list would otherwise have been shared with the frozen registry
+  constant, so one in-place `append` anywhere would have rewritten the seed for the process's life.
+  `test_oneshot_start_body.py` now derives its expected params from the registry instead of
+  restating them — a hand-copied literal pins tuning values in a suite that has no opinion about
+  tuning, and it reddened here, which is the tell.
+
+- **The dataset-generator proxy never authenticated, so on a keyed deployment every dataset's
+  params panel read "No adjustable parameters" (Y5).** `GET /api/dataset/generators` fetched
+  juniper-data's `/v1/generators` with bare `httpx` and no `X-API-Key`. That route is **not** in
+  juniper-data's `EXEMPT_PATHS` — that set holds the three health probes and `/metrics`, nothing
+  else — so a deployment with `JUNIPER_DATA_API_KEY` set answered 401. Every *other* canopy →
+  juniper-data call already sent the key, because they all go through `juniper-data-client`
+  (`api_key=settings.juniper_data_api_key`); this proxy was the one raw-`httpx` caller that did
+  not, and `settings.juniper_data_api_key`'s own docstring already promised the key travels "on
+  every juniper-data request".
+
+  The 401 was invisible twice over. The route ignored any non-200 and fell through to its
+  built-in four-entry demo list, which carries **no `schema`** — so `_generator_schema` returned
+  `{}` for every dataset and the schema-driven sidebar rendered "No adjustable parameters"
+  everywhere, looking like a UI with nothing to configure rather than a request that was refused.
+  The proxy now sends the key when one is configured (and nothing when none is, which an unkeyed
+  juniper-data accepts either way), and a reachable-but-refusing juniper-data is logged at
+  **warning** with the status code and whether a key was configured. The unreachable case keeps
+  its `debug` and its fallback: that is an outage, and the demo list is the intended affordance
+  there. This is design §12.3's hard blocker for the generator-gap seeding — ten new seeds on top
+  of a schema-less list would have shipped ten datasets with no visible knobs.
+
+- **`util/check_image_cpu_only.py` let the `cuda-*` family through, and the merge job's
+  digest-identity step accepted any number of linux images per pushed digest.** The 2026-09-07 CUDA
+  worker image carried `cuda-toolkit`, `cuda-bindings` and `cuda-pathfinder` next to the `nvidia-*`
+  wheels and `triton`; the census forbade only the latter two families, so an image with torch `X+cpu`
+  plus those three would have read `cuda_stack=0` -- and the CPU index this image installs torch from
+  hosts exactly those wheels. It now forbids `nvidia-*`, `cuda-*` and `triton`. `publish-image.yml`'s
+  merge job also asserts that each pushed per-arch digest resolves to exactly **one** linux image whose
+  architecture is the digest file's name, so a multi-platform index could never count an image the
+  census did not run on as verified. Both pinned by `src/tests/unit/test_dockerfile_cpu_torch_pin.py`.
+  Follow-up 6a of juniper-ml
+  `prompts/thread-handoff_automated-prompts/HANDOFF_2026-09-08_container-registry-rollout-wave-2-opened-and-the-cuda-class-in-three-shapes.md`.
+- **`Dockerfile` installed torch unpinned from the PyTorch CPU index**, so the image silently
+  changed with every PyTorch release and had no guard against the CUDA re-resolution that put a
+  3 GB `torch 2.12.1+cu130` stack into the worker's first published image. torch is now pinned to
+  `ARG TORCH_VERSION`+cpu (2.14.0, what the unpinned install resolved to) in **both** installs, the
+  lock install carries the CPU index as an extra index, `pip check` gates the builder, and
+  `util/check_image_cpu_only.py` asserts the contract *inside* the image (pinned `+cpu` version,
+  `torch.version.cuda is None`, **no** `nvidia-*` / `triton` distribution) on the PR arm and on the
+  publish path. `src/tests/unit/test_dockerfile_cpu_torch_pin.py` pins Dockerfile ↔ workflow.
+
+## [0.7.0] - 2026-09-08
+
+- **The partial-data contract's three-way prompt — the last unbuilt piece of the contract.** When a
+  Start is refused because juniper-data could not produce the staged dataset in full (cascor leaves
+  the staged config in place for exactly this retry), a modal now puts the owner's three options to
+  the operator and requires an affirmative choice: **accept** the broken rows and continue, **drop**
+  them and continue, or **fail** the load — which cancels the staged change and deselects the
+  dataset (`⊥`) so Start and Apply stay gated until another is chosen. Accept and drop re-stage
+  the config cascor still holds with `allow_truncation=true` and the chosen `incomplete_rows`
+  through the existing `/api/stage_dataset` route, then Start again; the outcome rides the
+  existing `training-control-action` store, so a second refusal renders through the same alert
+  and — if it is another shortfall (drop can empty a universe) — re-opens the prompt.
+
+  The prompt fires on **both** transports (the Phase D clientside WS/REST path and the server-side
+  handler) because both write the outcome into that store; the clientside JS now also carries
+  `detail_full` (4000 chars) beside the alert's 300-char `detail`, so the producer's own sentence —
+  which symbols, how many rows — survives to the modal. It recognises the refusal by cascor#633's
+  machine-readable token `[dataset_shortfall_refused]`, and by the fixed sentence for a cascor that
+  predates it; an outage ("juniper-data fetch failed: …") carries neither and never opens it.
+
+  **A run on partial data is now marked where the operator looks**: `dataset_shortfall` is carried
+  through `normalize_status` (the whitelist was the one place it was lost — canopy already polls
+  cascor's status route at 1 Hz, so no new poller), the status bar appends `· partial data` in
+  every state (progress while it runs, result when it completes), and the Network Info panel opens
+  with cascor's own one-sentence summary, which names who accepted the shortfall.
+
+  **Two form defects fixed on the way.** The schema-driven sidebar rendered juniper-data's
+  `allow_truncation` checkbox and `incomplete_rows` select as ordinary inputs, so an unticked box
+  sent an **explicit `allow_truncation: false` on every equities apply** — which cascor#624
+  honours over its own deployment default, turning the operator's silence into a refusal and
+  stripping the remedy from the failure message — while a ticked one pre-answered a question the
+  contract says must be asked when the shortfall happens. Both are now `PARTIAL_DATA_POLICY_FIELDS`,
+  excluded from the form; the prompt owns them, and a default apply sends neither (option 3).
+
+  Found by the round-37 handoff validation in juniper-ml. Not in this change: an equities request
+  at canopy's defaults (`start_date` 2000, `fundamentals_fill="nan"`) is refused by cascor#630's
+  NaN guard *after* the shortfall is accepted, so exercising the prompt end-to-end on equities
+  needs a later `start_date` or a fill policy — a separate finding, recorded in that handoff.
+
+### Changed
+
+- **The five registry resolvers that closed over module globals are now injectable** --
+  `gated_dataset_options`, `get_model_spec`, `get_dataset_spec`, `dataset_type_options` and
+  `dataset_default_params` -- following the convention `compatible_models` and
+  `compatible_datasets` already established. `_build_model_selection_table` gains `dataset_types`
+  for the same reason.
+
+  This was the design's stated "enabling change", and without it guardrail **G1c** could not be
+  written at all: a synthetic registry was unreachable from handler level, so the consensus audit
+  had to record G1c as **NO ARTIFACT** and declined to report a number from monkeypatched globals.
+
+  The two registries travel **together** on `gated_dataset_options`. Resolving the model against a
+  synthetic registry while iterating the production dataset seeds would silently score a graph that
+  exists nowhere -- and resolving a synthetic dataset value against the production seeds returns
+  `None`, which reads as `⊥` and enables every Select.
+
+- **Upper version ceilings on all five first-party `juniper-*` dependencies.** canopy was the only
+  service pinning its Juniper dependencies with a floor and **no ceiling**, against the documented
+  ecosystem policy: the release-train plan states consumers pin `>=floor,<next-minor`, "which makes
+  each `0.x` a compatibility boundary". Now `juniper-observability>=0.4.0,<0.5.0`,
+  `juniper-service-core>=0.5.0,<0.8.0`, `juniper-cascor-protocol>=0.1.0,<0.3.0`,
+  `juniper-data-client>=0.4.1,<0.5.0`, `juniper-cascor-client>=0.7.0,<0.8.0`.
+
+  This is the root-cause fix for the lockfile drift found on 2026-08-31: canopy's
+  `juniper-service-core` lock sat at `==0.5.1` across **two** published releases. An unbounded range
+  does not make a lockfile self-updating -- it removes the *ceiling raise*, which is the event that
+  prompts a lockfile refresh in every other repo. With `Lockfile Freshness` running in constraint
+  mode (it asks only whether the lock still *satisfies* pyproject), `==0.5.1` satisfied `>=0.5.0`
+  forever and no gate ever fired. A ceiling turns the next minor into a deliberate, prompted upgrade.
+
+  No lockfile change accompanies this: all five locked versions already sit inside the new ceilings,
+  and a constraint-mode recompile reproduces the current lock with **zero** pin drift.
+
+### Added
+
+- **Guardrail G4, re-specified**, plus the X8 `task_type` tripwire
+  (`src/tests/regression/test_dataset_generator_contract.py`). The design predicted G4 would "fail
+  before" because `spirals`/`moons` are not registry keys; as worded (*through*
+  `generator_name_for_type`) it already passed, since the alias map had shipped. What it *meant* to
+  catch is drift, so that is what is asserted: resolution is total, the alias map carries no dead
+  entries and no identity entries, and the one-shot body sends the resolved name.
+
+  It is deliberately **not** tested against an installed `juniper_data`. That package is importable
+  in the canopy test env but incidental -- canopy talks to the service over HTTP and has no version
+  contract with the library. The copy installed here is 0.6.0, whose registry has 8 generators and
+  contains neither `moon` nor `equities_seq`, so a subset assertion would fail on a stale dependency
+  rather than on real drift.
+
+  **X8**: canopy labels `equities_seq` `regression` while juniper-data labels it `classification`.
+  The generator is genuinely dual-target and both labels are locally correct; the divergence is inert
+  today only because `GeneratorInfo` omits `task_type` from the wire. A test now pins canopy's label
+  with the reason, and a companion **computes** the consequence rather than asserting it in prose:
+  relabelled to `classification`, `compatible_models(equities_seq)` is **empty** -- the LMU would have
+  no dataset at all. It has exactly one today, which is how little slack there is.
+
+- **The recurrence backend stages a dataset in-process, and the next fit consumes it** (X6 /
+  design §4.9; handoff item 2). `(recurrence, equities_seq)` could be selected but not staged:
+  `POST /api/stage_dataset` answered 501 because `RecurrenceBackend` had no `stage_dataset`, and
+  the dataset modal's bare restart had nothing to fit. The handoff filed the fix as a
+  **juniper-recurrence endpoint**; none is needed. Staging is a canopy-side "pending config"
+  fact -- cascor holds it server-side, `DemoMode` holds it in-process -- and the recurrence
+  service is one-shot, with the dataset reference travelling in `POST /v1/train`. So
+  `RecurrenceBackend` now holds `stage_dataset` / `cancel_pending_dataset` /
+  `get_pending_dataset` in-process, surfaces `pending_dataset` on `get_status` for the banner,
+  and `start_training` fits the staged dataset, translated by `dataset_ref_from_staged`
+  (registry `default_params` seed the params, typed fields override, schema-driven
+  `nn_dataset_params` override both; the alias map is applied here, where the ref is built for
+  juniper-data's vocabulary, never on the cascor-bound payload).
+
+  **A staged config takes precedence over the one-shot Start body**, which carries only the
+  registry's defaults for the dropdown value and knows nothing of what the operator edited and
+  applied -- preferring it would discard the applied change while reporting success. Start
+  consumes the staged config, as cascor's does, so the banner closes.
+
+- **Guardrail G1c** -- `I-cover` and `I-safe` over a synthetic registry with **three** disjoint
+  components (three models over four datasets, partitioned by rank and task). The shipped registry
+  has exactly two, so the Confinement Lemma is only ever exercised at n=2 there, and a fix that
+  happened to work for two components could pass every other guardrail while leaving a
+  three-component registry trapped. §12.2 argues the seeded generator expansion keeps the count at
+  two; this is the case that argument does not cover.
+
+  Measured, and matching the design's prediction: without both clear affordances the synthetic
+  registry strands **two** components rather than one. That is exactly why the shipped registry
+  cannot substitute for it -- it can only ever strand one, so it cannot distinguish a fix that
+  generalises from one that does not. A companion test asserts the fixture really does have three
+  components, so a later edit cannot collapse it and leave G1c passing while testing nothing.
+
+- **Complementary X7 slice 1c guard tests** (`src/tests/regression/test_x7_status_cache_guards.py`),
+  18 tests over the leftover paths `#578`'s T-C1–T-C4 suite cannot reach: a raising `normalize`
+  must not keep a prior OK payload reading fresh; the OK-but-stale window stays
+  `status_class=ok` while *marked* stale rather than flipping class; `for_status()` synthesises
+  `error` on a half-dead 200 and **omits** `is_training` rather than guessing `False`; the
+  `is_training` tri-state (true / false / absent) stays distinct, which is the property a
+  boolean coercion silently destroys; C7 health extras and the health boolean prefer the cache
+  over a live outage-negative and still fall back when the cache holds no verdict;
+  `_start_status_cache` skips demo and adapterless service backends, and DOES build one for an
+  adaptered service backend on the dedicated breaker fetch; `backend_status_stale` tracks the
+  cache rather than sitting at its default; the status-class gauge is one-hot on transition. Harvested from canopy#580, whose other nine files had already landed.
+- **X7 event-loop I/O operator docs.** Runbook in `docs/AGENTS_REFERENCE.md` covering the
+  single-worker outage class (sync `requests` inside `async def` stalls `/v1/health/live`),
+  the slice 1b client budget already on `main` (`CASCOR_CLIENT_RETRIES = 0`), the slice 1a
+  gate / T-A2–T-A4 / adapter callgraph landing with `#567`, and the pitfalls (`ruff
+  --select ASYNC` is blind; the `main.py` gate cannot see adapter I/O). Cheatsheet,
+  testing manuals, QUICK_START Issue 8, CasCor adapter notes, and `/v1/health/live` in
+  the API reference. Resident hazard in `AGENTS.md`.
+- **Hierarchy depth-filter operator docs (CAN-020 / F-CANOPY-042).** Canonical
+  runbook in `docs/AGENTS_REFERENCE.md` § Hierarchy Depth Filter: filter arms
+  (`0` / `None` / `>= N` → `"all"`), why the slider ships `value=0`, the
+  circular-dependency that forbids putting `-depth-slider.value` on the
+  bounds-sync callback, and why the label must not ride `update_network_graph`
+  (1.5–31 s). Operator copy and a `"0 of N"` troubleshooting row in
+  `docs/USER_MANUAL.md`. Pins in the cheatsheet, REFERENCE, TESTING_REFERENCE.
+  canopy#570 is the incoming label-callback split — documented as not yet on
+  `main`.
+
+- **Topology node-selection operator docs (F-CANOPY-044 / F-CANOPY-045 / F-CANOPY-046).** Canonical
+  runbook in `docs/AGENTS_REFERENCE.md` § Topology Node Selection: click identity
+  (`text` or edge `customdata`), layer from the label not `curveNumber`, the
+  toggle that *does* clear, and why empty-canvas "click elsewhere" never runs
+  the callback (plotly emits `plotly_click` only on a point hit). Documents the
+  unguarded `[]` write into `-selected-nodes` (an Input of `update_network_graph`,
+  1.5–31 s). Operator copy and troubleshooting row 6 in `docs/USER_MANUAL.md`.
+  Pins in the cheatsheet, REFERENCE, TESTING_REFERENCE. canopy#573 is the
+  incoming Clear-selection button — documented as not yet on `main`.
+
+- **F-CANOPY-047 operator docs.** The Topology modebar camera is a Plotly PNG export that rasterises SVG → Blob → `<img>` → canvas, so `img-src` must allow `blob:` *and* `data:`. `blob:` is img-only. Canonical runbook: `docs/AGENTS_REFERENCE.md` § Plotly PNG Export. Pins: `src/tests/regression/test_csp_plotly_image_export.py` and `test_csp_bootstrap_cdn.py`.
+
+- **X7 slice 1c status-cache operator docs.** Runbook in `docs/AGENTS_REFERENCE.md` for the
+  incoming `#578` cache: one 1 Hz poll, `/api/status` publishes `status_class` /
+  `stale` / `age_seconds`, the status bar renders the class (half-dead 200 → Unreachable,
+  not Stopped), dedicated `cascor-status` breaker, C6 never-OK omits `is_training`, C7
+  health extras, T-C1–T-C4. Cheatsheet, QUICK_START Issue 9, API `/api/status` envelope,
+  CasCor adapter notes, testing manuals. Resident hazard in `AGENTS.md`. Distinct from
+  the 1a / 1b off-loop runbook (docs `#568`).
+- Complementary F-CANOPY-046 tests: `#573` already pins the clear control, the hint text, and the click-path `no_update` guard. The rebuild consumer (`-selected-nodes` as an Input of `update_network_graph`), the selectedData fall-through that also used to write `[]`, and the layout↔callback style contract for the clear button were untested. New `src/tests/unit/frontend/test_f046_selection_rebuild_contract.py`.
+
+- Tests pinning Stage 2 (`#511`) live-callback contracts that the original PR's happy-path suite left open: `_update_unified_status_bar_handler` element `[9]` stays `dash.no_update` on every error path (so a hiccup cannot blank `training-status-store` and re-fire its consumers), `{is_running, phase}` is coerced then suppressed, and `_update_system_panels_handler` isolates a `/api/status` Timeout/JSON failure from the details and stream-health surfaces.
+
+### Changed
+
+- **CodeQL / SAST operator docs.** CI manuals now describe the live
+  SHA-pinned `github/codeql-action` v4 workflow (`.github/workflows/codeql.yml`),
+  the required check name `Analyze (python)`, the Dependabot `codeql-action`
+  group that also bumps `ci.yml` Bandit `upload-sarif`, and the ruleset
+  code-scanning gate (errors + high-or-higher alerts). Replaces the stale
+  `init@v2` snippet.
+
+### Added
+
+- **"Clear model — show all datasets"**, the second selection affordance (design §5.5 / OQ-N6).
+  It was specified at canopy#394, deferred there on the grounds that *"the model is selected
+  first"*, falsified by canopy#397 thirteen hours later when the model input became a
+  dataset-gated table, and never revisited. Its absence was half of why the mutual gate had no
+  exit.
+
+  Clearing writes `None` to `model-selection-store` and deliberately does **not** POST: it is a
+  statement about the UI's filter, not a request to change the live backend, and there is no
+  "no model" for `/api/model/select` to select. The backend keeps running whatever it was
+  running -- which is why Start stays disabled at a cleared model and why the sidebar reads
+  *"No model selected — all datasets shown; choose one to train"* rather than going blank. A
+  blank summary over a live backend is the X1 class this arc opened by closing.
+
+  **Measured consequence, contrary to how the design frames it:** the two clear affordances are
+  not a fix plus a companion, they are **two independent cut vertices**. Clearing the model
+  ungates the dataset list, from which `equities_seq` can be picked directly and Recurrence then
+  selected -- reaching the previously-unreachable pair without ever touching the dataset ✕. So
+  removing either affordance alone does *not* resurface the deadlock, and neither can be
+  regression-tested by its own absence. **G2** now pins exactly that: the deadlock returns only
+  when *both* are withheld, and each alone still reaches the target.
+
+### Fixed
+
+- **Every sequence (3-D) dataset has rendered TRAIN-ONLY since decision 11** (S-6).
+  `DemoMode._install_sequence_dataset` read `X_full` / `dt_full` / `y_full` and fell back to
+  `X_train` / `dt_train` / `y_train`. Decision 11 (juniper-ml
+  `notes/JUNIPER_2026-08-29_JUNIPER-ECOSYSTEM_TRAIN-EVAL-TEST-PARTITION-DESIGN.md` §9.5) retired the
+  `*_full` family and juniper-data#369 (merged 2026-09-06) stopped emitting it, so from that merge on
+  the fallback was the **only** arm ever reached and the whole `val` + `test` remainder simply
+  disappeared from the dashboard. Nothing errored: `n_windows`, `lookback`, `n_features`, the stored
+  windows and the Δt / target histograms whose comment says *"computed over ALL windows"* all went on
+  reporting the whole dataset while showing one partition of it. canopy#589 migrated the 2-D path to
+  `DemoMode._whole_dataset` and did not touch its 3-D twin.
+
+  The install now assembles `X`, `dt` and `y` through that same helper, which gains three things:
+  `np.concatenate` in place of `np.vstack` (identical for 2-D and above, but `vstack` promoted a 1-D
+  `(W,)` regression target to a `(k, W)` matrix -- k rows of "the whole dataset" instead of one), an
+  `optional` arm so an artifact carrying no `dt` or no `y` at all yields `None` rather than raising,
+  and the entity-major reordering below.
+
+  **Row order is restored for multi-ticker datasets.** juniper-data built `*_full` ENTITY-major (each
+  ticker's train, then its val, then its test) while the partitions it emits are SPLIT-major, so a
+  plain concatenation rendered a *different* order from a legacy artifact's `X_full` for the same
+  logical dataset -- canopy showed two orders depending on artifact vintage. `equities` and
+  `equities_seq` both emit `ticker_code_<split>` for every partition, which makes the legacy order
+  exactly reconstructible: concatenate, then **one** stable argsort on the concatenated codes,
+  computed once per artifact and applied to every stem so `X` / `dt` / `y` stay row-aligned.
+  Reordering them independently would pair each window with another window's Δt. Mirrors
+  `juniper_recurrence_model.data.derive_full_split`.
+
+  A legacy `<stem>_full` still wins when present, and is never reordered -- decision 11 dropped the
+  requirement, not the tolerance, and every artifact minted before 2026-09-06 still ships the family.
+  Nothing asserts `X_full` is *absent*. The 3-D rank probe still consults `X_full` first (any
+  partition answers "how many dimensions", and a legacy artifact has no other key to ask); only its
+  error message changed, to name `X_train`, the key the current contract actually requires.
+
+  Pins: six new tests in `src/tests/unit/test_sequence_dataset_viz.py`. `docs/demo/DEMO_MODE_REFERENCE.md`
+  described the fetch as validating `X_full` / `y_full`; it now describes the partition ladder.
+
+- **The one-shot Start body named a generator juniper-data does not have** (X3 / design §4.6).
+  `_resolve_oneshot_start_body_handler` sent the **raw dropdown value** as the generator, skipping
+  the alias map -- so `spirals` went where `spiral` belongs. Masked in production only because
+  `equities_seq`, the one dataset a one-shot model could reach, is identity-mapped.
+
+  Verified through the consumer rather than the design's assertion: the recurrence service passes
+  `generator` **straight to `client.create_dataset()`** (`juniper_recurrence/data.py:45-46`), so
+  juniper-data's vocabulary is the right one for that channel.
+
+  The fix is deliberately **asymmetric**, and a counter-guard pins that. The staging payload reaches
+  **cascor**, whose `dataset_type` is a `Literal["spirals", …, "moons", …]` -- canopy's *plural*
+  dialect (`juniper-cascor/src/api/models/training.py:235`). Translating it too, for consistency,
+  would send `"spiral"` to a field that does not accept it. The params lookup is likewise untranslated,
+  because canopy's registry is keyed on canopy's values and translating it would silently drop
+  `equities_seq`'s `max_symbols` cap -- the thing keeping the one-shot fit inside the train timeout.
+
+- **Start was not gated on whether the selected model is the one that would run** (design N5 /
+  §4.4; handoff item 1). With `recurrence_service_url` unset -- the code default -- selecting
+  Recurrence records the selection, swaps nothing and answers 200. canopy#592 made the sidebar
+  read *"NOT ACTIVE"* in that state, but the Start gate read only the registry's lifecycle status
+  plus both axes being set, so pressing Start filed a **cascor/demo run under Recurrence (LMU)**.
+  The label was fixed; the run was not.
+
+  The predicate is now one shared function, `model_registry.selection_is_live` (provider
+  agreement -- deliberately **not** `swapped`, which is also `False` on the healthy re-select),
+  applied at both ends. The Start button reads it off a new `model-state-store`: the last
+  `/api/model/select` payload, written by the same callback that writes `model-selection-store`,
+  so the key and the payload cannot disagree, and `None` after a model clear. Every server start
+  path -- `POST /api/train/start`, the `/ws/control` `start` dispatch and `POST /api/train/restart`
+  -- refuses with 409 and the reason, so no transport, `curl` included, can misattribute a run;
+  the restart route refuses **before** stopping the current run. The `train-gate-notice` names the
+  model, the backend that is really running, and the consequence.
+
+  `None` (nothing round-tripped yet, or a cleared model) is unknown, not disagreement: first paint
+  stays enabled, as does the boot backend serving the default model. Seeding that value honestly
+  is §4.10 hydration, unchanged here. `main.current_nn_model` is now reset between tests, because
+  two existing tests select Recurrence over the demo backend and the new refusal would otherwise
+  have leaked into every later `/api/train/start` in the session.
+
+- **Staging toward a backend the selection does not target is refused** (X6's cascor branch, at
+  its cause). With `recurrence_service_url` unset, a Recurrence selection is recorded over the
+  cascor/demo backend and Apply Dataset sent `equities_seq` -- rank 3 -- toward
+  cascade-correlation, which answered 502. The handoff filed that as *"cascor's `Literal` lacks
+  `equities_seq`"*, to be fixed in cascor. It is not a cascor defect: cascor refuses 3-D artifacts
+  **by design** at the tier boundary (`api/lifecycle/manager.py:3815`, *"3-D sequence artifacts
+  belong to the juniper-recurrence tier"*, W-2), and widening the `Literal` would only move the
+  refusal from the request boundary to artifact load, after a juniper-data round trip. The defect
+  is canopy staging into a backend the selection does not target -- the inactive state N5 names.
+  `POST /api/stage_dataset` now refuses it with 409 and the N5 reason, Apply Dataset is disabled
+  there alongside Start (same callback, same predicate), and the train-gate notice names both
+  controls. Nothing reaches cascor; its refusal stays where it is.
+
+- **A backend that cannot stage a dataset returned an opaque 500** (X6 / design §4.9).
+  `RecurrenceBackend` has no `stage_dataset`, and `POST /api/stage_dataset` called it unguarded, so
+  the `AttributeError` fell into the route's bare `except` and the operator was told "Internal server
+  error" plus an error id -- for a condition that is neither internal nor an error. It now answers
+  **501** naming the active backend, matching the guard the sibling routes (`regenerate_dataset`,
+  `import_dataset`) already use. Masked until now by the deadlock, which kept that backend
+  unreachable.
+
+- **Demo mode fell back to a locally generated dataset without saying so in the UI** (design
+  §4.12 / N13). Demo mode exists to **dogfood the platform**: it calls juniper-data first and
+  falls back to its own generator only when the service is unreachable. That fallback is
+  deliberately kept -- deleting it would make demo mode hard-depend on juniper-data being up, and
+  its own comment names Docker-standalone and CI smoke tests as the reason it exists. What it must
+  not do is happen *quietly*, because then demo mode stops demonstrating the platform and starts
+  demonstrating code that runs nowhere else.
+
+  `/api/stream_health` now carries `dataset_source`, and the connection badge turns red with
+  *"WS: Demo — LOCAL data, not juniper-data"*. It reuses the surface X7 PR 2 built rather than
+  adding new UI: that component exists precisely to stop canopy rendering a green *"WS: Connected"*
+  over simulated data, and this is the same claim one level finer -- red rather than grey because
+  it differs from "these numbers are simulated", in that the **data itself never came from the
+  platform**.
+
+  Two corrections to §4.12 are pinned by the new suite. The design names **one** fallback site;
+  there are **three** (`__init__`, `restart_dataset`, and the spiral-rotations regeneration), so
+  the flag is set *inside* `_generate_spiral_dataset_local` — covering every call site by
+  construction, including any added later — and a guard fails if it is moved out to the callers.
+  And the design says the fallback "degrades silently": it does not, it logs a `warning` and raises
+  a `DeprecationWarning`. It degrades silently **in the UI**, which is the channel a researcher
+  actually reads.
+
+
+- **An empty compatible ∩ available dataset set silently parked the UI on an unusable dataset**
+  (design §4.7 / N8). `_gate_dataset_options_handler` treated "the current dataset is still fine"
+  and "no dataset is both compatible with this model and available in this deployment" as one
+  branch, returning `no_update` for both -- so in the second case the dropdown kept displaying a
+  dataset **its own option list disables**, and nothing said why.
+
+  These are different events. The empty set now clears the dataset to `⊥` and renders a
+  **persistent** inline alert naming the model and the remedy. Clearing to `⊥` also disables Start
+  and Apply through the gates that already exist, rather than adding a third one. This is not a
+  hypothetical: `yfinance` is absent from juniper-data's lockfile, so in the deployed container the
+  LMU has zero available datasets regardless of any UI change -- §4.7 makes that state legible
+  instead of a silent park.
+
+- **The gate moved the dataset without telling anyone** (design §4.3 / D5). D5 always specified a
+  notice when the model gate snaps the dataset to a compatible one; the snap shipped and the notice
+  never did, so the dataset changed under the operator silently. It now names the old value, the
+  new one, and the model that forced the change -- "the dataset changed", without saying from what
+  to what, is an alarm rather than a notice.
+
+  The two notices are deliberately different channels (N12). A successful repair is informational
+  and **auto-dismisses**; the empty set is blocking and **persists until resolved**. Both render at
+  the control (N4) rather than in a detached toast, in a container carrying `role="status"` and
+  `aria-live="polite"` -- Y7 measured **zero** `aria-*` attributes in this file and dash 4.2.0's
+  dropdown emits no `aria-disabled`, so a toast alone would have been an accessibility regression
+  against simply rendering the notice inline.
+
+### Changed
+
+- **`_gate_dataset_options_handler` returns `(options, value, notice)`.** The callback that *moves*
+  the dataset owns the notice about having moved it, because only it knows both the old value and
+  the new one. Twelve unpack sites across three test files were widened.
+
+- **The reachability BFS now starts where the app actually starts** -- after the mount-time gate
+  pass, not at the layout's seeded value. `params-init-interval` fires the gate ~1 s after load, so
+  the seeded default is a state the UI occupies only transiently; where that dataset is
+  unavailable it is cleared before the user can touch anything. Guardrail **G1d** would otherwise
+  have been asserting about a pre-gate snapshot rather than about the recovery state.
+
+
+- **The model/dataset selection catch-22: `(recurrence, equities_seq)` was compatible but
+  unreachable.** The dataset dropdown was gated by the selected model and the model table's Select
+  buttons were gated by the selected dataset, and the compatibility relation is a disjoint
+  partition -- cascor takes the five 2-D datasets, the LMU takes only `equities_seq`. With no way
+  to leave a dataset selected, the two gates trapped the UI in whichever component it mounted in.
+  Each gate was individually correct; the trap was mutual.
+
+  `nn-dataset-type-dropdown` is now `clearable`, restoring the null dataset `⊥` -- the cut vertex
+  that joins both components. Measured over the real handlers, reachability goes from 5 pairs to 8
+  with **zero** invalid states: `I-cover` gained without weakening `I-safe`.
+
+  Guardrail **G1a** BFSs the composed transition relation and reads `clearable` off the shipped
+  layout, so reverting the one keyword turns it red with `compatible but unreachable:
+  {('recurrence', 'equities_seq')}`. **G1b** admits `⊥` explicitly (`Reach ⊆ compatible ∪ {(m,⊥)}`)
+  -- without that term the assertion would fail on this change itself. **G2** withholds the clear
+  transition and asserts the pair is unreachable again: the deadlock, reproduced in-suite.
+
+- **Start could train on a dataset the sidebar was not showing** (X5). `⊥` made this reachable:
+  a `recurrence` start fails closed with a 409, but a `cascor` start sent the bare POST and trained
+  on whatever was **last staged**. Start now requires a complete selection on both axes.
+  `model_is_trainable` could not carry this -- it answers `True` for `None` by design, so the model
+- **A cleared model would have frozen the dataset list at the previous model's gate** (design
+  N11). `_gate_dataset_options_handler` early-returned `(no_update, no_update)` on a falsy model
+  key -- harmless only while the model could not be cleared. The moment it can, clearing the
+  model *to escape a constraint* would have left that constraint in force: the mutual-gate trap
+  again, on the model axis, shipped by the very affordance meant to relieve it. The registry was
+  already correct (`gated_dataset_options(None)` enables every dataset); only the handler was
+  wrong. Guardrail **G8**, verified red against the restored early return.
+
+  Because the current dataset is then in the enabled set, the snap leaves it alone: clearing the
+  model **keeps** the dataset. That is §5.6's dataset-primary conflict policy, which was not even
+  expressible while the dropdown was unclearable.
+
+- **The model table claimed every model was compatible when no dataset was selected** (Y9). At
+  `⊥`, `model_reason` has nothing to compare against and returned `None`, which rendered as
+  *"✓ compatible"* -- a positive falsehood asserting agreement with a dataset that does not
+  exist, for every row. Rows now state what they *would* require (`model_requirement`, new:
+  "needs 2-D classification or regression data", "needs 3-D regression data, irregular Δt
+  supported").
+
+  The same flag drives `disabled=not is_compatible`, so the fix corrects the **claim** without
+  touching selectability -- `⊥` is compatible with everything, which is what makes it the cut
+  vertex. A dedicated guard asserts every Select stays enabled at `⊥`, because re-disabling them
+  would silently restore the deadlock while the compatibility cell read honestly.
+
+  axis needed its own check, which also pre-closes the ungated Start that the forthcoming "clear
+  model" affordance would otherwise ship. **Apply Dataset** is disabled at `⊥` from the same
+  callback.
+
+- **Three paths could commit a `⊥` dataset, and none of them was merely vacuous** (X4). Apply
+  Dataset POSTed `{"nn_dataset_type": None}`, which `model_dump(exclude_none=True)` strips to `{}`
+  -- and cascor documents an empty body as *clearing any prior staging*, so the click silently
+  discarded a change the operator had already staged while the banner reported success. The live
+  dataset swap POSTed `{}` and rendered "Live dataset swap complete." while the backend's
+  `swap_dataset_live()` stopped the training future and discarded in-flight candidates -- a cleared
+  dropdown could destroy a running experiment. `_restage_dataset`, which the design cites as *the
+  correct idiom*, omitted the key and produced the same empty body. All three now refuse and say
+  why, and the live-swap confirmation names a missing dataset instead of silently omitting the row.
+
+- **The restart modal's dataset list was frozen to cascor forever** (X2). `restart-ds-type.options`
+  had no writer anywhere in the repository -- the list was seeded once at layout time and never
+  regated. Harmless only while the deadlock made a non-cascor model unreachable; the moment the ✕
+  ships it would offer a recurrence user the five 2-D datasets **enabled** and `equities_seq`
+  **disabled**, seeded with a value its own list disables, and `execute_restart` would forward it.
+  It is now regated on every open from the same composition the sidebar uses. An unset sidebar
+  dataset is left unset rather than snapped to an arbitrary option.
+
+- **A guardrail from the previous change pinned a `backend_type` that does not exist.** The domain
+  is exactly `{"service", "demo", "recurrence"}`; the parametrisation asserted on `"cascor"`, so
+  the live-cascor case -- the one the predicate most needed pinned -- went uncovered while the
+  suite read green. Corrected, and the domain itself is now pinned against the three property
+  implementations.
+
+
+- **The sidebar claimed a model was active while a different backend trained it** (X1, selection
+  design N5). `POST /api/model/select` answers HTTP 200 for a `recurrence` selection even when
+  `recurrence_service_url` is unset -- the code default -- because `_swap_backend` sees that the
+  selection routes to the backend type already running and no-ops. The response reports that
+  faithfully (it carries both `backend` and `swapped`), but `_model_summary_text` read only
+  `nn_model` and the registry's lifecycle `status`, which are `"recurrence"` and `"live"`. The
+  sidebar therefore rendered *"Active: Recurrence (LMU)"* while cascor trained, filing real runs
+  under the wrong model.
+
+  The summary now leads with `"Selected:"` and names the backend actually running whenever the two
+  disagree. The predicate is deliberately **not** `swapped is False`: that is also the correct
+  answer when a user re-selects the model already live, so gating on it would report a healthy
+  CasCor as inactive. Agreement is tested on the model's *provider* instead -- a recurrence-provider
+  model is live iff the recurrence backend is -- and an absent `backend` (the first-paint seed,
+  which has never round-tripped) reads as unknown rather than as disagreement.
+
+  Guardrail **G5** lands with it (`src/tests/regression/test_selection_reachability_guardrails.py`),
+  including a false-positive guard for the no-op re-select and an end-to-end case that feeds the
+  real route payload to the real summary, so the two cannot drift apart. Verified red before green:
+  7 of its 9 cases fail against the prior code with the exact symptom.
+
+  This is phase 1 of the selection-reachability remediation
+  (`JUNIPER_2026-09-02_JUNIPER-CANOPY_SELECTION-REACHABILITY-DESIGN.md` §4.4, §7). It ships first
+  because unblocking the model/dataset deadlock without it would convert a blocked control into a
+  silently mis-attributed result.
+
+## [0.6.0] - 2026-07-28
+
+### Added
+
+- **N8 — WS-primary tiles/state with a liveness-gated poll fallback (juniper-ml
+  training-runtime defects plan §4 I-1, posture O3+O1 / Q6).** The metrics tiles
+  (via `metrics-panel-metrics-store`) and the training-state status strip (via
+  `metrics-panel-training-state-store`) now consume the WebSocket buffers FIRST
+  while the stream is demonstrably fresh, with N1's REST polls demoted to a
+  liveness-gated fallback. **The gate is a LIVE freshness signal, never a sticky
+  flag** — `ws_dash_bridge.js` stamps each `metrics` / `state` frame arrival
+  (`_lastMetricsFrameMs` / `_lastStateFrameMs`) and `peekLiveness()` reports the
+  *age*; a fast-tick clientside callback compares it to the new
+  `DashboardConstants.WS_LIVENESS_WINDOW_MS` (5000 ms) and writes booleans to a
+  new `ws-liveness-store`. The retired sticky `metricsReceived`/`topologyReceived`
+  flags are deliberately NOT consulted, so a stream that goes quiet flips stale
+  within the window and the poll re-engages on the next tick (the anti-sticky
+  reset that ended the N1-era starvation). **Two-callback split per store** (the
+  load-bearing correctness detail): a WS buffer must NOT be an *Input* of the
+  interval poll — a chained input whose clientside producer `no_update`s makes
+  Dash skip the interval-only callback for that tick, silently re-creating the
+  I-1 starvation. So each store is co-owned by (a) a liveness-gated REST poll
+  (interval Input only; liveness read as State) that returns `no_update` while
+  WS-primary is live and polls when stale, and (b) an `allow_duplicate` append
+  callback triggered ONLY by the WS buffer (accumulates metrics into a bounded
+  scrolling window; latest-only replace for state) that is the sole WS writer and
+  can never starve the store when the stream is quiet. History-analysis display
+  modes (`full` / `hidden_units`) stay on REST (Q6: polling for non-real-time
+  surfaces). Also re-created the `ws-state-buffer` store + `drainState` drain that
+  N1 removed as write-only, and **fixed a latent dead handler** — the bridge
+  listened on the never-emitted `state_change` type while the server broadcasts
+  training state as `state` (`broadcast_state_change`, relay forward, on-connect),
+  so `_stateBuffer` had never populated. The header status bar (`/api/status`,
+  N6's reconciled counters) and topology (N1 tab-gated slow poll) are intentionally
+  unchanged; §8 chart/tile-wipe guard and empty-guard preserved. The UI layout
+  snapshot is unchanged (no pinned `get_layout()` touched). Closes I-1 (target
+  architecture), Q6.
+
+- **N9 — Metrics-visualization overhaul: C7 scalar rendering + U-2/U-3
+  presentation (juniper-ml training-runtime defects plan §4-U U-2/U-3/U-4
+  display half).** The metrics panel's accuracy plot becomes a bounded-[0, 1]
+  **Classification Metrics** plot that renders C7's new scalar evaluation
+  metrics (`juniper-cascor` #419) alongside accuracy. (1) **C7 scalar series
+  (U-4 display):** F1, precision, recall and ROC-AUC render as additional
+  series where accuracy renders today, driven by a single
+  `MetricsPanel.SCALAR_SERIES` source of truth (row key → trace name → color).
+  Nullable values become **honest gaps** (`None` y + `connectgaps=False`),
+  never zeros, so the ~every-25th-epoch sparsity and candidate-phase gaps read
+  correctly; each series draws `lines+markers` so sparse points stay legible;
+  a series with no real value adds no trace (no legend clutter). The C7
+  `eval_metrics` metadata is surfaced without guessing — `average`/`split` in
+  the legend title, any `undefined` reasons (e.g. `roc_auc: single_class`) in
+  an unobtrusive annotation — present only when the data carries the block.
+  (2) **U-2/U-3 presentation:** percentage y-axis bounded to [0, 1]
+  (`tickformat=".0%"`), a coherent light/dark-legible series palette, subtle
+  gridlines, per-series hover formatting, and an `x unified` hover; loss keeps
+  its own unbounded axis (the scaling/overlap fix — bounded metrics never share
+  loss's scale). (3) **Trace-index contract (BOTH data paths):** loss-plot
+  trace 0 stays `Output Training` and classification-plot trace 0 stays
+  `Accuracy` (the WS bridge's `extendTraces` positional targets); the C7
+  series + validation overlays are looked up by name. The WS clientside
+  callback reads each scalar flat off the frame under the **same push-gate as
+  loss/accuracy** and shares the `[epochs]` axis, so every series stays
+  x-aligned (a length skew would silently corrupt WS appends). The
+  figure-builder names and the bridge lookups are pinned together in
+  `test_n9_metrics_visualization`. (4) **Data path:** the C7 flat scalars +
+  `eval_metrics` block thread through both adapter metric normalizers
+  (`_normalize_metric` / `_to_dashboard_metric`, additive/nullable — the
+  golden-shape contract is preserved) and the demo emission, so the series
+  render in both service and demo mode. `get_layout()` is unchanged (the
+  `metrics_panel` layout snapshot is unaffected).
+
+- **N10 — Workers tab shows local + remote workers (juniper-ml training-runtime
+  defects plan §4-U U-5).** After a read-only discovery pass over the
+  worker-registration surface (cascor `src/api/workers/registry.py` +
+  `src/api/routes/workers.py`; cascor-worker `/ws/v1/workers` registration), the
+  Workers tab now distinguishes worker locality honestly. **Discovery finding:**
+  cascor's registry models **remote** WebSocket-registered workers only and
+  carries no locality field; the local in-process candidate pool
+  (`src/parallelism/task_distributor.py`) is tracked separately and is not
+  individually enumerated by any REST route. **Build (honest hybrid, no fabricated
+  data):** (1) the `GET /api/v1/workers/list` proxy annotates each cascor worker
+  with `kind="remote"` (a backend-supplied `kind` is honored for forward-compat)
+  and a `local_reported` flag (`False` in service mode); demo mode returns one
+  clearly-labeled `local` + one `remote` synthetic worker with `local_reported:
+  true`. (2) The panel is now **store-driven**: a new `worker-panel-workers-store`
+  is filled by a dashboard-owned, **tab-gated** slow-interval poll
+  (`_update_workers_store_handler`, the topology-tab N1 posture — only polls when
+  the Workers tab is active, empty-guarded with `dash.no_update` so a transient
+  upstream hiccup never blanks the roster), replacing the panel's former always-on
+  5 s self-interval. (3) The roster renders as a table (Worker ID, Kind, Status,
+  Health, Last Heartbeat, Current Task) with a local/remote badge; when the backend
+  does not individually report local workers an honest note is shown rather than
+  fabricating local records. Cascade-only tab suppression for one-shot (recurrence)
+  models is unchanged. A cascor-side follow-up (surface the local MP pool via
+  `/v1/workers/stats` or a `/v1/workers/local` route) is proposed for the local
+  half. Regression coverage: store-driven render states, table/row rendering,
+  heartbeat formatting, the tab-gated + empty-guarded store handler, and the
+  extended demo-route contract.
+
+- **N7 — Schema-driven dataset panel, availability gating, per-type
+  Current-Dataset section (juniper-ml training-runtime defects plan §4 I-7 / §4-U
+  U-6 / I-5 UX).** The sidebar Dataset sub-section no longer shows the
+  spiral-centric typed fields for every dataset type. A new pure module
+  `src/dataset_schema.py` turns a juniper-data generator's JSON schema (surfaced
+  by `GET /v1/generators` as of juniper-data 0.10.0 / D1) into ordered renderable
+  field descriptors — excluding split/seed/cache infrastructure fields and
+  preserving each field's type/label/bounds/default/enum — and reads the additive
+  per-generator `available` flag with a **flag-absent-means-available** fallback
+  (older juniper-data degrades to all-available). (1) **Schema-driven params
+  (I-7):** `render_dataset_params` renames the section per selected type (U-6),
+  hides the spiral typed-field block for non-spiral types, and renders
+  schema-derived inputs (pattern-matching `{"type": "nn-gen-param", "name": …}`
+  ids) into `nn-dataset-schema-params`. Spiral keeps its typed convenience fields;
+  every other generator forwards its schema-true params through the **generic
+  `params` staging channel** — a new `nn_dataset_params` key on canopy's
+  `StageDatasetRequest` mapped to cascor's `StageDatasetRequest.params` (adapter
+  `_DATASET_PARAM_MAP`), so the staging dialect (cascor #396) is preserved and no
+  typed fields are widened. `apply_dataset` reads the schema inputs directly (no
+  store-race) and drops the now-hidden typed fields for non-spiral generators.
+  (2) **Capability gating (I-5 UX):** the training-dataset dropdown composes the
+  existing model-compatibility gate with an availability gate — an unavailable
+  generator (its optional data extra absent) renders disabled with a reworded
+  reason, and the gate runs on mount (not only after a model change). (3) **U-6:**
+  the "Current Dataset" left-menu sub-section is retitled per selected type
+  ("Current Dataset — MNIST") and populated with that type's schema-relevant
+  params. (4) **Hint rewording (I-7):** `dataset_model_hint` now reads "rank-2
+  (tabular) models only" / "rank-3 (sequence) Δt-aware models only" instead of
+  "2-D / 3-D models only", so the constraint reads as tensor rank rather than a
+  feature count (MNIST, a rank-2 784-feature tensor, is no longer implied to be
+  excluded). **No `juniper-data-client` floor bump:** canopy reads `/v1/generators`
+  via direct httpx (raw-dict passthrough), so the availability/schema surface needs
+  no client-library change; the client floor stays `>=0.4.1` (the juniper-data
+  *service* floor for the availability surface is a juniper-deploy concern, out of
+  scope here). Tests: `tests/unit/test_dataset_schema.py` (schema→fields mapping,
+  availability incl. flag-absent, alias, gate composition),
+  `tests/unit/frontend/test_n7_dataset_panel.py` (render/gate/apply handlers, U-6),
+  and `tests/integration/test_apply_dataset_flow.py` (adapter `params` mapping +
+  the `/api/stage_dataset` route accepting `nn_dataset_params`).
+
+### Changed
+
+- **CL2 — cascor-client `>=0.7.0` floor; adapter liveness seams onto the client
+  surface; manual-pong retirement; stream-liveness suite gated in CI (juniper-ml
+  training-runtime defects plan §7/§13).** Bumped the `[juniper-cascor]` extra
+  floor to `juniper-cascor-client>=0.7.0` (was `>=0.6.0`) and regenerated
+  `requirements.lock`, adopting the CL1 liveness surface the client shipped in
+  0.7.0 (cascor-client#92). `CascorServiceAdapter`'s three documented CL1 swap
+  seams now consume that surface: the `ControlStreamSupervisor.is_connected`
+  property reads the stream's own `is_connected` bool (an identical transport-state
+  test) instead of reaching into `_ws`; `_probe_liveness` prefers the stream's
+  passive `is_alive(window)` frame-recency view over an active `ws.ping()` (0.7.0's
+  eager control recv-loop already answers cascor's heartbeat, so the
+  canopy-originated ping — and its `_ws` reach-in — is retired); and the metrics
+  relay drops the manual `if msg_type == "ping": stream._ws.send(pong)` workaround
+  because 0.7.0's `CascorTrainingStream` auto-pongs and never yields `ping` frames.
+  Each seam keeps a `getattr` / `_ws_open` fallback for fakes and pre-CL1 clients
+  (only a real `bool` is trusted, so the N2 mock streams still exercise the
+  fallback), and the N2 one-line-per-disconnect/reconnect logging contract is
+  preserved. Because the client now consumes heartbeat pings, `ping` leaves the
+  relay's `StreamHealth` frame census (dropped from the summary's core-type
+  roster); to keep a healthy-but-idle relay from drifting to `degraded` (or
+  churning needless reconnects), the relay now polls the client's `is_alive`
+  surface at the heartbeat cadence (`RELAY_LIVENESS_POLL_SECONDS`, 30 s) and feeds
+  its liveness clock from that plus data/ack frames. Also wired the
+  `[juniper-cascor]` extra into the CI unit-tests lane so
+  `src/tests/unit/backend/test_stream_liveness.py` — which `importorskip`s the real
+  client — actually executes in a required CI lane (previously it ran only in
+  client-equipped local envs). Tests: CL2 seam-swap units, a real
+  `FakeCascorTrainingStream` pong-consumption pin, and an idle-but-alive re-arm
+  regression (`src/tests/unit/backend/test_stream_liveness.py`); the version-floor
+  guard (`src/tests/unit/test_client_version_floors.py`) tracks the bumped floor
+  automatically.
+
+### Fixed
+
+- **N5 — Apply-Parameters UX: seeded-value clamping, verbatim rejection toasts,
+  applied/skipped rendering, liveness-gated WS leg (juniper-ml training-runtime
+  defects plan §4 I-4, T1/T3).** Four apply-params defects behind the evening-502
+  session are closed. (1) **Clamp/validate against PATCH bounds** — a new
+  `CascorPatchBounds` (mirroring cascor's `TrainingParamUpdateRequest` in
+  `src/api/models/training.py`, keyed by canopy form key) clamps out-of-range
+  values both when the form seeds from the backend (`init_params_from_backend`)
+  and before every apply, so a backend-echoed default can no longer wholesale-422
+  the whole form the way cascor's pre-C2b `epochs_max`=1e11 did; any clamp is
+  flagged in the toast rather than silently changing the operator's intent.
+  (2) **Verbatim rejection detail** — the failure toast now carries the upstream
+  reason (cascor's specific bound-violation message via canopy's 502 payload,
+  truncated) instead of the bare `Failed to apply (502)` that hid every root
+  cause; same extraction idiom N4's snapshot toast uses. (3) **Render
+  applied/skipped** — the adapter surfaces cascor's C2a `applied` / `skipped`
+  (`{key, reason}`) partition (mapped back to the canopy `nn_*`/`cn_*` namespace;
+  REST-nested and WS-flat shapes both handled), `POST /api/set_params` threads it,
+  and the toast shows what the live network took vs. declined with the reason
+  (e.g. `epochs_max (not-updatable)`). (4) **Liveness-gated WS leg** — the
+  `set_params` WS leg is skipped straight to REST (no burned ack window) when the
+  control stream is not connected, consuming N2/CL2's honest `is_connected`
+  surface; the WS path is retained, only gated. The pre-existing adapter `skipped`
+  (canopy keys with no cascor mapping) contract is unchanged. Regression tests:
+  `tests/unit/test_cascor_patch_bounds.py`, `tests/integration/test_n5_apply_params_ux.py`.
+
+- **N3 — restart orchestration: confirm modal (Q3/Q4), stop → await → start(staged),
+  outcomes surfaced (juniper-ml training-runtime defects plan §4 I-6, T1/T4, U-1).**
+  The sidebar "Stop & Restart with new dataset" button no longer fires a
+  feedback-free `POST /api/train/start?reset=true` whose only output was the
+  banner (three cold-swaps trained to completion **invisibly** in the 2026-07-11
+  incident, and an active-run swap would have 409'd silently). It now opens a
+  **confirm modal** (Q3): a simple confirm by default — assuming all other
+  meta-parameters/structures/processes unchanged — leading with a **start-fresh
+  toggle (Q4, default OFF)** and an expandable granular **verify** section
+  (read-only current engine params; in-place *modify* is deferred to **N3b**,
+  which intersects N5's apply contract). Confirm runs a new
+  **`POST /api/train/restart`** orchestration route that, per the E-2 live pin
+  (a start against an ACTIVE run 409s immediately while the staged config
+  survives), performs **stop → await stopped (bounded) → start(staged)** for an
+  active run and skips straight to start when idle/terminal. **Every step's
+  outcome is surfaced** (T1/T4): a dedicated `restart-outcome-alert` renders a
+  truthful success (including an **instant-convergence / epoch-0** run, folded
+  finding 2) or a per-step failure carrying the upstream detail — the previously
+  silent 409 refusal, a retriable 504 stop-await timeout (staged change kept, the
+  pending banner stays open), and stop/start refusals. `start_fresh` (Q4) is
+  forwarded to cascor's C5 body field `{"start_fresh": true}` (cascor#408) through
+  the backend stack (`ServiceBackend`/`DemoBackend` → adapter; the 0.7.0 client
+  can't carry the field yet, so the adapter posts it through the client's own
+  transport — a documented CL2 swap seam); OFF continues the current model,
+  retaining metrics/history (Q4 use-case 1, preserving N1's chart retention). The
+  demo FSM now **auto-resets from a terminal (COMPLETED/FAILED) state on START**,
+  mirroring the cascor engine FSM (`state_machine.py:171-173`) — a
+  start/restart from a converged demo run is no longer silently refused (folded
+  finding 1; the asymmetry that turned canopy's CI UI leg red, §13 N2 addendum).
+  Apply-Dataset staging failures, previously swallowed, now surface too (T4).
+  Tests: the `/api/train/restart` route (idle/active/stop-await-timeout/refusal/
+  instant-convergence), the confirm-modal + outcome handlers, `start_fresh`
+  forwarding across every backend layer, and the demo-FSM start-from-terminal fix.
+
+- **N3b — restart modal granular modify: staging edits + N5-machinery param apply
+  before orchestration (juniper-ml training-runtime defects plan §4 I-6, §12 Q3,
+  §13; split from N3).** The N3 confirm modal's expandable granular section was
+  read-only **verify**; N3b makes it **modify** — the ratified Q3 design ("simple
+  confirm + expandable granular verify/modify"). Inside the section the operator
+  can now, before confirming: (1) edit the **staged dataset config** — exactly the
+  `StageDatasetRequest` fields (`dataset_type`/`n_samples`/`noise`/`rotations`/
+  `n_spirals`), defaulting to the currently staged / current values; an edit
+  re-stages via the existing `/api/stage_dataset` route before the restart
+  proceeds; and (2) edit a focused, restart-relevant set of **training parameters**
+  (learning rate, max hidden units, patience, candidate pool size, selected
+  candidates, correlation threshold — every one governed by N5's
+  `CascorPatchBounds`). Applying those params reuses N5's merged machinery
+  end-to-end — the same `CascorPatchBounds` clamp → `/api/set_params` →
+  applied/skipped partition path as the params panel (a shared
+  `_apply_params_via_backend` core now backs both call sites, so the bounds and
+  toast logic are called into, never duplicated) — and is **sequenced BEFORE** the
+  N3 stop → await → start orchestration. The **start-fresh toggle** stays as N3
+  built it, and the granular section shows its C5 consequence text (retained
+  history discarded, snapshots preserved). Every in-place edit is reflected in the
+  **"Restart plan" summary** before Confirm (dataset config + per-param `old → new`
+  deltas), and the `restart-outcome-alert` reports what was re-staged / applied as
+  part of the restart result. A re-stage or param-apply failure **aborts** the
+  restart (never restart on a stale dataset or with un-applied params), surfaces the
+  verbatim reason, and keeps the pending banner open so the staged change survives;
+  an untouched Confirm skips both modify phases (the ratified simple-confirm
+  default). The `/api/train/restart` route is unchanged — no new route parameters.
+  Tests: modal-handler units (dataset-edit round-trip, param path delegates to the
+  N5 core, summary reflects edits, abort-on-failure, the open-handler field/baseline
+  seeding + clamp), plus an integration file pinning layout wiring, the
+  param-field ⊆ `CascorPatchBounds` coherence guard, and route acceptance of the
+  modal payloads. No `get_layout()` snapshot regeneration (the restart modal is in
+  the manager layout, not the snapshot-pinned `metrics_panel`/`dataset_plotter`).
+
+- **N6 — header/tile counter mappings + denominators per the reconciled C2b
+  semantics (juniper-ml training-runtime defects plan §4 I-1c / §5 S12; closes
+  I-1c / S12).** The dashboard's Epoch/Step/Iteration/Hidden-Units displays were
+  mislabelled and wrongly denominated against the pre-C2b divergent surfaces.
+  Corrected each mapping to the C2b counter contract (juniper-cascor
+  `docs/api/JUNIPER_CASCOR_API_REFERENCE.md`, "Counter semantics"; cascor#400):
+  - The status-bar segment labelled **"Epoch"** actually showed `current_epoch`,
+    which C2b defines as completed **training steps** (one initial output pass +
+    one per growth iteration), NOT an inner output epoch — relabelled to **"Step"**
+    (the S12 "Epoch: 10000 vs 12" confusion; the value was already `current_epoch`).
+  - The status-bar segment labelled **"Iteration"** actually showed
+    `hidden_units / max_hidden_units` — relabelled to **"Hidden Units"** (the
+    segment id `top-hidden-units-display` was always the unit count; only the
+    label was wrong, and C2b reconciled the `max_hidden_units` denominator, fixing
+    S12's stale `/ 10000`).
+  - The Network Info panel's **"Current Iteration"** showed the hidden-unit count;
+    now shows the TRUE growth iteration `grow_iteration / grow_max`
+    (vs `max_iterations`), added a phase-qualified within-pass **"Epoch (in phase)"**
+    (`output_epoch`/`candidate_epoch` — "N / M (output|candidate)", rendering
+    "0 / N" on the by-design phase-entry reset rather than blank), and gave
+    "Hidden Units" the reconciled `/ max_hidden_units` denominator.
+  - The metrics **"Training Step"** tile read the latest metrics row's `epoch`
+    blind to C2b's `kind` discriminator, so a throttled within-pass `output_epoch`
+    row displayed as the step count (the tile-level "10000 vs 12" flip-flop); it
+    now prefers the latest `training_step` row (or the authoritative
+    `training_state.current_epoch`) and holds the last step value through a
+    candidate-phase metrics freeze.
+  - `ServiceBackend.get_status` now carries the reconciled counter surface
+    (`current_step`, `grow_iteration`, `grow_max`, `output_epoch`/`output_total_epochs`,
+    `candidate_epoch`/`candidate_total_epochs`) through to the header/panel
+    consumers; missing fields (pre-C2b cascor) degrade to a graceful placeholder.
+  The `max_epochs` derived budget is deliberately NOT rendered as an
+  `Epoch: X / Y` fraction against the step counter (different units — steps vs
+  inner-epochs); it remains the Parameters panel's "Maximum Total Epochs" budget.
+  Tests: `src/tests/unit/frontend/test_n6_counter_semantics.py` (mapping helper,
+  header, Network Info panel, tile `kind`-discrimination + candidate-freeze, and
+  the `get_status` surface).
+
+- **N1 — un-gated metrics/topology polls (sticky-gate starvation fix; juniper-ml
+  training-runtime defects plan §4 I-1/I-2, posture O2).** The metrics-store poll no longer
+  skips REST while the WS bridge reports `connected` + `metricsReceived`, and the topology
+  poll no longer requires `topologyReceived`: the sticky flags starved long-lived tabs
+  indefinitely once WS frames stopped arriving (tiles/charts froze at stale values until a
+  manual refresh — the 2026-07-10 frozen-dashboard session). The metrics poll now runs every
+  fast tick (1 Hz); the topology poll stays tab-gated on the slow interval (5 s) with the
+  `cascade_add` WS push as the fast path and tab-activation refetch. **This is the
+  correctness bridge until the WS-primary target lands (Q6/C6/N8)**, with three
+  validation-mandated guard rails: an **empty-guard** (an empty/errored fetch returns
+  `no_update` when the store already holds data, so cascor's post-run metrics clear can't
+  blank a completed run's charts), an **event-loop guard** (`/api/metrics/history`,
+  `/api/topology`, `/api/topology/raw` now run their synchronous backend calls via
+  `asyncio.to_thread` so a slow cascor can't stall canopy's event loop at 1 Hz), and a
+  **bounded full-history fetch** (`full`/`hidden_units` display modes fetch `limit=0` — up
+  to 10k rows — only every `FULL_HISTORY_POLL_TICK_MODULUS`-th tick (~0.2 Hz) on
+  interval-driven ticks; a display-mode switch, now an Input on the poll, refetches
+  immediately). Also removed the dead-end `ws-state-buffer` / `ws-candidate-progress-buffer`
+  stores and their clientside drains (no Input consumed them; the JS ring buffers stay for
+  N8), and fixed the metrics handler's stale "every 10th tick at 100ms" docstring (the fast
+  interval is 1000 ms). Tests: un-gated handler + empty-guard + bounded-fetch units
+  (`src/tests/unit/test_phase_b_bridge.py`), `asyncio.to_thread` wiring pins
+  (`src/tests/unit/test_main_api_coverage.py`), and WS-silent Playwright scenarios asserting on
+  the store wire — the metrics store keeps hydrating via poll on a long-lived tab under the
+  sticky connected+received WS state, a stopped run's populated store survives continued 1 Hz
+  polling, and the topology store fetches REST on tab switch
+  (`src/tests/ui/test_ws_silent_poll_liveness.py`). The store wire (not the tiles) is the UI
+  observable because `update_metrics_display` renders lazily in the headless harness on main
+  too — a pre-existing issue noted for E-3/N2, not introduced here.
+
+### Changed
+
+- **CI: per-file coverage is now a blocking gate (ecosystem per-file coverage rollout C-5).** The
+  `unit-tests` job's coverage lane (`src/tests/unit/ src/tests/regression/`, `--cov=src`) now runs the
+  shared `juniper-coverage-gap-map --enforce` gate from `juniper-ci-tools>=0.6.0,<0.7.0` as a
+  **blocking** step: CI **fails** when any source file's statement coverage is below 90% or any packaged
+  sub-module's pooled (statement-weighted) coverage is below 95%. The gate computes statement % itself
+  from `reports/coverage.json`, so this repo's `branch = true` coverage config does not change the gate
+  basis; it complements the existing aggregate `--cov-fail-under=80` gate (which a few well-covered
+  files can mask). The three existing `juniper-ci-tools` CI pins were bumped `>=0.5.1,<0.6.0` →
+  `>=0.6.0,<0.7.0` (0.6.0 is a superset — it adds the enforcing coverage gate and keeps every existing
+  console script). See juniper-ml
+  `notes/JUNIPER_ECOSYSTEM_PER_FILE_COVERAGE_ROLLOUT_SCOPING_2026-06-30.md`.
+
+### Tests
+
+- **Lifted whole-`src` per-file coverage to satisfy the new gate — no production-code change.** The unit
+  lane's overall pooled statement coverage rose **87.5% → 98.5%** (coverage.py total **85.8% → 97.5%**),
+  bringing every source file to **≥90% statement** and every sub-module to **≥95% pooled**. ~520 new
+  deterministic, offline unit tests were added for the previously under-covered files:
+  `main.py` (76.6 → 99.3%; FastAPI routes / WebSocket handlers / lifespan via `TestClient`),
+  `frontend/dashboard_manager.py` (77.2 → 99.9%; Dash inner-callback bodies invoked directly),
+  `demo_mode.py` (88.2 → 99.3%),
+  `backend/{cascor_service_adapter,training_monitor,demo_backend,service_backend}.py` (→ 100%),
+  `frontend/components/{parameters_panel,candidate_metrics_panel,network_evolution,decision_boundary,network_editor_panel,replay_player_panel,dataset_plotter}.py`
+  (→ 100%), plus the WebSocket-audit helpers in `audit_log.py` and the API-key branch of
+  `frontend/internal_api.py`. UI (`src/tests/ui/`, Playwright) tests remain out of the coverage lane by
+  design (session-fixture event-loop leak); no `get_layout()` / panel layout was touched.
+
+### Added
+
+- **3-D (time-series) dataset display — Phase 1 (#368)**: canopy can now load and
+  visualize 3-D sequence / irregular-Δt datasets. `DemoMode`'s dataset-load path is
+  `ndim`-aware (`src/demo_mode.py`): a 3-D artifact routes to a new **display-only**
+  `_install_sequence_dataset` (window-0 feature view stored as JSON into `self.dataset`;
+  **not** wired into the demo trainer — the cascor-like simulator can't ingest 3-D, OQ-4),
+  while 2-D keeps the existing classification path. The dataset-plotter
+  (`src/frontend/components/dataset_plotter.py`) gains a sequence render branch
+  (dispatched on `dataset_kind == "sequence"` before any 2-D logic): feature
+  **small-multiples over real (cumulative-Δt) time** + a **Δt strip** (≈ design mockup
+  R4). The dispatch inspects `X_full`/`X_train` rank directly because the installed
+  `juniper-data-client` (0.4.x) does not export `validate_npz_contract`. Design-of-record:
+  juniper-ml `notes/JUNIPER_CANOPY_3D_DATASET_VISUALIZATION_DESIGN_2026-06-19.md`. Tests:
+  `src/tests/unit/test_sequence_dataset_viz.py` (fixture-tested; live juniper-data 3-D
+  end-to-end verification to follow). The control surface (signal/window selectors,
+  small-multiple⇄overlay, target toggle) is Phase 2.
+- **3-D dataset viewer — compare-signals controls (Phase 2a, #368)**: the sequence
+  (3-D) dataset view gains its first interactive controls
+  (`src/frontend/components/dataset_plotter.py`). A **signal multi-select** chooses which
+  signals to plot (default: all) and a **Small multiples ⇄ Overlay** segmented toggle
+  switches arrangement — small-multiples keeps each signal per-normalized and vertically
+  offset (the honest default for mixed-scale sets, e.g. OHLCV), overlay shares one
+  normalized axis for direct cross-signal comparison (design R2). Both controls render
+  only for sequence datasets (a new visibility callback) and stay hidden for 2-D tabular;
+  the signal selector self-populates from the loaded dataset's feature labels. Window-0
+  only — **no backend change** (multi-window comparison + the target / characterization
+  companions are Phase 2b/2c). The render path guards stale / out-of-range signal
+  selections (falls back to all). Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_3D_DATASET_VISUALIZATION_DESIGN_2026-06-19.md` §3.1 / §5. Tests:
+  `src/tests/unit/test_sequence_dataset_viz.py` (5 new cases).
+- **3-D dataset viewer — compare-windows mode + multi-window backend (Phase 2b, #368)**:
+  the sequence view gains a **`Compare: [Signals | Windows]`** segmented mode toggle (M1).
+  *Compare-windows* plots one selected signal across multiple selected windows; *compare-
+  signals* (default) keeps the multi-signal view but now within a **selectable window**.
+  Each mode reuses the Small multiples ⇄ Overlay arrangement; only the active mode's
+  controls are shown. Backend (`src/demo_mode.py`): `_install_sequence_dataset` now stores
+  a **capped set of windows** (`windows_X` / `windows_dt`, cap 50; `n_windows_stored`
+  records the cap, the true `n_windows` is preserved) so window-switching needs no
+  re-fetch — still **display-only** (OQ-4, not wired into the trainer). Per-window Δt is
+  honoured (each window keeps its own irregular cumulative-time axis). The plotter
+  refactors the render path onto a shared `_plot_normalized_series` helper +
+  `_window_arrays` (which falls back to the window-0 view for legacy dicts), so the Phase-1
+  / 2a single-window behavior is preserved. Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_3D_DATASET_VISUALIZATION_DESIGN_2026-06-19.md` §3.1 / §5. Tests:
+  `src/tests/unit/test_sequence_dataset_viz.py` (8 new cases: window cap, multi-window
+  store, compare-windows render + defaults, window selection, fallback, control options).
+- **3-D dataset viewer — target + characterization companions (Phase 2c, #368)**: the
+  final Phase-2 slice completes the two-mode viewer. An optional **regression-target**
+  graph (a `Show target` switch in the control bar) renders the primary window's target;
+  a **collapsible characterization side companion** (on by default) shows whole-dataset
+  **Δt** and **target** histograms plus a **W / L / F** stats block beside the main plots
+  — the viz area is now a flex row whose companion hides for 2-D tabular so the main
+  column expands. Backend (`src/demo_mode.py`): `_install_sequence_dataset` additionally
+  stores the per-window regression target (`windows_y`, capped) and precomputes bounded
+  whole-dataset `dt_hist` / `target_hist` (~30 bins each) — still **display-only** (OQ-4).
+  The companions are wired as **separate callbacks**, so the core `update_dataset_plots`
+  (and its tests) are unchanged. Resolves design OQ-A (target = a separate companion
+  strip) and OQ-C (characterization = whole-dataset summary + the always-on selected-window
+  Δt strip). Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_3D_DATASET_VISUALIZATION_DESIGN_2026-06-19.md` §3.3 / §5. Tests:
+  `src/tests/unit/test_sequence_dataset_viz.py` (6 new cases). With 2a/2b this completes
+  the Phase-2 control surface; the advanced full-cross grid remains Phase 3.
+- **3-D dataset viewer — advanced full-cross grid (Phase 3, M4, #368)**: an opt-in
+  **`Advanced: full-cross grid`** switch reveals a scrollable faceted grid of **every
+  signal (columns) × window (rows)**, each cell a normalized line over cumulative-Δt time
+  — the expert view the default two-mode viewer deliberately avoids. Hidden by default and
+  **sequence-only**; **capped at 100 cells** (the window rows are trimmed so
+  `rows × cols ≤ 100`, the title noting e.g. "first 20 of 30 windows"), inside a
+  vertically-scrolling container with per-cell modebar zoom. No backend change (reuses the
+  capped multi-window store from Phase 2b); wired as a **separate callback**
+  (`update_sequence_grid`) so the core callbacks are untouched. Resolves design OQ-B (grid
+  mechanics: row-trim cap + scroll + modebar zoom). **Completes the 3-D dataset
+  visualization design** (Phases 1–3). Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_3D_DATASET_VISUALIZATION_DESIGN_2026-06-19.md` §3.4 / §5. Tests:
+  `src/tests/unit/test_sequence_dataset_viz.py` (4 new cases: hidden-off, hidden-tabular,
+  full-cross render, 100-cell cap).
+- **Harness L2 — enroll the three #366-wired controls in the behavioral manifest
+  (#369)**: `restart-with-new-dataset-button`, `nn-init-output-weights-dropdown`, and
+  `dataset-plotter-dataset-selector` were L1-guarded (wired) but not yet behaviorally
+  proven. Adds three `ControlContract` rows to `src/tests/ui_contract/control_manifest.py`
+  (restart → `POST /api/train/start?reset=true`; init-output-weights → `POST
+  /api/set_params` + `/api/state` roundtrip on the non-default `random`; dataset-plotter
+  selector → `POST /api/dataset/generate {"generator": "spiral"}`), exercised in-process
+  by the existing L2 driver. L2 grows 8 → 11 rows; closes the wired-vs-proven gap for the
+  controls completed in #366.
+- **Model + dataset-type registry (`src/model_registry.py`) — model-selection
+  groundwork (A0, #368)**: a single source of truth for NN-model (`ModelSpec`) and
+  dataset-type (`DatasetTypeSpec`) specifications. The dashboard's
+  `nn-dataset-type-dropdown` now sources its options and default from
+  `dataset_type_options()` / `DEFAULT_DATASET_TYPE` instead of a hardcoded inline list
+  — **behavior-preserving** (identical labels / values / order / `spirals` default).
+  Seeds the current `cascor` (live, 2-D) and `recurrence`/LMU (coming-soon, 3-D,
+  `requires_dt`) models plus the five 2-D classification dataset types, with a
+  future-proofed spec shape (`status` lifecycle; `version` / `benchmark_id` / `family`
+  / `variant` / `tags`). `task_type` uses juniper-data's vocabulary
+  (`classification` / `regression`); a model's 3-D / irregular-Δt nature is carried by
+  `ndim` + `requires_dt`, not a task-type label. The compatibility resolvers, the
+  dedicated selection surface, and the `nn_model` backend mirror are deferred to A1.
+  Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md`. Regression
+  coverage: `src/tests/unit/test_model_registry.py`.
+- **Recurrence (LMU) service adapter + outbound settings — model-selection A1 enabler
+  (A1-i, #368)**: the first build slice of A1 (making `recurrence` genuinely *trainable*
+  from canopy, not just a coming-soon registry entry). Adds `RecurrenceServiceAdapter`
+  (`src/backend/recurrence_service_adapter.py`) — a thin **synchronous** `httpx` REST
+  client for the juniper-recurrence model service: a blocking `POST /v1/train` (the LMU is
+  a one-shot ridge/lstsq fit — no epochs to stream, hence no WebSocket) plus the instant
+  `GET /v1/training/status`. It sends the outbound `X-API-Key`, applies a **generous
+  read-timeout** to the blocking train, and maps failures onto a typed error hierarchy
+  (`RecurrenceTrainInProgressError` 409 / `RecurrenceServiceAuthError` 401·403 /
+  `RecurrenceServiceTimeoutError` / `RecurrenceServiceUnavailableError` / base
+  `RecurrenceServiceError`) so the one-shot UI path (D1-A, A1-iii) can surface each
+  distinctly. New `Settings.recurrence_service_url` + `recurrence_api_key`
+  (`src/settings.py`) mirror the juniper-data outbound-key pattern: the prefixed
+  `JUNIPER_CANOPY_*` var wins over the shared cross-service var (`RECURRENCE_SERVICE_URL` /
+  `JUNIPER_RECURRENCE_API_KEY`), and the key honours `_FILE` secret indirection.
+  **Adapter + settings only — no routing or UI yet**: `create_backend` provider routing is
+  A1-ii; the one-shot execution path + cascade-panel suppression A1-iii. Scope is `train` +
+  `status` (predict / crossval deferred — enabler OQ-2). Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_MODEL_SELECTION_A1_ENABLER_SCOPE_2026-06-18.md` (D3) /
+  `..._MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md`. Tests:
+  `src/tests/unit/test_recurrence_service_adapter.py` (24 cases, mocked via
+  `httpx.MockTransport`) + `src/tests/unit/test_recurrence_settings.py` (11 cases).
+- **Recurrence backend + provider routing — model-selection A1 enabler (A1-ii, #368)**:
+  the second build slice, making the recurrence model *routable* through canopy's backend
+  factory. Adds `RecurrenceBackend` (`src/backend/recurrence_backend.py`) — a
+  `BackendProtocol` wrapper over the A1-i `RecurrenceServiceAdapter` that bridges the
+  execution-paradigm mismatch (D1-A): the recurrence `POST /v1/train` is a **synchronous
+  one-shot fit**, so `start_training` backgrounds it on a daemon thread and the backend
+  reports a **binary** `idle → training → trained|failed` status via `get_status` /
+  `is_training_active` (no fabricated per-epoch progress). The cascade-only protocol
+  surface is honestly stubbed — `get_network_topology` / `get_raw_topology` /
+  `get_decision_boundary` return `None` (LMU has no growing topology or 2-D decision
+  boundary, D6) — and `get_metrics` carries the **regression** metric set (mse / rmse / mae
+  / r2 / loss, never accuracy); `apply_params` stages `d` / `theta` / `ridge` for the next
+  fit; failures surface via the existing `completion_reason` field. `create_backend()`
+  (`src/backend/__init__.py`) gains an `nn_model` axis (D5): a recurrence-provider model
+  (resolved via the new `model_registry.get_model_spec()` + `RECURRENCE_PROVIDER` constant)
+  with `recurrence_service_url` configured routes to `RecurrenceBackend`; **every other
+  case — non-recurrence model, unconfigured URL, or the `nn_model=None` startup default —
+  leaves the demo/cascor selection byte-for-byte unchanged**. **Routing + backend only**:
+  wiring `backend_type == "recurrence"` through `main.py`'s route branches and the one-shot
+  result view / panel suppression are A1-iii. Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_MODEL_SELECTION_A1_ENABLER_SCOPE_2026-06-18.md` (D1-A / D5 / D6).
+  Tests: `src/tests/unit/backend/test_recurrence_backend.py` (24 cases — backgrounding,
+  binary status, stubs, failure handling, controllable fake adapter) +
+  `src/tests/unit/test_recurrence_routing.py` (9 cases — routing precedence + `get_model_spec`).
+- **Recurrence route correctness + dataset-ref plumbing — model-selection A1 enabler
+  (A1-iii-a, #368)**: makes a recurrence (one-shot) backend behave correctly in `main.py`'s
+  route layer and lets a recurrence fit actually run. **Route fixes** (`src/main.py`): the
+  `/api/v1/snapshots` mock-snapshot path is gated on `== "demo"` (was `!= "service"`, which
+  made recurrence serve fabricated demo snapshots); the snapshot create/restore adapter calls
+  are gated on `== "service"` (recurrence's `_adapter` is a different type — it must use the
+  h5py fallback, not cascor's `save_snapshot`/`load_snapshot`); `/api/v1/workers/stats` +
+  `/workers/list` return an **empty** pool for recurrence instead of the synthetic demo-worker
+  fixtures; and the lifespan seeds `training_state` from `get_status()` for recurrence (it has
+  no live stream / `set_state_update_callback`). The cascade-only routes were already correctly
+  fenced by `== "service"` guards (clean 501/503), and `RecurrenceBackend` already returns
+  `None` for topology / decision-boundary (a regression test now locks in the clean 503).
+  **Dataset-ref plumbing**: `/api/train/start` gains an optional body (`dataset` ref +
+  `d`/`theta`/`ridge`) and the `/ws/control` `start` command forwards its `params`, both via a
+  shared `_recurrence_start_kwargs` helper — for **recurrence only**, so cascor/demo keep their
+  bare `start_training(reset=…)` call **byte-for-byte unchanged** (extra kwargs would break
+  them). **No UI** — the model picker + the one-shot result view / panel suppression are
+  A1-iii-b / A1-iv. Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_A1_III_DASHBOARD_INTEGRATION_SCOPE_2026-06-23.md`. Tests:
+  `src/tests/regression/test_recurrence_routes.py` (11 cases — route mis-bucket guards,
+  topology/boundary 503, dataset-ref forwarding, cascor-unaffected, the helper).
+- **One-shot cascade-panel suppression — model-selection A1 enabler (A1-iii-b1, #368)**:
+  the dashboard now hides the cascade-network-only panels for a one-shot (recurrence / LMU)
+  model. Adds an **execution paradigm** axis: `ModelSpec.execution` (`"live" | "one_shot"`,
+  `model_registry.py`) + an `execution` property on `BackendProtocol` and all three backends
+  (`demo`/`service` → `"live"`, `recurrence` → `"one_shot"`), surfaced to the frontend via a
+  new `"execution"` field on `GET /api/train/status`. A new `model-class-store` (`dcc.Store`)
+  is hydrated from that route on mount; when it reads `"one_shot"`, three callbacks
+  (`_setup_model_class_callbacks`) **suppress** the cascade-only surface — the 5 viz tabs
+  (Candidate Metrics / Network Topology / Network Evolution / Decision Boundary / Workers,
+  rebuilt via a new `_all_visualization_tabs()` + `_visible_tabs()` so a now-hidden active
+  tab falls back to *Training Metrics*) and the status-bar **Iteration** (hidden-units)
+  segment. An LMU has no growing topology, decision boundary, candidate units, or worker pool,
+  so these are meaningless for it; the route layer already refuses to serve them (A1-iii-a).
+  **Suppression only** — the metrics accuracy→regression switch + the one-shot result view are
+  A1-iii-b2. Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_A1_III_DASHBOARD_INTEGRATION_SCOPE_2026-06-23.md`. Tests:
+  `src/tests/unit/test_recurrence_ui_suppression.py` (8 cases — execution flag across the
+  backends + registry, and `_visible_tabs` drop/keep behavior) + a `/api/train/status`
+  execution assertion in `test_recurrence_routes.py`.
+- **One-shot regression result view — model-selection A1 enabler (A1-iii-b2, #368)**: the
+  final A1-iii slice — a one-shot (recurrence / LMU) model now renders its **regression**
+  result instead of a broken classification view. The metrics panel
+  (`src/frontend/components/metrics_panel.py`) gains a `model-class-store`-driven callback
+  (`render_model_class_metrics`) that, when the active model is `one_shot`, **hides the
+  classification surface** (the accuracy / hidden-units / learning-rate cards row +
+  both per-epoch loss/accuracy plots — meaningless for a single regression fit) and **shows a
+  regression result card** (`_build_oneshot_result`): R² / RMSE / MSE / MAE / Loss formatted as
+  plain floats (never a percentage), with a spinner placeholder while the fit runs. The
+  `MetricsResult` TypedDict (`backend/protocol.py`) gains the regression keys (`r2` / `mse` /
+  `rmse` / `mae`) so `RecurrenceBackend.get_metrics` is type-honest. **Design choice:** a
+  dedicated result card (per design D-iii-3 "a regression-metrics card") rather than retrofitting
+  the classification cards in-place — which also sidesteps the cascor nested-vs-flat metrics-
+  envelope mismatch (the hidden classification cards never read recurrence data). Design-of-
+  record: juniper-ml `notes/JUNIPER_CANOPY_A1_III_DASHBOARD_INTEGRATION_SCOPE_2026-06-23.md`.
+  Tests: `src/tests/unit/test_recurrence_oneshot_result.py` (7 cases — surface toggle +
+  regression card / spinner) + regenerated `snapshots/metrics_panel.txt`; UI sub-suite run
+  locally.
+- **Dedicated model-selection surface (A1b-1, #368)**: model selection moves from the sidebar
+  `nn-model-dropdown` (A1-iv-3a) to a dedicated **`dbc.Modal`** (`size="xl"`, scrollable) holding a
+  custom **`dbc.Table`** of models, opened by a compact sidebar **"Model: … ▸ change"** summary +
+  button (`src/frontend/dashboard_manager.py`). Each row shows the model label / description,
+  category, a lifecycle **status badge** (D8), a **compatibility cell**, and a per-row **Select**
+  button (pattern-matching `{"type": "model-select-btn", "index": <key>}`) disabled only for
+  *incompatible* models — per ratified **option (a)** a `coming_soon` model stays selectable (D8
+  Train-gating deferred to iv-5). The compatibility cell is driven by a new registry
+  **`model_reason()`** — the model-perspective inverse of `dataset_reason()` (e.g. "needs 3-D data"
+  against a 2-D dataset). Selecting reuses the unchanged `_select_model_handler`
+  (`POST /api/model/select` + store mirror) and closes the modal; the downstream dataset gate
+  (A1-iv-3b) and one-shot start-body resolver (A1-iv-3c) are **untouched** — they key off the
+  stores, not the dropdown, so only the input side moved. A modal was chosen over a Models tab
+  because the tab bar caps `active_tab` writers at two and is rebuilt by the one-shot suppression —
+  a modal's `is_open` toggle sidesteps both (OQ-1); a custom `dbc.Table` over `dash_table.DataTable`
+  because the cells are rich components with no virtualization payoff at this row count (OQ-4). New
+  registry helpers: `model_reason()` + `get_dataset_spec()`. Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md` (D7 / §5.2 / §5.3). Tests:
+  `src/tests/regression/test_model_table.py` (15 cases — table builder, status badge, open/close,
+  Select → apply + close) + `src/tests/unit/test_model_registry.py` (`model_reason` / `get_dataset_spec`).
+  The reactive reverse dataset→model gate, degenerate states, and the search box are A1b-2.
+- **Reactive reverse gate + degenerate states (A1b-2, #368)**: completes the bidirectional gate
+  (§5.3) on the sidebar side. A new **reverse-gate annotation** under the model summary
+  (`nn-model-dataset-hint`) names the model constraint the *currently-selected dataset* imposes —
+  e.g. *"3-D Δt-aware models only"* for `equities_seq`, *"2-D models only"* for the 2-D types — the
+  dataset-side mirror of the table's per-row `model_reason` greying. It updates on every dataset
+  change (a user pick **or** the forward-gate snap from `gate_dataset_options`) via a new registry
+  `dataset_model_hint()` helper. The model **table** also now renders a clear **recovery message**
+  (§5.8) when a dataset has *no* compatible model (degenerate empty-compatible-set state) instead of
+  a silently-unusable all-greyed list — defensive under option (a) (every current seed dataset has a
+  compatible model), exercised via an injectable `models=` param. The **optional search box (§5.2)
+  is deferred** — it is a FR12 scale affordance with no value at the current two-model population.
+  Design-of-record: juniper-ml
+  [`notes/JUNIPER_CANOPY_MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md)
+  (§5.3 / §5.8). Tests: `src/tests/unit/test_model_registry.py` (`dataset_model_hint`) +
+  `src/tests/regression/test_model_table.py` (degenerate recovery, hint handler/seed, callback wiring).
+- **Recurrence model goes live + D8 Train-gating (A1-iv-5, #368)**: the `recurrence` (LMU) model is
+  flipped from `coming_soon` → **`live`** now that the canopy-routable service is deployed and wired
+  in-stack (juniper-deploy #132 sets `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL` → `http://juniper-recurrence:8210`),
+  so it is now a fully selectable, trainable model. Alongside it lands the **D8 Train-gate** (design
+  §5.7): a registry `model_is_trainable()` predicate (status == `live`; unknown → trainable so a
+  desync never strands Start, FR9), the Start button **force-disabled** for any non-live model
+  (folded into `update_button_appearance` via a new `model-selection-store` Input — a single-point
+  combination of training-state + model-status, not a racy second writer), and a `train-gate-notice`
+  status reason near the training controls explaining why Start is disabled. A non-live model stays
+  *selectable* for inspection (option (a)) but is not trainable. With every shipped model now live the
+  gate is exercised via synthetic non-live models (`model_options()` gained a `models=` injectable).
+  Tests: `model_is_trainable` + the flipped/repurposed registry assertions
+  (`test_model_registry.py`), the Start force-disable + notice handlers + wiring
+  (`test_model_table.py`), and the live-status route assertion (`test_model_select.py`).
+- **Model-table search box (A1b, #368)**: the model-selection modal gains a **free-text search**
+  (`model-search-input`, a `type="search"` box with a native clear) above the table. It filters the
+  model rows by **label + family + category + tags** (not label-only, §8) via a new registry
+  `model_matches_search()` predicate; a blank query shows everything and a non-empty query that
+  matches nothing renders a clear "no models match" message. Search is **folded into the existing
+  modal toggle callback** (the one that owns the table container) — typing rebuilds the table
+  filtered while the modal stays open, with no racy second writer; `_build_model_selection_table`
+  gains a `search=` parameter. This is the §5.2 scale affordance (browse-and-compare at
+  dozens-to-hundreds of model variants); it has no functional effect at today's two models but
+  completes the surface. Design-of-record: juniper-ml
+  [`notes/JUNIPER_CANOPY_MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md)
+  (§5.2). Tests: `model_matches_search` (`test_model_registry.py`) + search filtering / no-match
+  message / open-honours-search + search-rebuilds-keeping-open (`test_model_table.py`). **This
+  completes the A1 model-selection feature end-to-end.**
+
+- **Build provenance on `/v1/health` + `/v1/health/ready`.** The dashboard now
+  reports the source `git_sha` and ISO-8601 `build_date` baked into its image
+  at build time. New `GIT_SHA` / `BUILD_DATE` / `APP_VERSION` Dockerfile
+  build-args become OCI labels (`org.opencontainers.image.revision` /
+  `.created` / `.version` — the image previously carried no `revision` /
+  `created` / `version` labels at all) plus `JUNIPER_CANOPY_GIT_SHA` /
+  `_BUILD_DATE` env vars; a new `provenance` accessor (`src/provenance.py`)
+  reads them back (both `null` outside a provenance-stamped image — local dev /
+  a bare `docker build`). The values are also passed into `set_build_info(...)`
+  (Prometheus `juniper_canopy_build` Info metric) and the shared
+  `ReadinessResponse`. Foundation for the ecosystem stale-image-detection
+  effort — see juniper-ml
+  [`notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/JUNIPER_2026-06-14_JUNIPER-ECOSYSTEM_BUILD-PROVENANCE-DESIGN.md).
+  Requires `juniper-observability>=0.4.0`.
+
+- **STATUS BAR — show cascor `completion_reason` (converged vs stalled) on a completed run (Issue #3 diagnosability follow-up, consumes cascor #320)**: a finished training run rendered a bare "Completed" regardless of *why* growth stopped, so a genuine convergence was indistinguishable from a 0-unit stall. cascor #320 now emits a `completion_reason` on `/v1/training/status`; this wires it through canopy end-to-end. `ServiceBackend.get_status` (`src/backend/service_backend.py`) carries the top-level `completion_reason` into the flat `StatusResult` (mirroring the existing `pending_dataset` pass-through; `StatusResult` in `src/backend/protocol.py` gains the field), and `_build_unified_status_bar_content` (`src/frontend/dashboard_manager.py`) appends a short label to the status when `status == "Completed"` via a new `_completion_reason_label` helper: `residual_collapsed`/`below_threshold` → **"Completed — converged"**, `no_candidate` → **"Completed — stalled (0 new units)"**, `early_stopped` → **"Completed — early stopped"**, `max_iterations` → **"Completed — max iterations"**. Display-only (the status color still keys off the base "Completed"); an unknown or missing reason yields a plain "Completed", so a canopy talking to a cascor that predates #320 degrades gracefully. Regression coverage: `src/tests/unit/frontend/test_completion_reason_status_bar.py` (label mapping + the five completed-run suffixes + not-completed / unknown / missing cases) and two `test_service_backend.py` cases (carry-through + `None` when absent).
+- **SEC-16 parity — `/metrics` IP allowlist via
+  `juniper_observability.MetricsAuthMiddleware`**: canopy now wraps its
+  Prometheus `/metrics` ASGI mount in the shared
+  `MetricsAuthMiddleware` (promoted from juniper-data #157 and
+  juniper-cascor #313 to `juniper-observability` 0.3.0 — see
+  juniper-ml #335). The middleware enforces a configurable bare-IP /
+  CIDR allowlist with IPv6 zone-id strip and IPv4-mapped IPv6 unwrap,
+  so a Docker container appearing as `::ffff:172.18.0.5` matches an
+  IPv4 `172.18.0.0/16` allowlist entry; unparseable allowlist entries
+  raise a `ValueError` at `Settings()` construction (fail-loud).
+  Concrete changes: `src/settings.py` adds
+  `Settings.metrics_trusted_ips: list[str] = ["127.0.0.1", "::1"]`
+  with a `_validate_metrics_trusted_ips` field validator that
+  delegates to `juniper_observability.parse_trusted_networks`;
+  `src/main.py` rewraps the existing
+  `app.mount("/metrics", get_prometheus_app())` as
+  `app.mount("/metrics", MetricsAuthMiddleware(get_prometheus_app(), settings.metrics_trusted_ips))`;
+  `pyproject.toml` bumps `juniper-observability>=0.2.0` to `>=0.3.0`
+  (first release that exports the middleware). No `EXEMPT_PATHS`
+  change required because `SecurityConstants.EXEMPT_PATH_PREFIXES`
+  already contained `"/metrics"`, so canopy's `SecurityMiddleware`
+  was already letting the path through — the IP allowlist is the
+  only gate now. New regression test
+  `src/tests/unit/test_metrics_auth_settings_integration.py` (8 cases)
+  pins the canopy-side wiring: default loopback, env-var JSON-list
+  widening to CIDR, bare IPv6 CIDR, fail-loud on `172.18.0.0/164`
+  typos, fail-loud on `"not-an-ip"`, valid mixed CIDR + bare IP
+  accepted, shared `parse_trusted_networks` delegation contract, and
+  the `/metrics in EXEMPT_PATH_PREFIXES` invariant. Middleware
+  behaviour itself is covered by juniper-observability's
+  `tests/test_metrics_auth_middleware.py` (22 cases). Closes the
+  third trigger-conditioned deferred follow-up in
+  juniper-deploy/notes/poc/POC_REMEDIATION_PLAN_2026-05-27.md §6
+  ("Add `MetricsAuthMiddleware` to juniper-canopy"). Companion
+  juniper-deploy PR (wiring `JUNIPER_CANOPY_METRICS_TRUSTED_IPS`
+  into canopy's compose env block + `.env.observability` default)
+  is queued separately.
+
+- **Outbound `X-API-Key` for juniper-data calls**: new
+  `Settings.juniper_data_api_key` field plus `_check_juniper_data_api_key`
+  field validator that resolves the value via `secrets_util.get_secret`
+  (Docker-secrets `<NAME>_FILE` indirection). Resolution order:
+  `JUNIPER_CANOPY_JUNIPER_DATA_API_KEY_FILE` → direct prefixed env →
+  `JUNIPER_DATA_API_KEY_FILE` (shared cross-service) → direct shared
+  env → `None`. The resolved value is plumbed through
+  `_generate_spiral_dataset_from_juniper_data` and passed as
+  `JuniperDataClient(api_key=…)` so every outbound juniper-data call
+  carries `X-API-Key`. Closes the gap where canopy never sent an
+  outbound key and silently 401'd against juniper-data once
+  juniper-deploy#100 enabled juniper-data auth (canopy's own
+  `/v1/health` had remained misleading because juniper-data's
+  `/v1/health` is auth-exempt). When both prefixed and shared env vars
+  are unset the field defaults to `None` and `JuniperDataClient` omits
+  the header — preserving the pre-this-PR behaviour for stacks where
+  juniper-data auth is disabled. New regression suite at
+  `src/tests/unit/test_juniper_data_api_key_resolution.py` (8 cases)
+  pins prefixed direct, prefixed `_FILE`, prefixed `_FILE` precedence
+  over direct, prefixed `_FILE` missing-file fallthrough to shared,
+  shared direct, shared `_FILE`, prefixed-wins-over-shared, and the
+  no-env-vars `None` default.
+
+- **CFG-01** (v7 roadmap §13439): new `[demo]` optional-dependencies extra declaring `torch>=2.0.0`. Closes the missing-declaration where `src/demo_mode.py:63` and `src/backend/demo_backend.py:45` `import torch` unconditionally at module level but `pyproject.toml` had no `torch` entry — `pip install juniper-canopy` (no extra) silently produced a wheel that crashed on demo import. Kept out of `[project] dependencies` per the roadmap recommendation to avoid the ~2GB install footprint on production deployments that drive a remote cascor service via `[juniper-cascor]` and never load demo mode (matches the lazy-import convention in `src/backend/data_adapter.py:363,406` whose existing `noqa: F811` comments call out the size cost explicitly). The standalone demo runner `util/juniper_canopy-demo.bash` continues to install torch via `conf/requirements.txt` + the PyTorch CPU index URL for size-optimised bash-script installs; this extra is the canonical path for `pip install juniper-canopy[demo]`. `[dev]` aggregator updated to include `[demo]` so the test suite (`src/tests/unit/test_demo_mode_comprehensive.py:22` etc. import torch unconditionally) resolves under `pip install juniper-canopy[dev]`. No code changes — declaration only.
+
+### Changed
+
+- **SEC-F22 / D2 — two-flag bind attestation (supersedes the unreleased single-flag attestation)**: the startup loopback bind-guard's single operator attestation is replaced by **two** independent booleans (both default `False`), so the guard names the *reason* a non-loopback bind is permitted instead of collapsing two distinct perimeters into one flag: `settings.loopback_publish_attested` (`JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED`) — canopy is reachable only via a loopback-only host publish (the containerized default; verifiable by the juniper-deploy preflight) — and `settings.auth_proxy_attested` (`JUNIPER_CANOPY_AUTH_PROXY_ATTESTED`) — a fronting authenticating reverse proxy terminates access (Phase 4; attestation only). `security.enforce_loopback_bind_guard()` (`src/security.py`, called from `main.lifespan`) now allows a non-loopback bind iff **at least one** attestation is `True` and logs which one permitted it; a non-loopback bind with **neither** still hard-fails uniformly (CRITICAL log + `NonLoopbackBindError`; there is no warning-only mode). Loopback binds (the default) start normally — zero-UX for the shipped posture. **(c) consistency fix:** the root `Dockerfile` default bind host changes from `0.0.0.0` to `127.0.0.1` so a bare `docker run -p 8050:8050` is safe-by-default (matches juniper-cascor); the juniper-deploy compose already sets `SERVER__HOST=0.0.0.0` explicitly and will add the explicit attestation. The `docker-build` smoke step (`.github/workflows/ci.yml`) now runs the container with `-e JUNIPER_CANOPY_SERVER__HOST=0.0.0.0 -e JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true` so the image still boots past the guard for the `/v1/health` probe. Regression coverage: `src/tests/unit/test_bind_guard.py` (neither / either / both attest; loopback-safe default; which-attestation-permitted logging) and `src/tests/regression/test_docker_bind_default.py` (loopback-safe Dockerfile default; no baked attestation). **This is one of a three-PR set** — the identical two-flag scheme lands in juniper-cascor and juniper-deploy; the deployed stack needs all three consistent, and this is owner-gated (not auto-merged). Design-of-record: juniper-ml [`notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md) §4 / §8 (D2).
+- **CFG-09** (v7 roadmap §13896): `Settings.audit_log_path` default changed from `/var/log/canopy/audit.log` (root-only) to `logs/audit.log` (CWD-relative user-space). Closes the failure class where a fresh non-root install of juniper-canopy crashed at startup inside `src/audit_log.py:51` (parent-directory `mkdir`) or `:53-58` (`TimedRotatingFileHandler` open) because the bake-in default required root privileges to create `/var/log/canopy`. The matching parameter default of `configure_audit_logger(log_path=...)` in `src/audit_log.py:27` was changed in lockstep so direct callers (i.e. anyone invoking the function without passing `settings.audit_log_path`) also get the user-space default. **Not breaking for production**: deployments override via `JUNIPER_CANOPY_AUDIT_LOG_PATH` (pydantic auto-derives from `env_prefix='JUNIPER_CANOPY_'`); the env-var path is unchanged and continues to resolve. No `Settings` model_validator was added — `audit_log.py:51` already does `Path(log_path).parent.mkdir(parents=True, exist_ok=True)`, so adding one in Settings would be duplicate. Switching the default to the canonical XDG state location (`$XDG_STATE_HOME/canopy/audit.log`, default `~/.local/state/canopy/audit.log`) is a deferred follow-up — would require introducing an XDG helper to canopy, which is out of CFG-09's scope. Pinned by new 5-case source-level regression suite at `src/tests/regression/test_cfg_09_audit_log_default.py` (Settings default value, function-parameter default value, no-old-default-in-settings-source, no-old-default-in-audit_log-source, env-var-override-still-resolves).
+- Refreshed developer and API documentation for the SEC-F22/SEC-F19 control-surface hardening: `docs/QUICK_START.md`, `docs/ENVIRONMENT_SETUP.md`, `docs/REFERENCE.md`, `docs/DEVELOPER_CHEATSHEET.md`, and `docs/api/API_REFERENCE.md` now document the fail-closed loopback bind guard, the two bind attestations `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED` / `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED`, canonical `JUNIPER_CANOPY_*` settings, and global/per-IP/per-session WebSocket caps.
+
+### Fixed
+
+- **CI DOCKER SMOKE — the smoke container is attested past the bind-guard so the image can boot** (updated for the two-flag migration above): the startup loopback bind-guard (SEC-F22 / D2) refuses to serve on a non-loopback interface without a perimeter attestation, so canopy's `docker-build` "Verify Container Starts" smoke step (`.github/workflows/ci.yml`) — which must reach the container through the published port — would otherwise abort at startup (`NonLoopbackBindError`, raised in `main.lifespan`) and never reach `healthy`. The smoke step now runs `docker run` with `-e JUNIPER_CANOPY_SERVER__HOST=0.0.0.0 -e JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true` — scoped to that ephemeral CI container only (no fronting proxy is present; the container just needs to boot for the `/v1/health` probe). Supersedes the interim single-flag smoke attestation (never released). Independent security review of #420, §9.
+
+- **SEC-F19 / D4 WS cap rollback — globally rejected sockets no longer leak reserved per-IP/per-session slots**: the endpoints reserve the per-IP/session counters before awaiting `WebSocketManager.connect()`, but the new stack-absolute global cap can reject later inside `connect()` when `max_connections` is already full. That rejection path closes the socket before it enters `active_connections`, so the endpoint's normal `disconnect()` cleanup no-ops and the reserved counters stayed inflated, letting repeated over-global attempts strand a browser session/IP at its cap until process restart. `connect()` now returns whether it actually registered the socket, and all WS endpoints release the reserved cap slots when registration is rejected or fails before activation. Regression coverage: `src/tests/unit/test_ws_connection_caps.py::TestGlobalConnectionCap::test_global_cap_rejection_releases_reserved_session_slots`.
+
+- **STALE-VERSION SHADOW — `.dockerignore` now excludes *nested* `**/*.egg-info/` so the image stops reporting a stale package version**: `importlib.metadata.version("juniper-canopy")` (the source of `APP_VERSION` → `/v1/health` `version`, the Prometheus `juniper_canopy_build` metric, and the Sentry release) resolved to **0.4.0** while `pyproject.toml` was **0.5.0**. Root cause: a stale, git-untracked `src/juniper_canopy.egg-info` build artifact was COPYed into the image by the Dockerfile's `COPY src/ ./src/`; with `ENV PYTHONPATH=/app/src` ahead of site-packages, `importlib.metadata` resolved that egg-info's `PKG-INFO` (0.4.0) instead of the freshly-installed `juniper_canopy-0.5.0.dist-info`. The existing `.dockerignore` carried `*.egg-info/`, but that pattern only matches the **context root** and silently missed the nested `src/*.egg-info`. Fix: add the `**/`-prefixed `**/*.egg-info/` and `**/*.dist-info/` forms so nested build-metadata dirs are excluded from the build context at any depth (verified against a context containing `src/X.egg-info` — excluded, while real source is kept). Surfaced by the build-provenance `make doctor` work (juniper-ml [`notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/JUNIPER_2026-06-14_JUNIPER-ECOSYSTEM_BUILD-PROVENANCE-DESIGN.md)): doctor correctly reported the image **FRESH** (`git_sha` == source HEAD) while the version string lied — exactly why `git_sha` is the reliable staleness signal. Takes effect on the next canopy image rebuild. Regression coverage: `src/tests/regression/test_dockerignore_egg_info.py` pins the nested-exclusion patterns.
+
+- **TRAINING-CONTROL ERROR SURFACING — a rejected Start/Pause/Stop/Resume/Reset now shows a danger alert instead of silently bouncing the button (the "dead button" class)**: clicking a training-control button that the backend then rejected produced **no** user-visible feedback — the button flipped to its optimistic "pending" state and silently re-enabled, with the failure (and its reason) reaching only a server log or the browser console. This was the canopy half of the cascor dual-path #319 incident: a 401/502 live dataset swap (cascor#331) and an FSM-rejected Start (409) were both invisible from the dashboard. Two transports were silent: (1) the **production-default clientside WS path** (`PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS`, gated `enable_ws_control_buttons=True`) returned `success: true` *synchronously* and resolved the real WS/REST outcome only to `console.warn`; (2) the server-side handler (`_handle_training_buttons_handler`) computed `success: False` into `training-control-action` but **nothing consumed it** and the response body (the reason) was discarded. Fix — one shared outcome surface fed by both transports: a new fixed-position `training-control-outcome-alert` div (offset below `live-switch-outcome-alert`) is filled by a single unconditionally-registered render callback (`_surface_training_control_outcome_handler`) that renders a dismissable `dbc.Alert(color="danger", duration=8000)` naming the command and the reason on failure, and clears on success. The server-side handler now captures the rejection detail via a new `_extract_training_error_detail` helper (prefers cascor's structured `{"error": {"message": …}}` body — which cascor#332 made specific, e.g. "Training cannot be started: Training data not provided" — then raw text, then the exception string; never raises) and stores `{success, command, detail}`. The clientside JS pushes the **real** async outcome into the same store via `dash_clientside.set_props('training-control-action', …)` (the established Phase D §S10 pattern) from the REST-fallback failure branches, so WS rejections, WS-down→REST, and pure-REST failures all surface. All edits are additive on failure branches that previously dead-ended in the console; the success path, optimistic button state, debounce, and timeout sweeper are untouched. Design + root cause: [`notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md`](notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md). Regression coverage: `test_dashboard_manager.py` (handler failure now carries `command`+`detail`; `_extract_training_error_detail` JSON / text / bare-exception / never-raises; `_surface_training_control_outcome_handler` clear-on-success / render-danger-on-failure / fallback-detail) and `test_phase_d_button_clientside.py` (JS contains the `set_props` reporting wired into the REST fallback; render callback registered under both transport flags). **Live-verification gate:** the `set_props`→render round-trip is not Python-unit-testable, so this must be confirmed on the deployed stack (force a Start the FSM will reject; confirm the red alert appears with the cascor reason) before merge. **Deferred (noted in the design doc):** short-circuiting the REST double-send on a *definitive* WS command rejection, and an optional green success confirmation.
+- **WS-CONTROL PONG — `/ws/control` accepts an inbound heartbeat pong instead of erroring (closes the WS-KEEPALIVE latent note)**: the `/ws/control` receive loop (`src/main.py`) handled inbound `{"type": "ping"}` (replies with a pong) but had no branch for `{"type": "pong"}`. A pong frame carries no `command` key, so it fell through to the command dispatch as `command == ""` and the endpoint replied `Unknown command: ` (`code="unknown_command"`). Dormant today — the server Phase-F heartbeat only pings `/ws/training`, never `/ws/control` (the WS-KEEPALIVE entry below scoped it to `channel="training"` *specifically* to avoid this misfire) — but it would trip the moment the heartbeat is extended to the control channel, or any client sends an unsolicited pong. The loop now treats `{"type": "pong"}` as a silent no-op (debug-logged), mirroring `/ws/training`, which already ignores non-ping frames. Removes the blocker noted in WS-KEEPALIVE so a future control-channel heartbeat is safe. Regression coverage in `test_websocket_control.py::TestWebSocketControlIntegration::test_control_pong_is_noop_not_unknown_command` (send a pong then a valid `start`; the next command response is the `start` success — proving the pong produced no `ok: False` error).
+- **#2a APPLY-PARAMS RETRY-AFTER BACKOFF — a 429 now backs off and retries instead of failing the click (completes the half #345 deferred)**: `_apply_parameters_handler` (`src/frontend/dashboard_manager.py`) wraps its `/api/set_params` POST in a 3-attempt retry loop (`DashboardConstants.DASHBOARD_SET_PARAMS_MAX_RETRIES`), but the `429` branch **returned immediately** — it never consumed the retry budget and ignored the `Retry-After` header the limiter faithfully sets (`src/security.py`; `Retry-After: <reset_in>` seconds). After #345 exempted canopy's own self-calls a 429 here is the rarer genuine downstream/cascor-side limit, but a single transient one still failed the user's "Apply Parameters" click outright. The 429 branch now **backs off and `continue`s within the existing loop**: it sleeps `min(Retry-After, DASHBOARD_RETRY_AFTER_MAX_SLEEP_S)` and retries, returning the "Rate limited — please try again in a few seconds" message only *after* the retry budget is exhausted (not on the first 429). The sleep is **bounded** — this runs on a Dash callback thread and the advertised `Retry-After` can be the limiter's full window (tens of seconds), so it is capped at a new `DashboardConstants.DASHBOARD_RETRY_AFTER_MAX_SLEEP_S = 2.0`; a missing/non-numeric header (e.g. the rare RFC 9110 HTTP-date form, which our own limiter never emits) falls back to `DASHBOARD_RETRY_AFTER_FALLBACK_S = 0.5` via a new `_parse_retry_after` helper. **Both constants are provisional first-cut tuning and are flagged in `canopy_constants.py` for revisiting once there is real 429-frequency data from the deployed stack.** Regression coverage in `test_dashboard_manager_handlers.py` (429-then-200 retries and succeeds with the sleep capped at 2.0s even when `Retry-After: 60`; persistent 429 consumes the full retry budget and returns the message only after exhausting — not immediately; a missing header backs off by the 0.5s fallback).
+- **#2a RATE LIMIT — exempt canopy's own self-calls (the dashboard was 429-ing itself)**: canopy's `RateLimiter` keys by API-key (falling back to per-IP), but the dashboard's high-frequency `/api/*` polling **and** a user's actions are *all* server-side self-calls from the canopy process carrying the same `X-API-Key` — so they shared one bucket, the polling drained it, and a click (e.g. "Apply Parameters") landing in a drained window got HTTP 429 ("Rate limited"), which also surfaced as the #3 "Error" status. `frontend.internal_api.internal_api_headers()` now attaches a **per-process unforgeable token** (`INTERNAL_REQUEST_HEADER`, a fresh `secrets.token_urlsafe(32)` generated at process start) to every self-call, and `RateLimiter.__call__` (`src/security.py`) **exempts** requests bearing it (constant-time `hmac.compare_digest`). External clients can't forge the token, so they stay rate-limited. Regression coverage in `test_security.py::TestInternalRequestRateLimitExemption` (valid token → exempt across many calls; forged token → limited; missing → limited; round-trip that `internal_api_headers()` carries the exact exempt token). **Deferred:** a `Retry-After`-aware backoff in the apply handler — the exempt removes canopy's own 429 (the dominant source), leaving only the rarer cascor-side case, so it's a small optional follow-up.
+- **#2b APPLY-PARAMS HONESTY — stop reporting canopy-local params as "not supported"**: the "Apply Parameters" toast read "Applied 19 of 27 … 8 not yet supported by the backend", listing 8 params the code *already knew* were canopy-only. `CascorServiceAdapter.apply_params` (`src/backend/cascor_service_adapter.py`) built its `skipped` list from every key absent from `_CANOPY_TO_CASCOR_PARAM_MAP`, **including** the keys in `_CANOPY_LOCAL_PARAMS` — which the code's own comment says "should never be reported as skipped". Now `skipped` also excludes `_CANOPY_LOCAL_PARAMS`, so it surfaces only *genuinely* unsupported keys; with an empty `skipped`, the dashboard's honesty toast (`dashboard_manager.py`) simply doesn't fire and the clean "applied" message shows. Reworked `test_apply_params_skipped_surfaced.py::TestAdapterSurfacesSkipped` (which previously asserted the buggy contract — that canopy-local keys appear in `skipped`) to the corrected contract: canopy-local keys are not surfaced, a genuinely-unknown key still is. **Fast-follow (separate PR):** the structural param-surface cleanup — wiring the 3 silently-dropped `SetParamsRequest` params (`nn_output_epochs`/`nn_optimizer_type`/`nn_activation_function_name`), dropping the read-only `cn_training_complete`, and relocating `nn_dataset_*` off the 27-key dict onto `/api/stage_dataset`.
+- **#3 STATUS-BAR DIAGNOSABILITY — specific labels instead of a bare "Error"**: a failed `/api/status` poll rendered a generic `"Error"` in the unified status bar regardless of cause, so the dominant case on the deployed stack — a transient **429** from canopy's own rate limiter (see #2a) — was indistinguishable from a real backend outage. `_update_unified_status_bar_handler` (`src/frontend/dashboard_manager.py`) now maps the failure to a specific label via a new `_status_bar_error_tuple` helper: **429 → "Rate Limited"**, **401/403 → "Unauthorized"**, **5xx → "Backend Error"**, other non-200 → "Backend Unavailable", `requests.Timeout` → "Backend Timeout", `requests.ConnectionError` → "Unreachable", anything else → "Error". Regression coverage in `test_dashboard_manager.py::TestStatusBarErrorDiagnosability` (10 cases across status codes + exception types + the unchanged 200 happy path). **Deferred follow-up:** rendering the circuit-breaker-open state as "Unreachable" rather than "Stopped" needs an `error`/unreachable signal plumbed through the `StatusResult` schema (`backend/protocol.py` + `service_backend.get_status`), so it's a separate PR rather than bundled here.
+- **#4 DATASET-APPLY — numeric inputs now reach `/api/stage_dataset` (a modified dataset trains)**: editing a dataset's element count / noise and clicking **Apply Dataset** never changed the trained dataset on the real backend — only a dropdown `dataset_type` change took effect. Two coupled causes in `src/frontend/dashboard_manager.py`: (1) **Apply-Dataset had no force-blur**, so a numeric value typed and then committed by *clicking* the button (without tabbing out) was still the Dash/React `null` at `State()`-read time — the same gap fixed for Apply-Parameters in Issue #2; (2) `apply_dataset` then ran a blanket `{k: v for ... if v is not None}` drop that silently discarded those `null` numerics, leaving only `dataset_type`. Fix: the existing force-blur clientside callback now fires on **both** `apply-params-button` and `apply-dataset-button`, and `apply_dataset` seeds the payload with `nn_dataset_type` unconditionally (cascor `_reload_dataset` requires it) while including the optional numeric / spiral fields only when present. Regression coverage in `test_dashboard_manager.py::TestDatasetApplyNumericCommit` (force-blur wired to both buttons; payload always sends `dataset_type`; blanket None-drop removed) plus an updated input assertion in `tests/ui/test_apply_blur_clientside.py`. The companion relocation of `nn_dataset_*` off `/api/set_params` is the #2b change.
+- **WS-KEEPALIVE — server-side Phase F heartbeat (completes the #3 "WS: Reconnecting" idle-timeout fix)**: the browser client already replied to server `{"type": "ping"}` frames with a pong (`src/frontend/assets/websocket_client.js`), but nothing on the server ever *sent* those pings, so the `/ws/training` receive loop (`src/main.py` — `asyncio.wait_for(websocket.receive_text(), timeout=idle_timeout_seconds)`, default 120s) idled out on any quiet-but-healthy training stream and the client flapped Connected→Reconnecting. `src/main.py` now starts a `_websocket_keepalive_loop` task in the application lifespan that calls `websocket_manager.broadcast_ping(channel="training")` every `websocket.heartbeat_interval` seconds (the previously-dormant 30s setting, well under the 120s idle timeout) and cancels it on shutdown; the client's existing pong resets the server idle timer. `WebSocketManager.broadcast()` / `broadcast_ping()` gain an optional `channel` filter so the heartbeat is scoped to the training channel only — `/ws/control` has no idle timeout and would mis-handle the resulting pong as an unknown command. Regression coverage: `test_main_import_and_lifespan.py::TestWebSocketKeepalive` (loop pings the training channel periodically and survives a transient broadcast error) and `test_websocket_comprehensive.py::TestHeartbeatFunctionality` (channel-scoped ping reaches training but not control; no-channel still pings all). Latent adjacent issue noted for a separate PR: the `/ws/control` endpoint treats an inbound `{"type": "pong"}` as an unknown command — dormant today because the heartbeat never pings control.
+- **#1 TAB-FEEDBACK-LOOP — collapse to one tab-persistence system + equality-guard the restore callback**: clicking one tab then another re-opened the previous tab (deterministic Snapshots→Dataset). Two compounding causes in `src/frontend/dashboard_manager.py`: (1) the clientside callback that restores `visualization-tabs.active_tab` from `layout-state-store` (Input on the Store's `data`) re-asserted the tab on *every* Store change — including the echo from the write callback that stamps the Store on each tab change — re-triggering every `Input("visualization-tabs", "active_tab")` callback and racing the `allow_duplicate` active_tab outputs; (2) a redundant *second* persistence system (hand-rolled `localStorage['juniper_canopy_active_tab']` with an `active_tab`→`active_tab` self-edge writer plus a `params-init-interval` mount restore) raced the Store restore at mount. Fix: the restore callback now takes the current tab as `State("visualization-tabs", "active_tab")` and returns `no_update` when `state.active_tab === currentTab` (mirrors the write callback's existing `prev.active_tab === activeTab` guard), and the legacy localStorage pair is deleted so `layout-state-store` (`storage_type="local"`) is the single source of truth. Net: `visualization-tabs.active_tab` now has exactly two writers (Store restore + tutorial-link trigger) and a single mount-time restore. Regression coverage in `test_dashboard_manager.py::TestLayoutStatePersistence`: legacy key fully removed, restore callback equality-guarded, exactly two active_tab outputs.
+
+### Security
+
+- **SEC-F19 log hygiene — hash the `canopy_session` cookie before logging (never log the raw value)**: `WebSocketManager.check_per_session_limit` (`src/communication/websocket_manager.py`) logged a raw 8-char prefix of the anonymous `canopy_session` cookie (`session_key[:8]`) when the per-session cap tripped. That cookie is a signed Starlette session token, so even a prefix in a log line is an avoidable session-identifier leak. A new `_hash_session_key_for_log` helper now emits a short, non-reversible tag instead — keyed HMAC-SHA256 over the raw cookie with a per-process random secret (`_LOG_HASH_KEY`), truncated to 12 hex chars — so the logged digest is not an offline-computable function of the cookie and does not correlate across process restarts, mirroring the cascor sibling that hashes its identity before logging (`juniper-cascor src/api/workers/security.py`). Regression coverage: `src/tests/unit/test_ws_connection_caps.py::TestPerSessionLogHygiene`. Independent security review of #420, §9.
+
+- **SEC-F22 / D2 — startup loopback bind-guard (the loopback bind is now an enforced invariant)**: canopy's browser training-control gate (`/api/train/*`, `/ws/control`) authenticates the same-origin browser by `Origin` + CSRF, both of which are forgeable by an in-network **non-browser** client (spoofable `Origin`, anonymously-mintable CSRF token — audit HO-6), so the **only** effective control is the loopback bind. That bind was an implicit default, not an enforced invariant — flipping `BIND_HOST=0.0.0.0` silently made the control surface in-network- (or internet-) reachable. A new startup guard (`src/security.py`: `is_loopback_host` / `enforce_loopback_bind_guard` / `NonLoopbackBindError`, called from `main.lifespan`, mirroring the E-8 `enforce_dependency_floors` fail-loud idiom) now **refuses to start** (CRITICAL log + raise; fail-closed) when `settings.server.host` (`JUNIPER_CANOPY_SERVER__HOST`) is a non-loopback interface (anything not in `127.0.0.0/8`, `::1`, or `localhost`) **unless** at least one of two operator attestations (both default `False`) is `True` — `settings.loopback_publish_attested` (`JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED`, reachable only via a loopback-only host publish) or `settings.auth_proxy_attested` (`JUNIPER_CANOPY_AUTH_PROXY_ATTESTED`, a fronting authenticating proxy terminates access); the attested non-loopback path logs a loud WARNING naming which attestation permitted it. Loopback binds (the default) start normally, so this is zero-UX for the shipped posture. Implemented **inline in canopy** (no new dependency). Regression coverage: `src/tests/unit/test_bind_guard.py`. Design-of-record: juniper-ml [`notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md) §4 / §8 (D2); implementation note: [`notes/JUNIPER_CANOPY_CONTROL-SURFACE-HARDENING_SEC-F22-F19_NOTE_2026-07-04.md`](notes/JUNIPER_CANOPY_CONTROL-SURFACE-HARDENING_SEC-F22-F19_NOTE_2026-07-04.md).
+
+- **SEC-F19 / D4 — global + per-session WebSocket connection caps (kills the shared-NAT self-DoS)**: Docker NAT collapses every WS client to the bridge-gateway IP (audit HO-3), so the existing per-IP cap (`max_connections_per_ip=5`) is shared across all users behind the gateway — one client's five sockets exhaust the cap for everyone (a live self-DoS). `src/communication/websocket_manager.py` now adds, alongside the per-IP cap: (a) the stack-absolute **global** cap `max_connections` (=50) enforced in `connect()` — the single admission choke point shared by `/ws/training`, `/ws/control`, `/ws` — rejecting the N+1th connection stack-wide with close code `1013`; and (b) a **per-session** cap `max_connections_per_session` (=5, new `WebSocketSettings` field) keyed on the anonymous `canopy_session` cookie read from the WS handshake, restoring per-client fairness where the per-IP cap is inert (one session can no longer starve another behind the same gateway). A cookieless first connection is allowed and left to the global cap as the backstop. The three endpoints call a new `check_connection_limits()` (per-IP then per-session, rolling back the per-IP slot on a per-session rejection so a rejected attempt can't leak the per-IP counter); each endpoint keeps its existing close-reason (`/ws/control` stays opaque per M-SEC-06). The per-IP cap is retained but re-scoped honestly (a code comment + this note): it is **inert behind NAT** — DoS-dampening, **not** authentication. Regression coverage: `src/tests/unit/test_ws_connection_caps.py`. Design-of-record §5 / §8 (D4). **Deferred (Phase 4, owner-gated, NOT in this PR):** X-Forwarded-For-from-trusted-proxy (D6) and a real dashboard login / fronting proxy (D7) — the only mechanisms that restore genuine per-client identity / close SEC-F22 for the remote/multi-user case.
+
+## [0.5.0] - 2026-05-23
+
+**Note on version history**: `pyproject.toml` was bumped 0.3.0 → 0.4.0 on 2026-03-03 in preparation for a 0.4.0 release that was never cut to PyPI (the `[0.4.0]` section below documents the work that *would have* shipped). This 0.5.0 release rolls up both that work and the subsequent ~2.5 months of changes (983 commits since `v0.3.0`) into a single PyPI release. Subsequent entries in this section list the additional work landed since 2026-03-03.
+
+### Added
+
+- **`util/test_agents_md_version_drift.py`** -- portable port of juniper-ml's lint test pinning `AGENTS.md`'s `**Version**:` header to `pyproject.toml`'s `[project].version`. Catches the failure class where a `pyproject.toml` bump leaves the agent-facing contract stale. Preventive-only here: canopy's `AGENTS.md` and `pyproject.toml` are already in sync at `0.5.0`. Wired into the CI tests job next to the existing `test_workflow_script_paths.py` lint.
+
 - Added documentation for the Network Editor service-mode investigation workflow and its network mutation proxy endpoints:
   - `docs/USER_MANUAL.md` now covers the `Investigating`-state gated Network Editor tab, append/remove/patch operations, service-mode constraints, and common failure modes.
   - `docs/api/API_REFERENCE.md` now documents `PATCH /api/v1/network/weights`, `POST /api/v1/network/hidden-units`, and `DELETE /api/v1/network/hidden-units/{idx}` with request examples and status-code expectations.
@@ -34,6 +2932,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **CFG-16** (v7 roadmap): `create_backend()` (`src/backend/__init__.py`) no longer re-reads `CASCOR_DEMO_MODE` or `CASCOR_SERVICE_URL` via raw `os.getenv` as a "legacy fallback". Both env vars are already handled by the corresponding Settings field validators (`_check_legacy_demo_mode`, `_check_cascor_service_url` in `src/settings.py`), which emit `DeprecationWarning` and map the values onto `settings.demo_mode` / `settings.cascor_service_url`. Removing the duplicated raw reads collapses the selection chain from 7 cases to 5 (legacy fallback rows merged into the corresponding Settings field rows), drops the unused `import os` from `backend/__init__.py`, and ensures every legacy use is announced via the validator's deprecation warning rather than silently absorbed at the call site. The roadmap explicitly called out only `CASCOR_DEMO_MODE`; `CASCOR_SERVICE_URL` was bundled in the same PR because the redundancy pattern is identical (adjacent lines, same fix, single CHANGELOG entry). New regression suite at `src/tests/regression/test_cfg_16_create_backend_no_raw_env.py` pins two properties: (a) `backend/__init__.py` source contains neither `CASCOR_DEMO_MODE` nor `CASCOR_SERVICE_URL` (scope guard against reintroduction), and (b) the legacy `CASCOR_DEMO_MODE=1` path still produces a `DemoBackend` end-to-end via the Settings validator (behaviour guard, `importorskip("torch")` for env tolerance). Mirrors the cascor CFG-04 convergence pattern (canonical Settings field plus validator-handled legacy alias). No deprecation timeline change — the validator-level deprecation of `CASCOR_DEMO_MODE` / `CASCOR_SERVICE_URL` introduced earlier is unchanged.
 - Phase D §S10.3 (D-49): **flag-flip** `enable_ws_control_buttons` default `False` → `True` after production soak passed on the P12b clientside routing. Training Start/Pause/Stop/Resume/Reset buttons now route through `window.cascorControlWS.send({command, command_id})` by default, with automatic REST fallback via `fetch('/api/train/<command>', {method:'POST'})` when the WS is disconnected, the `send()` promise rejects, or an error envelope arrives. The kill switch is unchanged: `JUNIPER_CANOPY_ENABLE_WS_CONTROL_BUTTONS=false` reverts to pure REST per §S10.7. Mirrors the earlier Phase B-P7 pattern (`enable_browser_ws_bridge`) and the Phase C-P10 pattern (`use_websocket_set_params`). Regression: 175 unit/integration/performance tests green (Phase C, Phase D envelope, Phase D clientside, `test_websocket_control`, `test_button_state`, `test_button_responsiveness`, `test_dashboard_manager`, `test_main_import_and_lifespan`, `test_main_coverage_95`, `test_phase_b_pre_b_csrf`).
 - Phase D test updates: `test_enable_ws_control_buttons_default_off` renamed to `test_enable_ws_control_buttons_default_on_after_flip` asserting `True`; new `test_kill_switch_env_var_disables_flag` validates the §S10.7 rollback by constructing a fresh `Settings()` with `JUNIPER_CANOPY_ENABLE_WS_CONTROL_BUTTONS=false` set.
 
@@ -854,18 +3753,18 @@ Comprehensive test coverage improvements for Phase 3 Wave 3 implementations. Add
 
 ### Test Coverage Summary
 
-| File                      | Before | After | Target | Status           |
-| ------------------------- | ------ | ----- | ------ | ---------------- |
-| redis_panel.py            | 49%    | 100%  | 95%    | ✅ Exceeded      |
-| redis_client.py           | 76%    | 97%   | 95%    | ✅ Exceeded      |
-| cassandra_client.py       | 75%    | 97%   | 95%    | ✅ Exceeded      |
-| websocket_manager.py      | 94%    | 100%  | 95%    | ✅ Exceeded      |
-| statistics.py             | 91%    | 100%  | 95%    | ✅ Exceeded      |
-| dashboard_manager.py      | 93%    | 95%   | 95%    | ✅ Met           |
-| training_monitor.py       | 95%    | 95%   | 95%    | ✅ Met           |
-| training_state_machine.py | 96%    | 96%   | 95%    | ✅ Exceeded      |
-| cassandra_panel.py        | 99%    | 99%   | 95%    | ✅ Exceeded      |
-| main.py                   | 79%    | 84%   | 95%    | ⚠️ Near target   |
+| File                      | Before | After | Target | Status        |
+|---------------------------|--------|-------|--------|---------------|
+| redis_panel.py            | 49%    | 100%  | 95%    | ✅ Exceeded    |
+| redis_client.py           | 76%    | 97%   | 95%    | ✅ Exceeded    |
+| cassandra_client.py       | 75%    | 97%   | 95%    | ✅ Exceeded    |
+| websocket_manager.py      | 94%    | 100%  | 95%    | ✅ Exceeded    |
+| statistics.py             | 91%    | 100%  | 95%    | ✅ Exceeded    |
+| dashboard_manager.py      | 93%    | 95%   | 95%    | ✅ Met         |
+| training_monitor.py       | 95%    | 95%   | 95%    | ✅ Met         |
+| training_state_machine.py | 96%    | 96%   | 95%    | ✅ Exceeded    |
+| cassandra_panel.py        | 99%    | 99%   | 95%    | ✅ Exceeded    |
+| main.py                   | 79%    | 84%   | 95%    | ⚠️ Near target |
 
 ### Technical Notes
 
@@ -1402,14 +4301,14 @@ This release addresses a critical security vulnerability in the `urllib3` depend
 
 Added 400+ new tests across 6 new test files:
 
-| File | Before | After |
-| ------ | -------- | ------- |
-| `metrics_panel.py` | 67% | 98% |
-| `dashboard_manager.py` | 68% | 93% |
-| `network_visualizer.py` | 71% | 99% |
-| `main.py` | 79% | 89% |
-| `decision_boundary.py` | 84% | 100% |
-| `dataset_plotter.py` | 87% | 99% |
+| File                    | Before | After |
+|-------------------------|--------|-------|
+| `metrics_panel.py`      | 67%    | 98%   |
+| `dashboard_manager.py`  | 68%    | 93%   |
+| `network_visualizer.py` | 71%    | 99%   |
+| `main.py`               | 79%    | 89%   |
+| `decision_boundary.py`  | 84%    | 100%  |
+| `dataset_plotter.py`    | 87%    | 99%   |
 
 **New test files:**
 
@@ -1669,7 +4568,7 @@ Added 400+ new tests across 6 new test files:
   - `test_callback_context_coverage.py` - 29 tests for callback adapter
   - `test_dashboard_helpers_coverage.py` - 48 tests for dashboard helpers
   - `test_network_visualizer_layout_coverage.py` - 43 tests for layout methods
-  - `test_metrics_panel_helpers_coverage.py` - 74 tests for metrics helpers  
+  - `test_metrics_panel_helpers_coverage.py` - 74 tests for metrics helpers
   - `test_main_api_coverage.py` - 36 tests for API endpoints
   - `test_demo_mode_comprehensive.py` - 72 tests for demo mode
   - `test_websocket_comprehensive.py` - 51 tests for WebSocket
@@ -2808,7 +5707,7 @@ juniper_canopy/
 
 #### New User Onboarding Flow
 
-**Old:** README.md → Search for relevant docs → Trial and error  
+**Old:** README.md → Search for relevant docs → Trial and error
 **New:** README.md → QUICK_START.md → ENVIRONMENT_SETUP.md → AGENTS.md
 
 **Impact:** <15 minutes to productive (vs. hours)

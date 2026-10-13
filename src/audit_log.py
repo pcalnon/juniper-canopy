@@ -24,7 +24,16 @@ def _escape_crlf(s: str) -> str:
 
 
 def configure_audit_logger(
-    log_path: str = "/var/log/canopy/audit.log",
+    # CFG-09 (v7 roadmap §13896): default kept in lockstep with
+    # ``Settings.audit_log_path`` in ``settings.py``. The old
+    # ``/var/log/canopy/audit.log`` default required root to create the
+    # parent dir and crashed non-root deployments at line 51 below
+    # (mkdir) or 53-58 (TimedRotatingFileHandler open). Callers that
+    # rely on this parameter default rather than passing
+    # ``settings.audit_log_path`` explicitly now get the same
+    # CWD-relative ``logs/audit.log`` and can be overridden via
+    # ``JUNIPER_CANOPY_AUDIT_LOG_PATH``.
+    log_path: str = "logs/audit.log",
     retention_days: int = 90,
     enabled: bool = True,
 ) -> logging.Logger:

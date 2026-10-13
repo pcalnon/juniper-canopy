@@ -27,7 +27,18 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=%h/Development/python/Juniper/juniper-canopy/src
 EnvironmentFile=-%h/Development/python/Juniper/juniper-canopy/.env
-ExecStart=/opt/miniforge3/envs/JuniperCanopy/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8050
+# Bind host/port come from settings (JUNIPER_CANOPY_SERVER__HOST, default 127.0.0.1 loopback;
+# JUNIPER_CANOPY_SERVER__PORT, default 8050). The SEC-F22 bind guard evaluates the setting at
+# startup, so the bind MUST be driven through settings -- a `uvicorn --host` CLI flag would
+# bypass the guard (uvicorn binds the socket without the setting ever being consulted, so the
+# guard sees the loopback default and passes while the socket is public). See juniper-ml
+# notes/JUNIPER_2026-07-06_JUNIPER-ECOSYSTEM_LAUNCH-PATH-BIND-AUDIT.md (SEC-F23).
+# To expose off-loopback you MUST attest the perimeter; the guard hard-fails on an unattested
+# non-loopback bind. Uncomment the host override AND exactly one honest attestation:
+#   Environment=JUNIPER_CANOPY_SERVER__HOST=0.0.0.0
+#   Environment=JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true   # only if reachable solely via a loopback-only host publish
+#   Environment=JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true         # only if a fronting authenticating proxy terminates access
+ExecStart=/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
 Restart=on-failure
 RestartSec=5
 

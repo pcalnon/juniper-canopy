@@ -4,31 +4,31 @@
 # Prototype:     Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
 # File Name:     test_worker_panel.py
 # Author:        Paul Calnon
-# Version:       1.0.0
+# Version:       1.1.0
 # Date:          2026-03-31
-# Last Modified: 2026-03-31
+# Last Modified: 2026-07-22
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-2026 Paul Calnon
 # Description:   Unit tests for WorkerPanel component and worker API endpoints
 #####################################################################
-"""Unit tests for WorkerPanel component and /api/v1/workers/* endpoints (CAN-HIGH-005)."""
+"""Unit tests for the store-driven WorkerPanel and /api/v1/workers/* endpoints.
 
-import os
+CAN-HIGH-005 (aggregate stats + roster) and N10 / U-5 (local/remote kind column,
+tab-gated worker store, honest "local not individually reported" note).
+"""
+
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
+import dash_bootstrap_components as dbc
 import pytest
+from dash import dcc, html
 
 # Add src to path
 src_dir = Path(__file__).parents[2]
 sys.path.insert(0, str(src_dir))
 
-from frontend.components.worker_panel import (  # noqa: E402
-    DEFAULT_API_TIMEOUT,
-    DEFAULT_REFRESH_INTERVAL_MS,
-    WorkerPanel,
-)
+from frontend.components.worker_panel import WorkerPanel  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -47,10 +47,29 @@ def worker_panel(config):
     return WorkerPanel(config, component_id="test-worker")
 
 
-@pytest.fixture
-def custom_panel():
-    """Create WorkerPanel instance with custom interval."""
-    return WorkerPanel({"interval_ms": 10000, "api_timeout": 5}, component_id="custom-worker")
+def _worker(**overrides):
+    """A canonical worker record (roster shape), overridable per test."""
+    base = {
+        "worker_id": "worker-001",
+        "kind": "remote",
+        "capabilities": {"cpu_cores": 8, "gpu": False, "python": "3.13"},
+        "connected_at": 1711900000,
+        "last_heartbeat": 1711900100,
+        "tasks_completed": 10,
+        "tasks_failed": 0,
+        "active_task_id": None,
+        "health_score": 1.0,
+        "idle": True,
+    }
+    base.update(overrides)
+    return base
+
+
+def _store(workers=None, stats=None, local_reported=False, error=None):
+    """A worker-store payload as filled by _update_workers_store_handler."""
+    workers = workers if workers is not None else []
+    payload = {"workers": workers, "count": len(workers), "local_reported": local_reported, "error": error, "stats": stats or {}}
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -63,12 +82,10 @@ class TestWorkerPanelInitialization:
 
     @pytest.mark.unit
     def test_init_with_default_config(self):
-        """Should initialize with empty config and use defaults."""
+        """Should initialize with empty config and the default component id."""
         panel = WorkerPanel({})
         assert panel is not None
         assert panel.component_id == "worker-panel"
-        assert panel.interval_ms == DEFAULT_REFRESH_INTERVAL_MS
-        assert panel.api_timeout == DEFAULT_API_TIMEOUT
 
     @pytest.mark.unit
     def test_init_with_custom_id(self, config):
@@ -77,37 +94,12 @@ class TestWorkerPanelInitialization:
         assert panel.component_id == "my-workers"
 
     @pytest.mark.unit
-    def test_init_with_custom_interval(self):
-        """Should use interval_ms from config when provided."""
-        panel = WorkerPanel({"interval_ms": 15000})
-        assert panel.interval_ms == 15000
-
-    @pytest.mark.unit
-    def test_init_with_custom_api_timeout(self):
-        """Should use api_timeout from config when provided."""
-        panel = WorkerPanel({"api_timeout": 10})
-        assert panel.api_timeout == 10
-
-    @pytest.mark.unit
-    def test_init_env_var_override(self):
-        """Should override interval_ms from JUNIPER_CANOPY_WORKER_REFRESH_INTERVAL_MS env var."""
-        with patch.dict(os.environ, {"JUNIPER_CANOPY_WORKER_REFRESH_INTERVAL_MS": "7000"}):
-            panel = WorkerPanel({})
-        assert panel.interval_ms == 7000
-
-    @pytest.mark.unit
-    def test_init_env_var_invalid_falls_back_to_default(self):
-        """Should fall back to default when env var is not a valid integer."""
-        with patch.dict(os.environ, {"JUNIPER_CANOPY_WORKER_REFRESH_INTERVAL_MS": "not_a_number"}):
-            panel = WorkerPanel({})
-        assert panel.interval_ms == DEFAULT_REFRESH_INTERVAL_MS
-
-    @pytest.mark.unit
-    def test_init_config_takes_priority_over_env(self):
-        """Config interval_ms should take priority over env var."""
-        with patch.dict(os.environ, {"JUNIPER_CANOPY_WORKER_REFRESH_INTERVAL_MS": "7000"}):
-            panel = WorkerPanel({"interval_ms": 3000})
-        assert panel.interval_ms == 3000
+    def test_init_ignores_legacy_interval_config(self):
+        """Legacy interval_ms/api_timeout config is inert (panel is store-driven now)."""
+        panel = WorkerPanel({"interval_ms": 15000, "api_timeout": 10}, component_id="legacy")
+        # No self-owned interval anymore; the config keys are simply ignored.
+        assert not hasattr(panel, "interval_ms")
+        assert panel.component_id == "legacy"
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +140,32 @@ class TestWorkerPanelInheritance:
 # ---------------------------------------------------------------------------
 
 
+def _collect_ids(component):
+    ids = []
+    if hasattr(component, "id") and component.id:
+        ids.append(component.id)
+    if hasattr(component, "children"):
+        if isinstance(component.children, list):
+            for child in component.children:
+                ids.extend(_collect_ids(child))
+        elif component.children is not None:
+            ids.extend(_collect_ids(component.children))
+    return ids
+
+
+def _find_of_type(component, cls):
+    found = []
+    if isinstance(component, cls):
+        found.append(component)
+    if hasattr(component, "children"):
+        if isinstance(component.children, list):
+            for child in component.children:
+                found.extend(_find_of_type(child, cls))
+        elif component.children is not None:
+            found.extend(_find_of_type(component.children, cls))
+    return found
+
+
 class TestWorkerPanelLayout:
     """Test WorkerPanel layout generation."""
 
@@ -156,8 +174,6 @@ class TestWorkerPanelLayout:
         """get_layout should return a Dash Div."""
         layout = worker_panel.get_layout()
         assert layout is not None
-        from dash import html
-
         assert isinstance(layout, html.Div)
 
     @pytest.mark.unit
@@ -179,6 +195,7 @@ class TestWorkerPanelLayout:
         layout = worker_panel.get_layout()
 
         expected_ids = [
+            "test-worker-workers-store",
             "test-worker-status-badge",
             "test-worker-error-display",
             "test-worker-total",
@@ -188,169 +205,51 @@ class TestWorkerPanelLayout:
             "test-worker-tasks-done",
             "test-worker-avg-health",
             "test-worker-worker-list",
-            "test-worker-refresh-interval",
         ]
 
-        def collect_ids(component):
-            ids = []
-            if hasattr(component, "id") and component.id:
-                ids.append(component.id)
-            if hasattr(component, "children"):
-                if isinstance(component.children, list):
-                    for child in component.children:
-                        ids.extend(collect_ids(child))
-                elif component.children is not None:
-                    ids.extend(collect_ids(component.children))
-            return ids
-
-        found_ids = collect_ids(layout)
+        found_ids = _collect_ids(layout)
         for expected_id in expected_ids:
             assert expected_id in found_ids, f"Expected ID '{expected_id}' not found in layout"
 
     @pytest.mark.unit
-    def test_layout_contains_interval(self, worker_panel):
-        """Layout should contain a dcc.Interval component for refresh."""
-        from dash import dcc
+    def test_layout_contains_store_not_interval(self, worker_panel):
+        """The panel is store-driven: it holds a dcc.Store and owns NO dcc.Interval.
 
+        Tab-gated polling is the dashboard's shared slow interval (N10); a
+        panel-owned interval would poll unconditionally and defeat the gating.
+        """
         layout = worker_panel.get_layout()
-
-        def find_intervals(component):
-            intervals = []
-            if isinstance(component, dcc.Interval):
-                intervals.append(component)
-            if hasattr(component, "children"):
-                if isinstance(component.children, list):
-                    for child in component.children:
-                        intervals.extend(find_intervals(child))
-                elif component.children is not None:
-                    intervals.extend(find_intervals(component.children))
-            return intervals
-
-        intervals = find_intervals(layout)
-        assert len(intervals) == 1
-        assert intervals[0].interval == worker_panel.interval_ms
-
-    @pytest.mark.unit
-    def test_layout_custom_interval_reflected(self, custom_panel):
-        """Layout interval should match the custom interval_ms config."""
-        from dash import dcc
-
-        layout = custom_panel.get_layout()
-
-        # Interval is a direct child of the root Div
-        intervals = [child for child in layout.children if isinstance(child, dcc.Interval)]
-        assert len(intervals) == 1
-        assert intervals[0].interval == 10000
+        stores = _find_of_type(layout, dcc.Store)
+        intervals = _find_of_type(layout, dcc.Interval)
+        assert len(stores) == 1
+        assert stores[0].id == "test-worker-workers-store"
+        assert len(intervals) == 0
 
 
 # ---------------------------------------------------------------------------
-# TestWorkerPanelCallbacks
+# TestRenderFromStore (panel state rendering)
 # ---------------------------------------------------------------------------
 
 
-class TestWorkerPanelCallbacks:
-    """Test WorkerPanel callback registration."""
+class TestRenderFromStore:
+    """WorkerPanel._render_from_store maps a store payload to the 10 panel outputs."""
 
     @pytest.mark.unit
-    def test_register_callbacks_sets_attribute(self, worker_panel):
-        """register_callbacks should set _cb_update_worker_panel attribute."""
-        from dash import Dash
-
-        app = Dash(__name__)
-        worker_panel.register_callbacks(app)
-        assert hasattr(worker_panel, "_cb_update_worker_panel")
-        assert callable(worker_panel._cb_update_worker_panel)
-
-    @pytest.mark.unit
-    def test_register_callbacks_returns_none(self, worker_panel):
-        """register_callbacks should return None."""
-        from dash import Dash
-
-        app = Dash(__name__)
-        result = worker_panel.register_callbacks(app)
-        assert result is None
-
-    @pytest.mark.unit
-    def test_callback_returns_defaults_on_connection_error(self, worker_panel):
-        """Callback should return safe defaults when API is unreachable."""
-        import requests
-        from dash import Dash
-
-        app = Dash(__name__)
-        worker_panel.register_callbacks(app)
-
-        with patch("frontend.components.worker_panel.requests.get", side_effect=requests.exceptions.ConnectionError("Connection refused")):
-            result = worker_panel._cb_update_worker_panel(0)
-
-        assert len(result) == 10
-        status_text, status_color, error_children, total, idle, busy, stale, tasks_done, avg_health, worker_list = result
-
-        # Should show UNAVAILABLE with safe default values
-        assert status_text == "UNAVAILABLE"
+    def test_none_store_shows_loading(self):
+        """A None store (tab not yet visited) yields a LOADING placeholder."""
+        result = WorkerPanel._render_from_store(None)
+        status_text, status_color = result[0], result[1]
+        assert status_text == "LOADING"
         assert status_color == "secondary"
-        assert total == "--"
-        assert idle == "--"
-        assert busy == "--"
-        assert stale == "--"
-        assert tasks_done == "--"
-        assert avg_health == "--"
+        # counts remain placeholders
+        assert result[3] == "--"
 
     @pytest.mark.unit
-    def test_callback_returns_defaults_on_timeout(self, worker_panel):
-        """Callback should return safe defaults when API times out."""
-        import requests
-        from dash import Dash
-
-        app = Dash(__name__)
-        worker_panel.register_callbacks(app)
-
-        with patch("frontend.components.worker_panel.requests.get", side_effect=requests.exceptions.Timeout("Timeout")):
-            result = worker_panel._cb_update_worker_panel(0)
-
-        assert len(result) == 10
-        status_text = result[0]
-        error_children = result[2]
-
-        assert status_text == "UNAVAILABLE"
-        # Should show a timeout warning alert
-        assert error_children is not None
-
-    @pytest.mark.unit
-    def test_callback_handles_successful_stats_response(self, worker_panel):
-        """Callback should parse successful stats response correctly."""
-        from dash import Dash
-
-        app = Dash(__name__)
-        worker_panel.register_callbacks(app)
-
-        mock_stats_response = MagicMock()
-        mock_stats_response.status_code = 200
-        mock_stats_response.json.return_value = {
-            "data": {
-                "total": 3,
-                "idle": 2,
-                "busy": 1,
-                "stale": 0,
-                "total_tasks_completed": 100,
-                "total_tasks_failed": 2,
-                "average_health_score": 0.95,
-            }
-        }
-
-        mock_list_response = MagicMock()
-        mock_list_response.status_code = 200
-        mock_list_response.json.return_value = {"data": {"workers": []}}
-
-        def mock_get(url, **kwargs):
-            if "stats" in url:
-                return mock_stats_response
-            return mock_list_response
-
-        with patch("frontend.components.worker_panel.requests.get", side_effect=mock_get):
-            result = worker_panel._cb_update_worker_panel(1)
-
-        status_text, status_color, error_children, total, idle, busy, stale, tasks_done, avg_health, worker_list = result
-
+    def test_healthy_stats(self):
+        """Non-stale, populated stats render HEALTHY with formatted aggregates."""
+        stats = {"total": 3, "idle": 2, "busy": 1, "stale": 0, "total_tasks_completed": 100, "total_tasks_failed": 2, "average_health_score": 0.95}
+        result = WorkerPanel._render_from_store(_store(workers=[_worker()], stats=stats))
+        status_text, status_color, error_children, total, idle, busy, stale, tasks_done, avg_health, _ = result
         assert status_text == "HEALTHY"
         assert status_color == "success"
         assert error_children is None
@@ -362,364 +261,324 @@ class TestWorkerPanelCallbacks:
         assert avg_health == "95.0%"
 
     @pytest.mark.unit
-    def test_callback_shows_degraded_when_stale_workers(self, worker_panel):
-        """Callback should show DEGRADED status when stale workers exist."""
-        from dash import Dash
-
-        app = Dash(__name__)
-        worker_panel.register_callbacks(app)
-
-        mock_stats_response = MagicMock()
-        mock_stats_response.status_code = 200
-        mock_stats_response.json.return_value = {
-            "data": {
-                "total": 3,
-                "idle": 1,
-                "busy": 1,
-                "stale": 1,
-                "total_tasks_completed": 50,
-                "total_tasks_failed": 0,
-                "average_health_score": 0.8,
-            }
-        }
-
-        mock_list_response = MagicMock()
-        mock_list_response.status_code = 200
-        mock_list_response.json.return_value = {"data": {"workers": []}}
-
-        def mock_get(url, **kwargs):
-            if "stats" in url:
-                return mock_stats_response
-            return mock_list_response
-
-        with patch("frontend.components.worker_panel.requests.get", side_effect=mock_get):
-            result = worker_panel._cb_update_worker_panel(1)
-
+    def test_degraded_when_stale(self):
+        """A stale worker in the aggregate flips status to DEGRADED."""
+        stats = {"total": 3, "idle": 1, "busy": 1, "stale": 1, "total_tasks_completed": 50, "total_tasks_failed": 0, "average_health_score": 0.8}
+        result = WorkerPanel._render_from_store(_store(workers=[_worker()], stats=stats))
         assert result[0] == "DEGRADED"
         assert result[1] == "warning"
 
     @pytest.mark.unit
-    def test_callback_shows_no_workers_when_total_zero(self, worker_panel):
-        """Callback should show NO WORKERS when total is 0."""
-        from dash import Dash
-
-        app = Dash(__name__)
-        worker_panel.register_callbacks(app)
-
-        mock_stats_response = MagicMock()
-        mock_stats_response.status_code = 200
-        mock_stats_response.json.return_value = {
-            "data": {
-                "total": 0,
-                "idle": 0,
-                "busy": 0,
-                "stale": 0,
-                "total_tasks_completed": 0,
-                "total_tasks_failed": 0,
-                "average_health_score": 0,
-            }
-        }
-
-        mock_list_response = MagicMock()
-        mock_list_response.status_code = 200
-        mock_list_response.json.return_value = {"data": {"workers": []}}
-
-        def mock_get(url, **kwargs):
-            if "stats" in url:
-                return mock_stats_response
-            return mock_list_response
-
-        with patch("frontend.components.worker_panel.requests.get", side_effect=mock_get):
-            result = worker_panel._cb_update_worker_panel(1)
-
+    def test_no_workers_when_total_zero(self):
+        """Zero total workers renders NO WORKERS."""
+        stats = {"total": 0, "idle": 0, "busy": 0, "stale": 0, "total_tasks_completed": 0, "total_tasks_failed": 0, "average_health_score": 0}
+        result = WorkerPanel._render_from_store(_store(workers=[], stats=stats, local_reported=False))
         assert result[0] == "NO WORKERS"
         assert result[1] == "warning"
 
     @pytest.mark.unit
-    def test_callback_renders_worker_cards_from_list(self, worker_panel):
-        """Callback should render worker cards when workers are returned."""
-        from dash import Dash, html
+    def test_roster_without_stats_still_renders(self):
+        """If the stats endpoint was down but a roster exists, still show HEALTHY + count."""
+        result = WorkerPanel._render_from_store(_store(workers=[_worker(), _worker(worker_id="w2")], stats={}))
+        assert result[0] == "HEALTHY"
+        assert result[3] == "2"  # total derived from roster length
 
-        app = Dash(__name__)
-        worker_panel.register_callbacks(app)
+    @pytest.mark.unit
+    def test_upstream_error_surfaces_alert(self):
+        """An upstream error string is surfaced as a dismissable degraded alert."""
+        result = WorkerPanel._render_from_store(_store(workers=[], stats={}, error="Upstream error"))
+        error_children = result[2]
+        assert isinstance(error_children, dbc.Alert)
 
-        mock_stats_response = MagicMock()
-        mock_stats_response.status_code = 200
-        mock_stats_response.json.return_value = {
-            "data": {
-                "total": 1,
-                "idle": 1,
-                "busy": 0,
-                "stale": 0,
-                "total_tasks_completed": 5,
-                "total_tasks_failed": 0,
-                "average_health_score": 1.0,
-            }
-        }
-
-        mock_list_response = MagicMock()
-        mock_list_response.status_code = 200
-        mock_list_response.json.return_value = {
-            "data": {
-                "workers": [
-                    {
-                        "worker_id": "worker-001",
-                        "idle": True,
-                        "health_score": 1.0,
-                        "capabilities": {"cpu_cores": 8},
-                        "tasks_completed": 5,
-                        "tasks_failed": 0,
-                    }
-                ]
-            }
-        }
-
-        def mock_get(url, **kwargs):
-            if "stats" in url:
-                return mock_stats_response
-            return mock_list_response
-
-        with patch("frontend.components.worker_panel.requests.get", side_effect=mock_get):
-            result = worker_panel._cb_update_worker_panel(1)
-
-        worker_list = result[9]
-        assert isinstance(worker_list, html.Div)
+    @pytest.mark.unit
+    def test_worker_list_is_div(self):
+        """The worker-list output is always a Div (table + optional note, or empty-state)."""
+        result = WorkerPanel._render_from_store(_store(workers=[_worker()], stats={}))
+        assert isinstance(result[9], html.Div)
 
 
 # ---------------------------------------------------------------------------
-# TestRenderWorkerCard
+# TestRenderWorkerList (roster container + honest local note)
 # ---------------------------------------------------------------------------
 
 
-class TestRenderWorkerCard:
-    """Test WorkerPanel._render_worker_card() static method."""
+class TestRenderWorkerList:
+    """WorkerPanel._render_worker_list: table-or-empty plus the local-scope note."""
 
     @pytest.mark.unit
-    def test_render_idle_worker(self):
-        """Should render card for an idle worker with IDLE badge."""
-        import dash_bootstrap_components as dbc
-
-        worker = {
-            "worker_id": "worker-idle-01",
-            "idle": True,
-            "health_score": 1.0,
-            "capabilities": {"cpu_cores": 8, "gpu": False, "python": "3.13"},
-            "tasks_completed": 10,
-            "tasks_failed": 0,
-            "connected_at": 1711900000,
-            "active_task_id": None,
-        }
-
-        card = WorkerPanel._render_worker_card(worker)
-        assert isinstance(card, dbc.Card)
-
-        # Find the status badge in the card header
-        header = card.children[0]  # CardHeader
-        header_div = header.children  # inner Div
-        badge = header_div.children[1]  # second child is the badge
-        assert isinstance(badge, dbc.Badge)
-        assert badge.children == "IDLE"
-        assert badge.color == "success"
+    def test_empty_roster_shows_alert(self):
+        div = WorkerPanel._render_worker_list([], local_reported=True)
+        alerts = _find_of_type(div, dbc.Alert)
+        assert len(alerts) == 1
 
     @pytest.mark.unit
-    def test_render_busy_worker(self):
-        """Should render card for a busy worker with BUSY badge and active task."""
-        import dash_bootstrap_components as dbc
-
-        worker = {
-            "worker_id": "worker-busy-01",
-            "idle": False,
-            "health_score": 0.95,
-            "capabilities": {"cpu_cores": 4, "gpu": True, "python": "3.13"},
-            "tasks_completed": 17,
-            "tasks_failed": 1,
-            "connected_at": 1711900000,
-            "active_task_id": "task-cn-round-7-cand-3",
-        }
-
-        card = WorkerPanel._render_worker_card(worker)
-        assert isinstance(card, dbc.Card)
-
-        # Check BUSY badge
-        header = card.children[0]
-        header_div = header.children
-        badge = header_div.children[1]
-        assert badge.children == "BUSY"
-        assert badge.color == "primary"
-
-        # Card body should have an active task row
-        body = card.children[1]  # CardBody
-        body_rows = body.children
-        # Should have 3 rows: capabilities, stats, active task
-        assert len(body_rows) == 3
+    def test_populated_roster_shows_table(self):
+        div = WorkerPanel._render_worker_list([_worker()], local_reported=True)
+        tables = _find_of_type(div, dbc.Table)
+        assert len(tables) == 1
 
     @pytest.mark.unit
-    def test_render_worker_no_active_task(self):
-        """Should render card without active task row when no task is active."""
-        worker = {
-            "worker_id": "worker-no-task",
-            "idle": True,
-            "health_score": 0.85,
-            "capabilities": {},
-            "tasks_completed": 0,
-            "tasks_failed": 0,
-            "active_task_id": None,
-        }
-
-        card = WorkerPanel._render_worker_card(worker)
-        body = card.children[1]
-        body_rows = body.children
-        # Should have 2 rows: capabilities and stats (no active task row)
-        assert len(body_rows) == 2
+    def test_local_not_reported_appends_note(self):
+        """When the backend does not report local workers, an honest note is shown."""
+        div = WorkerPanel._render_worker_list([_worker()], local_reported=False)
+        ids = _collect_ids(div)
+        assert "worker-panel-local-note" in ids
 
     @pytest.mark.unit
-    def test_render_worker_health_color_success(self):
-        """Health score >= 0.9 should use 'success' color."""
-        import dash_bootstrap_components as dbc
+    def test_local_reported_omits_note(self):
+        """When local workers ARE reported (demo), no scope caveat is shown."""
+        div = WorkerPanel._render_worker_list([_worker(kind="local")], local_reported=True)
+        ids = _collect_ids(div)
+        assert "worker-panel-local-note" not in ids
 
-        worker = {
-            "worker_id": "healthy",
-            "idle": True,
-            "health_score": 0.95,
-            "capabilities": {},
-            "tasks_completed": 0,
-            "tasks_failed": 0,
-        }
 
-        card = WorkerPanel._render_worker_card(worker)
-        body = card.children[1]
-        stats_row = body.children[1]  # second row has health badge
-        health_col = stats_row.children[1]  # second column
-        health_badge = health_col.children[1]  # Badge is second child in col
-        assert isinstance(health_badge, dbc.Badge)
+# ---------------------------------------------------------------------------
+# TestRenderWorkersTable / TestRenderWorkerRow
+# ---------------------------------------------------------------------------
+
+
+class TestRenderWorkersTable:
+    """WorkerPanel._render_workers_table builds a bordered roster table."""
+
+    @pytest.mark.unit
+    def test_returns_table(self):
+        table = WorkerPanel._render_workers_table([_worker()])
+        assert isinstance(table, dbc.Table)
+
+    @pytest.mark.unit
+    def test_header_has_kind_and_heartbeat_columns(self):
+        table = WorkerPanel._render_workers_table([_worker()])
+        thead = table.children[0]
+        header_cells = [th.children for th in thead.children.children]
+        assert "Worker ID" in header_cells
+        assert "Kind" in header_cells
+        assert "Status" in header_cells
+        assert "Health" in header_cells
+        assert "Last Heartbeat" in header_cells
+        assert "Current Task" in header_cells
+
+    @pytest.mark.unit
+    def test_one_row_per_worker(self):
+        table = WorkerPanel._render_workers_table([_worker(worker_id="a"), _worker(worker_id="b")])
+        tbody = table.children[1]
+        assert len(tbody.children) == 2
+
+
+class TestRenderWorkerRow:
+    """WorkerPanel._render_worker_row: one <tr> with id, kind, status, health, hb, task."""
+
+    @pytest.mark.unit
+    def test_remote_kind_badge(self):
+        row = WorkerPanel._render_worker_row(_worker(kind="remote"))
+        kind_badge = row.children[1].children
+        assert isinstance(kind_badge, dbc.Badge)
+        assert kind_badge.children == "REMOTE"
+        assert kind_badge.color == "secondary"
+
+    @pytest.mark.unit
+    def test_local_kind_badge(self):
+        row = WorkerPanel._render_worker_row(_worker(kind="local"))
+        kind_badge = row.children[1].children
+        assert kind_badge.children == "LOCAL"
+        assert kind_badge.color == "info"
+
+    @pytest.mark.unit
+    def test_missing_kind_defaults_to_remote(self):
+        w = _worker()
+        del w["kind"]
+        row = WorkerPanel._render_worker_row(w)
+        assert row.children[1].children.children == "REMOTE"
+
+    @pytest.mark.unit
+    def test_idle_worker_status_badge(self):
+        row = WorkerPanel._render_worker_row(_worker(idle=True))
+        status_badge = row.children[2].children
+        assert status_badge.children == "IDLE"
+        assert status_badge.color == "success"
+
+    @pytest.mark.unit
+    def test_busy_worker_status_badge(self):
+        row = WorkerPanel._render_worker_row(_worker(idle=False, active_task_id="task-cn-7"))
+        status_badge = row.children[2].children
+        assert status_badge.children == "BUSY"
+        assert status_badge.color == "primary"
+
+    @pytest.mark.unit
+    def test_health_color_success(self):
+        row = WorkerPanel._render_worker_row(_worker(health_score=0.95))
+        health_badge = row.children[3].children
         assert health_badge.color == "success"
 
     @pytest.mark.unit
-    def test_render_worker_health_color_warning(self):
-        """Health score >= 0.7 and < 0.9 should use 'warning' color."""
-        import dash_bootstrap_components as dbc
-
-        worker = {
-            "worker_id": "warning-health",
-            "idle": True,
-            "health_score": 0.75,
-            "capabilities": {},
-            "tasks_completed": 0,
-            "tasks_failed": 0,
-        }
-
-        card = WorkerPanel._render_worker_card(worker)
-        body = card.children[1]
-        stats_row = body.children[1]
-        health_col = stats_row.children[1]
-        health_badge = health_col.children[1]
-        assert isinstance(health_badge, dbc.Badge)
-        assert health_badge.color == "warning"
+    def test_health_color_warning(self):
+        row = WorkerPanel._render_worker_row(_worker(health_score=0.75))
+        assert row.children[3].children.color == "warning"
 
     @pytest.mark.unit
-    def test_render_worker_health_color_danger(self):
-        """Health score < 0.7 should use 'danger' color."""
-        import dash_bootstrap_components as dbc
-
-        worker = {
-            "worker_id": "danger-health",
-            "idle": True,
-            "health_score": 0.5,
-            "capabilities": {},
-            "tasks_completed": 0,
-            "tasks_failed": 0,
-        }
-
-        card = WorkerPanel._render_worker_card(worker)
-        body = card.children[1]
-        stats_row = body.children[1]
-        health_col = stats_row.children[1]
-        health_badge = health_col.children[1]
-        assert isinstance(health_badge, dbc.Badge)
-        assert health_badge.color == "danger"
+    def test_health_color_danger(self):
+        row = WorkerPanel._render_worker_row(_worker(health_score=0.5))
+        assert row.children[3].children.color == "danger"
 
     @pytest.mark.unit
-    def test_render_worker_capabilities_display(self):
-        """Should display CPU, GPU, and Python version capabilities."""
-        worker = {
-            "worker_id": "caps-worker",
-            "idle": True,
-            "health_score": 1.0,
-            "capabilities": {"cpu_cores": 16, "gpu": True, "python": "3.14"},
-            "tasks_completed": 0,
-            "tasks_failed": 0,
-        }
-
-        card = WorkerPanel._render_worker_card(worker)
-        body = card.children[1]
-        cap_row = body.children[0]  # first row is capabilities
-        cap_col = cap_row.children[0]
-        cap_text = cap_col.children.children  # Small -> text
-
-        assert "16 CPU" in cap_text
-        assert "GPU" in cap_text
-        assert "Py 3.14" in cap_text
+    def test_unknown_id_defaults(self):
+        w = _worker()
+        del w["worker_id"]
+        row = WorkerPanel._render_worker_row(w)
+        # first cell -> html.Code -> "unknown"
+        assert row.children[0].children.children == "unknown"
 
     @pytest.mark.unit
-    def test_render_worker_empty_capabilities(self):
-        """Should show 'No capability data' when capabilities dict is empty."""
-        worker = {
-            "worker_id": "no-caps",
-            "idle": True,
-            "health_score": 1.0,
-            "capabilities": {},
-            "tasks_completed": 0,
-            "tasks_failed": 0,
-        }
-
-        card = WorkerPanel._render_worker_card(worker)
-        body = card.children[1]
-        cap_row = body.children[0]
-        cap_col = cap_row.children[0]
-        cap_text = cap_col.children.children
-
-        assert "No capability data" in cap_text
+    def test_active_task_rendered(self):
+        row = WorkerPanel._render_worker_row(_worker(idle=False, active_task_id="task-abc"))
+        task_cell = row.children[5].children
+        assert task_cell.children == "task-abc"
 
     @pytest.mark.unit
-    def test_render_worker_unknown_id(self):
-        """Should default worker_id to 'unknown' when not provided."""
-        worker = {
-            "idle": True,
-            "health_score": 0.5,
-            "capabilities": {},
-            "tasks_completed": 0,
-            "tasks_failed": 0,
-        }
-
-        card = WorkerPanel._render_worker_card(worker)
-        header = card.children[0]
-        header_div = header.children
-        worker_name = header_div.children[0]  # Strong element
-        assert worker_name.children == "unknown"
+    def test_no_active_task_shows_dash(self):
+        row = WorkerPanel._render_worker_row(_worker(active_task_id=None))
+        task_cell = row.children[5].children
+        assert task_cell.children == "—"
 
     @pytest.mark.unit
-    def test_render_worker_connected_at_formatting(self):
-        """Should format connected_at timestamp as HH:MM:SS UTC."""
-        worker = {
-            "worker_id": "time-worker",
-            "idle": True,
-            "health_score": 1.0,
-            "capabilities": {},
-            "tasks_completed": 0,
-            "tasks_failed": 0,
-            "connected_at": 1711929600,  # 2024-04-01 00:00:00 UTC
-        }
-
-        card = WorkerPanel._render_worker_card(worker)
-        body = card.children[1]
-        stats_row = body.children[1]
-        connected_col = stats_row.children[2]  # third column
-        connected_text = connected_col.children[1]  # Small text element
-        assert "UTC" in connected_text.children
+    def test_heartbeat_cell_present(self):
+        row = WorkerPanel._render_worker_row(_worker(last_heartbeat=1711900100))
+        hb_cell = row.children[4].children
+        assert hb_cell.children is not None
 
 
 # ---------------------------------------------------------------------------
-# TestWorkerAPIEndpoints (demo mode)
+# TestFormatHeartbeat
+# ---------------------------------------------------------------------------
+
+
+class TestFormatHeartbeat:
+    """WorkerPanel._format_heartbeat: relative age when recent, else UTC clock."""
+
+    @pytest.mark.unit
+    def test_recent_heartbeat_relative(self):
+        import time
+
+        assert WorkerPanel._format_heartbeat(time.time() - 3).endswith("s ago")
+
+    @pytest.mark.unit
+    def test_future_heartbeat_clamped_to_zero(self):
+        import time
+
+        assert WorkerPanel._format_heartbeat(time.time() + 50) == "0s ago"
+
+    @pytest.mark.unit
+    def test_old_heartbeat_absolute_utc(self):
+        # A fixed epoch far in the past -> absolute UTC clock (HH:MM:SS UTC).
+        assert WorkerPanel._format_heartbeat(1711929600).endswith("UTC")
+
+
+# ---------------------------------------------------------------------------
+# TestWorkerPanelCallbacks (registration wiring)
+# ---------------------------------------------------------------------------
+
+
+class TestWorkerPanelCallbacks:
+    """Callback registration wires the store-driven render callback."""
+
+    @pytest.mark.unit
+    def test_register_callbacks_sets_attribute(self, worker_panel):
+        from dash import Dash
+
+        app = Dash(__name__)
+        worker_panel.register_callbacks(app)
+        assert hasattr(worker_panel, "_cb_render_worker_panel")
+
+    @pytest.mark.unit
+    def test_register_callbacks_returns_none(self, worker_panel):
+        from dash import Dash
+
+        app = Dash(__name__)
+        assert worker_panel.register_callbacks(app) is None
+
+    @pytest.mark.unit
+    def test_registered_callback_renders_from_store(self, worker_panel):
+        """The registered callback maps a store payload to the panel outputs."""
+        from dash import Dash
+
+        app = Dash(__name__)
+        worker_panel.register_callbacks(app)
+        stats = {"total": 1, "idle": 1, "busy": 0, "stale": 0, "total_tasks_completed": 5, "total_tasks_failed": 0, "average_health_score": 1.0}
+        result = worker_panel._cb_render_worker_panel(_store(workers=[_worker()], stats=stats, local_reported=False))
+        assert result[0] == "HEALTHY"
+        assert isinstance(result[9], html.Div)
+
+
+# ---------------------------------------------------------------------------
+# TestWorkerStoreHandler (dashboard tab-gated poll)
+# ---------------------------------------------------------------------------
+
+
+class TestWorkerStoreHandler:
+    """DashboardManager._update_workers_store_handler: tab-gated + empty-guarded."""
+
+    @pytest.fixture
+    def dm(self):
+        from frontend.dashboard_manager import DashboardManager
+
+        return DashboardManager({})
+
+    @pytest.mark.unit
+    def test_inactive_tab_returns_no_update(self, dm):
+        import dash
+
+        assert dm._update_workers_store_handler(n=1, active_tab="metrics") is dash.no_update
+
+    @pytest.mark.unit
+    def test_active_tab_fetches_and_annotates(self, dm, mocker):
+        list_resp = mocker.MagicMock(ok=True)
+        list_resp.json.return_value = {"workers": [_worker(kind="remote")], "count": 1, "local_reported": False}
+        stats_resp = mocker.MagicMock(ok=True)
+        stats_resp.json.return_value = {"total": 1, "idle": 1, "busy": 0, "stale": 0}
+
+        def fake_get(url, **kwargs):
+            return stats_resp if "stats" in url else list_resp
+
+        mocker.patch("frontend.dashboard_manager.requests.get", side_effect=fake_get)
+        payload = dm._update_workers_store_handler(n=1, active_tab="workers")
+        assert payload["count"] == 1
+        assert payload["local_reported"] is False
+        assert payload["workers"][0]["kind"] == "remote"
+        assert payload["stats"]["total"] == 1
+
+    @pytest.mark.unit
+    def test_list_error_returns_no_update(self, dm, mocker):
+        import dash
+
+        err_resp = mocker.MagicMock(ok=False, status_code=502)
+        mocker.patch("frontend.dashboard_manager.requests.get", return_value=err_resp)
+        assert dm._update_workers_store_handler(n=1, active_tab="workers") is dash.no_update
+
+    @pytest.mark.unit
+    def test_list_exception_returns_no_update(self, dm, mocker):
+        import dash
+
+        mocker.patch("frontend.dashboard_manager.requests.get", side_effect=RuntimeError("boom"))
+        assert dm._update_workers_store_handler(n=1, active_tab="workers") is dash.no_update
+
+    @pytest.mark.unit
+    def test_stats_failure_is_non_fatal(self, dm, mocker):
+        """If /stats is down but the roster succeeds, still return the roster."""
+        list_resp = mocker.MagicMock(ok=True)
+        list_resp.json.return_value = {"workers": [_worker()], "count": 1, "local_reported": False}
+
+        def fake_get(url, **kwargs):
+            if "stats" in url:
+                raise RuntimeError("stats down")
+            return list_resp
+
+        mocker.patch("frontend.dashboard_manager.requests.get", side_effect=fake_get)
+        payload = dm._update_workers_store_handler(n=1, active_tab="workers")
+        assert payload["count"] == 1
+        assert payload["stats"] == {}
+
+
+# ---------------------------------------------------------------------------
+# TestWorkerStatsEndpoint (demo mode)
 # ---------------------------------------------------------------------------
 
 
@@ -784,7 +643,7 @@ class TestWorkerStatsEndpoint:
 
 
 class TestWorkerListEndpoint:
-    """Tests for GET /api/v1/workers/list in demo mode (CAN-HIGH-005)."""
+    """Tests for GET /api/v1/workers/list in demo mode (CAN-HIGH-005 + N10/U-5)."""
 
     @pytest.mark.unit
     def test_list_returns_200(self, app_client):
@@ -811,12 +670,13 @@ class TestWorkerListEndpoint:
 
     @pytest.mark.unit
     def test_list_worker_has_required_fields(self, app_client):
-        """Each demo worker should have all required fields."""
+        """Each demo worker should have all required fields including kind (N10)."""
         response = app_client.get("/api/v1/workers/list")
         data = response.json()
 
         required_fields = [
             "worker_id",
+            "kind",
             "capabilities",
             "connected_at",
             "last_heartbeat",
@@ -830,6 +690,20 @@ class TestWorkerListEndpoint:
         for worker in data["workers"]:
             for field in required_fields:
                 assert field in worker, f"Worker missing required field: {field}"
+
+    @pytest.mark.unit
+    def test_list_local_reported_true_in_demo(self, app_client):
+        """Demo mode synthesizes both kinds, so it advertises local_reported=True."""
+        response = app_client.get("/api/v1/workers/list")
+        data = response.json()
+        assert data["local_reported"] is True
+
+    @pytest.mark.unit
+    def test_list_demo_has_one_local_one_remote(self, app_client):
+        """Demo roster exercises both kinds: exactly one local and one remote."""
+        response = app_client.get("/api/v1/workers/list")
+        kinds = sorted(w["kind"] for w in response.json()["workers"])
+        assert kinds == ["local", "remote"]
 
     @pytest.mark.unit
     def test_list_demo_worker_states(self, app_client):

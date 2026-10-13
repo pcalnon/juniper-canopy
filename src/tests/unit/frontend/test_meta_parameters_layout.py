@@ -71,6 +71,8 @@ def dashboard():
     dm.worker_panel = type("Mock", (), {"get_layout": lambda self: None})()
     # Phase 6E CAN-015h-5: surgical network-editor panel for restored snapshots.
     dm.network_editor_panel = type("Mock", (), {"get_layout": lambda self: None})()
+    # W1.2 / ruling R7: the effective-request preview above Start.
+    dm.recurrence_request_preview = type("Mock", (), {"get_layout": lambda self: None})()
     dm._setup_layout()
     return dm
 

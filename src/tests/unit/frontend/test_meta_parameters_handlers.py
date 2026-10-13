@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import dash
 import pytest
 
+import frontend.dashboard_manager as dashboard_manager_module
 from canopy_constants import TrainingConstants
 from frontend.dashboard_manager import DashboardManager
 
@@ -112,7 +113,13 @@ class TestToggleCnTrainingInputs:
 class TestToggleCnSelectionInputs:
     """Tests for candidate network selection input toggle callbacks."""
 
+    def test_top_mode(self, dm):
+        """F-CANOPY-022: ``top`` is the shipped value (cascor's literal)."""
+        result = dm._toggle_cn_selection_inputs_handler("top")
+        assert result == (False, True)
+
     def test_top_tier_mode(self, dm):
+        """F-CANOPY-022: the pre-fix value still gates, for a persisted store."""
         result = dm._toggle_cn_selection_inputs_handler("top_tier")
         assert result == (False, True)
 
@@ -123,6 +130,62 @@ class TestToggleCnSelectionInputs:
     def test_none_disables_both(self, dm):
         result = dm._toggle_cn_selection_inputs_handler(None)
         assert result == (True, True)
+
+
+class TestCandidateSelectionOptionVocabulary:
+    """F-CANOPY-022 — the radio's option values must be cascor literals.
+
+    canopy shipped ``top_tier`` while cascor declares
+    ``Literal["top", "random", "mixed"]``
+    (juniper-cascor ``src/api/models/training.py:159``, ``:327``), so selecting
+    "Add Top Tier Candidates" and clicking Apply returned a pydantic
+    ``literal_error`` that the dashboard surfaced as HTTP 502 — the option
+    could never be applied, while its sibling ``random`` worked because that
+    value happened to match. This pins the vocabulary at the layout so the
+    mismatch cannot silently return.
+    """
+
+    # cascor api/models/training.py:159,:327
+    CASCOR_CANDIDATE_SELECTION_LITERALS = {"top", "random", "mixed"}
+
+    @staticmethod
+    def _selection_option_values():
+        """Read the radio's option values straight out of the layout source.
+
+        The ``dm`` fixture builds a bare ``__new__`` manager, so the layout is
+        never constructed and cannot be walked. Parsing the definition with
+        ``ast`` pins the shipped literals without needing a live Dash app.
+        """
+        import ast
+        import pathlib
+
+        source_path = pathlib.Path(dashboard_manager_module.__file__)
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            kwargs = {kw.arg: kw.value for kw in node.keywords}
+            id_node = kwargs.get("id")
+            if not (isinstance(id_node, ast.Constant) and id_node.value == "cn-candidate-selection-radio"):
+                continue
+            options_node = kwargs.get("options")
+            assert isinstance(options_node, ast.List), "cn-candidate-selection-radio options is not a literal list"
+            values = set()
+            for element in options_node.elts:
+                option = ast.literal_eval(element)
+                values.add(option["value"])
+            return values
+
+        raise AssertionError("cn-candidate-selection-radio not found in dashboard_manager source")
+
+    def test_every_option_value_is_a_cascor_literal(self):
+        values = self._selection_option_values()
+        assert values, "no option values found"
+        assert values <= self.CASCOR_CANDIDATE_SELECTION_LITERALS, f"option values {sorted(values)} are not all cascor literals " f"{sorted(self.CASCOR_CANDIDATE_SELECTION_LITERALS)}"
+
+    def test_top_tier_is_not_shipped(self):
+        assert "top_tier" not in self._selection_option_values(), "the rejected pre-fix value is shipped again"
 
 
 class TestToggleCnMultiCandidateSubgroup:
@@ -290,9 +353,9 @@ class TestInitParamsFromBackend:
 
     def test_already_initialized_returns_no_update(self, dm):
         result = dm._init_params_from_backend_handler(1, {"some": "data"})
-        # NUM_OUTPUTS=28 since canopy#204/205/206 added output_epochs /
+        # NUM_OUTPUTS=29 since canopy#204/205/206 (+ the D-2 dropdown) added output_epochs /
         # optimizer_type / activation_function to the handler.
-        assert len(result) == 28
+        assert len(result) == 29
         assert all(r is dash.no_update for r in result)
 
     @patch("frontend.dashboard_manager.requests.get")
@@ -303,8 +366,8 @@ class TestInitParamsFromBackend:
         )
         dm._api_url = MagicMock(return_value="http://test/api/state")
         result = dm._init_params_from_backend_handler(1, {})
-        # NUM_OUTPUTS=28 since canopy#204/205/206.
-        assert len(result) == 28
+        # NUM_OUTPUTS=29 since canopy#204/205/206 + the D-2 dropdown.
+        assert len(result) == 29
         # Last element is the applied dict
         assert isinstance(result[-1], dict)
         assert "nn_learning_rate" in result[-1]
@@ -314,6 +377,6 @@ class TestInitParamsFromBackend:
         mock_get.side_effect = Exception("connection error")
         dm._api_url = MagicMock(return_value="http://test/api/state")
         result = dm._init_params_from_backend_handler(1, {})
-        # NUM_OUTPUTS=28 since canopy#204/205/206.
-        assert len(result) == 28
+        # NUM_OUTPUTS=29 since canopy#204/205/206 + the D-2 dropdown.
+        assert len(result) == 29
         assert all(r is dash.no_update for r in result)

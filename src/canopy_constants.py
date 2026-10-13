@@ -28,7 +28,27 @@
 # COMPLETED:
 #
 #####################################################################################################################################################################################################
+import importlib.metadata
 from typing import Final
+
+
+def resolve_app_version(fallback: str = "0.8.1") -> str:
+    """Resolve the application version from the installed package metadata.
+
+    The single source for every surface that shows a version -- ``/v1/health``,
+    the build-info metric and the About panel. E2E arc OBS-1: the About panel
+    carried its own ``"2.2.0"`` literal ("should match pyproject.toml" -- it never
+    did) and rendered it while ``/v1/health`` served the installed version. The
+    ``fallback`` is for a source checkout that was never ``pip install``ed and
+    must track ``pyproject.toml`` (pinned by a test).
+    """
+    try:
+        return importlib.metadata.version("juniper-canopy")
+    except importlib.metadata.PackageNotFoundError:
+        return fallback
+
+
+APP_VERSION: Final[str] = resolve_app_version()
 
 
 class TrainingConstants:
@@ -181,12 +201,31 @@ class TrainingConstants:
     MAX_CANDIDATE_CONVERGENCE_THRESHOLD: Final[float] = 0.01
 
     # ── Candidate Nodes: Multi candidate selection ──
+    #
+    # F-CANOPY-024: these feed the (S, T, R) invariant triple cascor enforces in
+    # ``_validate_candidate_pool_triple`` (juniper-cascor
+    # ``src/api/lifecycle/manager.py:225``), where S = DEFAULT_SELECTED_CANDIDATES:
+    #
+    #     T > 0 and R > 0  ->  T + R must equal S
+    #     R == 0           ->  T must equal S
+    #     T == 0           ->  R must equal S
+    #     T == R == 0      ->  rejected
+    #
+    # This shipped as S=1, T=1, R=1 — so T+R=2 != S=1 and the FIRST Apply on a
+    # fresh dashboard always failed validation, client-side and at cascor. The
+    # operator could not correct it in place either, because T and R both ship
+    # disabled behind ``cn-multi-candidate-checkbox``.
+    #
+    # The MINs were also stricter than the backend: cascor declares
+    # ``top_candidates``/``random_candidates`` as ``ge=0``
+    # (``src/api/models/training.py:161-162``, ``:329-330``), so a floor of 1 made
+    # the valid single-strategy config (T=S, R=0) unreachable from the UI.
     DEFAULT_MULTI_CANDIDATE_ENABLED: Final[bool] = False
     DEFAULT_TOP_CANDIDATES_COUNT: Final[int] = 1
-    MIN_TOP_CANDIDATES_COUNT: Final[int] = 1
+    MIN_TOP_CANDIDATES_COUNT: Final[int] = 0
     MAX_TOP_CANDIDATES_COUNT: Final[int] = 20
-    DEFAULT_RANDOM_CANDIDATES_COUNT: Final[int] = 1
-    MIN_RANDOM_CANDIDATES_COUNT: Final[int] = 1
+    DEFAULT_RANDOM_CANDIDATES_COUNT: Final[int] = 0
+    MIN_RANDOM_CANDIDATES_COUNT: Final[int] = 0
     MAX_RANDOM_CANDIDATES_COUNT: Final[int] = 20
 
     # ── Cascade correlation internal constants (Phase 6 — matches CasCor reference) ──
@@ -201,6 +240,125 @@ class TrainingConstants:
     METRICS_HISTORY_MAXLEN: Final[int] = 10000
 
 
+class CascorPatchBounds:
+    """Admissible runtime-apply ranges, MIRRORED from cascor's PATCH request model.
+
+    N5 (juniper-ml training-runtime defects plan §4 I-4 / §7). The ``Apply
+    Parameters`` form seeds itself from the backend (``init_params_from_backend``)
+    and submits the full form to ``PATCH /v1/training/params``. A backend-echoed
+    value that violates cascor's own request-model bounds gets the WHOLE form
+    wholesale-rejected (422) — the exact evening-502 failure the plan diagnosed,
+    where cascor's pre-C2b ``epochs_max`` default (1e11) exceeded its own
+    ``le=1_000_000`` PATCH ceiling. This table lets canopy clamp/flag such values
+    defensively at init and before apply instead of submitting a doomed form.
+
+    Each entry is the range cascor's ``TrainingParamUpdateRequest``
+    (juniper-cascor ``src/api/models/training.py``) declares for that field,
+    keyed by the canopy ``nn_*``/``cn_*`` form key (mapped via the adapter's
+    ``_CANOPY_TO_CASCOR_PARAM_MAP``). ``hi`` is cascor's ``le``; ``lo`` is cascor's
+    ``ge`` — or, for the ``gt=0`` float fields, canopy's own strictly-positive
+    ``MIN_*`` floor (which satisfies ``gt=0``). The cascor field + its raw
+    ``ge``/``gt``/``le`` kwargs are named in the trailing comment so the mirror is
+    auditable against the source model. Keep this in sync when cascor's PATCH
+    bounds change (there is no cross-repo import; drift is guarded by
+    ``tests/unit/test_cascor_patch_bounds.py``).
+    """
+
+    # canopy form key -> {"lo", "hi", "deprecated"} (None = unbounded on that side)
+    BOUNDS: Final[dict] = {
+        # cascor learning_rate: gt=0, le=10.0
+        "nn_learning_rate": {"lo": TrainingConstants.MIN_LEARNING_RATE, "hi": 10.0},
+        # cascor max_hidden_units: ge=1, le=10_000
+        "nn_max_hidden_units": {"lo": 1, "hi": 10_000},
+        # cascor epochs_max: ge=1 (DEPRECATED per C2b/Q1 — derived read-only; a
+        # submitted value is reported skipped(not-updatable), never applied)
+        "nn_max_total_epochs": {"lo": 1, "hi": None, "deprecated": True},
+        # cascor max_iterations: ge=1
+        "nn_max_iterations": {"lo": 1, "hi": None},
+        # cascor output_epochs: ge=1, le=1_000_000
+        "nn_output_epochs": {"lo": 1, "hi": 1_000_000},
+        # cascor convergence_threshold: gt=0
+        "nn_growth_convergence_threshold": {"lo": TrainingConstants.MIN_CONVERGENCE_THRESHOLD, "hi": None},
+        # cascor patience: ge=1, le=100_000
+        "nn_patience": {"lo": 1, "hi": 100_000},
+        # cascor candidate_pool_size: ge=1, le=256
+        "cn_pool_size": {"lo": 1, "hi": 256},
+        # cascor correlation_threshold: gt=0, le=1.0
+        "cn_correlation_threshold": {"lo": TrainingConstants.MIN_CANDIDATE_CORRELATION_THRESHOLD, "hi": 1.0},
+        # cascor candidate_learning_rate: gt=0, le=10.0
+        "cn_candidate_learning_rate": {"lo": TrainingConstants.MIN_LEARNING_RATE, "hi": 10.0},
+        # cascor selected_candidates: ge=1, le=256
+        "cn_selected_candidates": {"lo": 1, "hi": 256},
+        # cascor candidate_epochs: ge=1, le=1_000_000
+        "cn_training_iterations": {"lo": 1, "hi": 1_000_000},
+        # cascor candidate_convergence_threshold: gt=0
+        "cn_training_convergence_threshold": {"lo": TrainingConstants.MIN_CANDIDATE_CONVERGENCE_THRESHOLD, "hi": None},
+        # cascor candidate_patience: ge=1, le=100_000
+        "cn_patience": {"lo": 1, "hi": 100_000},
+        # cascor top_candidates: ge=0, le=256
+        "cn_top_candidates": {"lo": 0, "hi": 256},
+        # cascor random_candidates: ge=0, le=256
+        "cn_random_candidates": {"lo": 0, "hi": 256},
+    }
+
+    @staticmethod
+    def _bound_label(bound: dict) -> str:
+        lo, hi = bound.get("lo"), bound.get("hi")
+        if lo is not None and hi is not None:
+            return f"[{lo}, {hi}]"
+        if hi is not None:
+            return f"<= {hi}"
+        if lo is not None:
+            return f">= {lo}"
+        return ""
+
+    @classmethod
+    def clamp_params(cls, params: dict):
+        """Clamp bounded values into their cascor PATCH range; return ``(clamped, violations)``.
+
+        ``clamped`` is a shallow copy of ``params`` with every out-of-range
+        *bounded* value pulled to the nearest admissible bound. ``violations`` is
+        a list of ``{"key", "requested", "clamped", "bound"}`` for each value that
+        was moved. Keys absent from :attr:`BOUNDS` pass through untouched; a
+        ``None`` / bool / non-numeric bounded value is left as-is (never coerced).
+        Int-valued inputs keep integer type after clamping. Pure/stdlib-only so it
+        is safe to call at init and before every apply without importing the
+        cascor client.
+        """
+        clamped = dict(params)
+        violations: list = []
+        for key, bound in cls.BOUNDS.items():
+            if key not in clamped:
+                continue
+            value = clamped[key]
+            # bool is an int subclass but never a numeric parameter here.
+            if value is None or isinstance(value, bool):
+                continue
+            try:
+                num = float(value)
+            except (TypeError, ValueError):
+                continue
+            lo, hi = bound.get("lo"), bound.get("hi")
+            new = num
+            if hi is not None and num > hi:
+                new = hi
+            elif lo is not None and num < lo:
+                new = lo
+            if new != num:
+                if isinstance(value, int):
+                    new = int(new)
+                clamped[key] = new
+                violations.append(
+                    {
+                        "key": key,
+                        "requested": value,
+                        "clamped": new,
+                        "bound": cls._bound_label(bound),
+                    }
+                )
+        return clamped, violations
+
+
 class DashboardConstants:
     """Dashboard UI constants.
 
@@ -212,6 +370,102 @@ class DashboardConstants:
     FAST_UPDATE_INTERVAL_MS: Final[int] = 1000  # 1 second
     SLOW_UPDATE_INTERVAL_MS: Final[int] = 5000  # 5 seconds
 
+    # F-CANOPY-035: the metrics-store REST poll's OWN lane. It is deliberately the
+    # same nominal cadence as the fast lane. canopy#613 made it a SEPARATE
+    # ``dcc.Interval`` so ``update_metrics_store`` could stop its own clock while a
+    # fetch was in flight (``running=``) without silencing the other nine fast-lane
+    # callbacks. Since F-CANOPY-058 that guard is gone: this Interval clocks the poll's
+    # request/ack pacer, which asks for the next fetch only once the last one has been
+    # acknowledged, so the cycle is the round trip plus at most one period. The
+    # measurements below are of canopy#613's guard, kept as history.
+    #
+    # MEASURED effective cadence, so nobody has to rediscover it -- and stated as the
+    # RANGE it actually is, because the first version of this comment cited the single
+    # slowest run and drew an inference the data does not carry (corrected 2026-09-10
+    # by independent review). Three runs on the same leg, medians of the inter-request
+    # gap: **5.5 s, 6.1 s, 7.3 s** (round trips 1.3-2.1 s; the remaining 4.2-5.2 s is
+    # dead time before the next request).
+    #
+    # Is that dead time period-bound? **Not established.** One run at a 250 ms period
+    # gave 6.1 s cadence / 4.5 s dead time -- which sits INSIDE the range of the two
+    # runs at 1000 ms, and the spread between those two untreated runs (1.0 s) is
+    # larger than the treated-vs-untreated difference (0.7 s). n_treated = 1, and no
+    # artifact records that the 250 ms period was ever actually delivered (only that
+    # ``setProps`` returned ok). So: lowering this constant has NOT been shown to help,
+    # and has NOT been shown not to. Do not cite a period effect either way without a
+    # replicated run that verifies the delivered period from ``n_intervals``.
+    #
+    # The slowdown from a nominal 1 Hz is real and is still the right trade: before
+    # this fix the store updated NEVER. During live training the WS append path is
+    # meant to own the store while this poll short-circuits on ``ws_live`` without
+    # fetching -- but note that path is UNTESTED here: every measurement above is on a
+    # COMPLETED fixture where the WS appender never fired once, so "the backstop is
+    # only the backstop" is a design claim, not a measured one.
+    #
+    # WHY THIS EXISTS AT ALL. dash-renderer discards a response whose callback has
+    # left ``watched`` (dash_renderer.dev.js:2698), and evicts a ``watched`` entry
+    # the moment the same callback identity appears in ``requested``
+    # (:3027 -- ``requested`` is concatenated last, so the newcomer wins). A poll
+    # whose round trip exceeds its trigger period is therefore re-requested over
+    # itself forever and NEVER applies a single response. Measured on canopy at
+    # 1000 ms: 55 responses, every one carrying a full payload, store length 0.
+    METRICS_STORE_POLL_INTERVAL_MS: Final[int] = 1000  # 1 second (paces the request/ack pacer; see above)
+
+    # F-CANOPY-055/058/068: how old an UNACKNOWLEDGED paced request may grow before the
+    # request/ack pacer (``poll_pacer_js`` in ``dashboard_manager.py``) issues a new one
+    # over it. This replaces ``METRICS_STORE_STRAND_TIMEOUT_MS`` and the strand watchdog it
+    # configured, which sampled ``metrics-store-interval.disabled`` every 5 s and fired
+    # falsely, mid-fetch, ~31-36 times an hour (F-CANOPY-068).
+    #
+    # The age is the outstanding request's own (``issued_at``), which is progress, not a
+    # sample of a prop. A request that never gets a response at all (a canopy restart, a
+    # connection reset: the renderer's ``handleError`` path), or whose non-OK reply carries
+    # no ack, is re-issued after this long. Re-issuing evicts the request in flight, so the
+    # bound must stay well above any legitimate round trip. Measured from entering
+    # ``watched``: at most 5.4 s on canopy ``main`` at host load averages of 1.9-4.6 (juniper-ml
+    # evidence ledger, Phase 11), but up to 16.4 s and 17.3 s (p90 12.2 s and 11.7 s) in two
+    # runs on the pacer's own verify leg, on a host loaded by other work (post-run load averages
+    # 13.8-32.7; not sampled during the runs; 2026-10-08). So this is a
+    # FLOOR: the pacer raises it to ``PACER_STALE_RTT_FACTOR`` (3) times the longest round trip
+    # its page has seen on that poll, measured as a lower bound, and caps it at
+    # ``PACER_STALE_CAP_MS`` (120 s); both live beside ``poll_pacer_js`` in
+    # ``dashboard_manager.py``. Recovering within about 30 s is the goal; recovering fast is not.
+    POLL_PACER_STALE_MS: Final[int] = 30000  # 30 seconds (a floor; see above)
+
+    # F-CANOPY-053 (provisional id): the Candidate Metrics panel's poll period, i.e.
+    # ``candidate-metrics-panel-update-interval``, the only trigger of
+    # ``fetch_training_state`` besides a tab switch.
+    #
+    # At the old 1000 ms, NOT ONE of that callback's writes after mount was applied.
+    # dash-renderer discards a response whose callback has left ``watched``
+    # (dash_renderer.dev.js:2698), and evicts a ``watched`` entry the moment the same
+    # callback identity is ``requested`` again (:3027). So a write lands only if its
+    # response is applied before the next tick. The wire round trip is ~30 ms; the
+    # renderer's window is far longer. Writes landed / issued, by period, across three
+    # live runs on 9bffaba1 (juniper-ml reports/e2e-canopy-2026-09-02/transcripts/
+    # 2026-09-22_laneA3_candidate_tick_period_run{1,2,3_nolifecycle}.json):
+    #     1000 ms: 0 / 225      4000 ms: 5 / 39      10000 ms: 23 / 24
+    # Even 4 s lost 34 of 39, so on this app the window regularly exceeds 4 s (the E2E
+    # ledger also records a 6.95 s wire->apply gap). 10 s is the shortest period tested
+    # that lands reliably.
+    #
+    # WHY A PERIOD AND NOT #613's ``running=`` GUARD. A guard's release (``runningOff``)
+    # writes a FIXED value from ``completeJob()`` after EVERY run, including the 204 that
+    # ``fetch_training_state`` answers on page load and on every other tab
+    # (``active_tab`` is its second Input). This lane is TAB-GATED, so a guard on
+    # ``disabled`` writes ``False`` after the CAN-000/tab gate wrote ``True``, and the
+    # poller runs on a hidden tab: F-CANOPY-027 back. A guard on some other prop avoids
+    # that race but not the next one: an evicted request's ``completeJob()`` still
+    # releases the guard while its successor is in flight, and #614 showed such a guard
+    # also needs a strand watchdog. A period needs no second writer at all, so the gate
+    # stays the only writer of this interval's ``disabled``.
+    #
+    # The cost is a refresh of up to 10 s plus apply latency. ``CandidateMetricsPanel``
+    # still honours a config ``update_interval`` override, but production passes none
+    # (``DashboardManager({})`` in main.py) and there is no env override. An override
+    # back near 1000 ms brings the eviction back with it.
+    CANDIDATE_STATE_POLL_INTERVAL_MS: Final[int] = 10000  # 10 seconds
+
     # API timeouts (seconds)
     API_TIMEOUT_SECONDS: Final[int] = 2
     FAST_API_TIMEOUT_SECONDS: Final[float] = 1.0  # For fast-interval polling callbacks
@@ -219,6 +473,53 @@ class DashboardConstants:
     # Data limits
     MAX_METRICS_HISTORY: Final[int] = 100
     MAX_DATA_POINTS: Final[int] = 10000
+
+    # N1 (training-runtime defects plan §4 I-1): bound the full-history metrics
+    # fetch. In ``full`` / ``hidden_units`` display modes the metrics-store poll
+    # fetches the complete history (``limit=0`` → up to 10k rows); refetching
+    # that every fast-interval tick (1 s) is an unconditional 10k-rows-per-second
+    # steady state. Interval-driven full fetches therefore only run every Nth
+    # tick; a display-mode switch still triggers an immediate fetch.
+    #
+    # **THE TICK THIS COUNTS CHANGED IN canopy#613, AND THE OLD ARITHMETIC HERE WAS
+    # LEFT BEHIND** (caught 2026-09-10 by independent review; the comment used to
+    # claim "one full fetch per ~5 s at the 1 s fast interval"). ``n`` is now
+    # ``metrics-store-interval.n_intervals``, which no longer advances once a second:
+    # the ``running=`` guard stops that interval for the duration of every fetch, so
+    # it advances once per COMPLETED round trip — measured at 5.5–7.3 s. At N = 5 a
+    # full-history refetch therefore happens roughly every **27–37 s**, not every 5 s.
+    #
+    # Left at 5 deliberately rather than re-tuned blind. The guard already removes the
+    # 1 Hz steady state this constant was introduced to prevent, so N = 1 would now
+    # give ~6 s — close to the original intent — but a full fetch is up to 10k rows,
+    # which lengthens the round trip, which lengthens the self-clocked period: the two
+    # constants interact and no one has measured a full-mode round trip. Re-tune only
+    # with that measurement in hand. ``full`` / ``hidden_units`` are the non-real-time
+    # history-analysis surfaces, and a mode switch still forces an immediate fetch.
+    #
+    # **THE COUNT CHANGED AGAIN WITH F-CANOPY-058.** The ``running=`` guard is gone and
+    # the poll is paced by request/ack, so ``n`` is now the request's ``seq``, which
+    # advances once per acknowledged request. A skipped request answers ``no_update``
+    # without fetching, so its round trip is short and the next one follows about a
+    # period later: a full-history refetch on every 5th request is expected roughly every
+    # 5-10 s, closer to the original intent. Not measured; the caveat above stands.
+    FULL_HISTORY_POLL_TICK_MODULUS: Final[int] = 5
+
+    # N8 (training-runtime defects plan §4 I-1, posture O3+O1 / Q6): WS-data
+    # freshness window for the liveness-gated poll fallback. The browser bridge
+    # timestamps each ``metrics`` / ``state`` frame arrival (``_lastMetricsFrameMs``
+    # / ``_lastStateFrameMs`` in ws_dash_bridge.js — a LIVE age, never the sticky
+    # ``metricsReceived`` flag N1 retired). A stream is "live" while its last frame
+    # is within this window; the metrics/state polls then skip their REST fetch and
+    # the WS buffers feed the tiles/state directly (O3). The instant frames stop for
+    # longer than this window the age exceeds it, the stream reads stale, and the
+    # REST poll resumes on the next tick (O1) — the anti-sticky guarantee (a genuinely
+    # dead stream can freeze the surfaces for at most this window before REST re-engages).
+    # ~5× the 1 s metrics cadence: generous enough to ride typical inter-frame gaps
+    # (e.g. the every-25th-epoch output-phase emission, brief candidate phases where
+    # ``metrics`` frames pause) without flapping to REST, short enough that a dead
+    # socket recovers promptly.
+    WS_LIVENESS_WINDOW_MS: Final[int] = 5000
 
     DEFAULT_METRICS_HISTORY: Final[int] = 50
     DEFAULT_DATA_POINTS: Final[int] = 1000
@@ -241,10 +542,49 @@ class DashboardConstants:
     # Long POST timeout for set_params with retry. Higher because the backend
     # may need to reconfigure the cascor session.
     DASHBOARD_LONG_POST_TIMEOUT: Final[int] = 10
+    # N3: the /api/train/restart POST orchestrates stop → await stopped (bounded
+    # by RESTART_STOP_WAIT_TIMEOUT_SECONDS) → start, so its client-side timeout
+    # must exceed that server-side await budget with headroom for the start leg.
+    DASHBOARD_RESTART_POST_TIMEOUT: Final[int] = 30
     # GET timeout for state verification reads.
     DASHBOARD_GET_TIMEOUT: Final[int] = 5
     # Maximum retries for set_params operations.
     DASHBOARD_SET_PARAMS_MAX_RETRIES: Final[int] = 3
+    # ── #2a Retry-After backoff (PROVISIONAL — revisit) ──────────────────
+    # On HTTP 429 from set_params, the handler backs off and retries within
+    # the budget above instead of bailing immediately. The sleep runs on a
+    # Dash callback thread, so the server-advertised ``Retry-After`` (which can
+    # be the limiter's full window, tens of seconds) is *capped* — we never
+    # block the callback on the raw value. A missing/non-numeric header (e.g.
+    # the rare RFC 9110 HTTP-date form) uses the fallback delay below.
+    # NOTE: both values are first-cut tuning and should be revisited once
+    # there is real 429-frequency data from the deployed stack.
+    DASHBOARD_RETRY_AFTER_MAX_SLEEP_S: Final[float] = 2.0
+    DASHBOARD_RETRY_AFTER_FALLBACK_S: Final[float] = 0.5
+
+    # FRONTEND_ISSUES_PLAN_2026-05-09 §2.5 B / Issue #2 — common debounce for
+    # numeric ``dbc.Input`` widgets. 350 ms balances typing latency against
+    # callback churn — typed values commit ~350 ms after the last keystroke
+    # without requiring blur. Spinner clicks commit immediately regardless.
+    # Pre-PR-8 every numeric input used ``debounce=True`` which only commits
+    # on blur/Enter, producing the "type then click Apply with mouse =
+    # stale value" UX bug.
+    NUMERIC_INPUT_DEBOUNCE_MS: Final[int] = 350
+
+    # ── E-3 (training-runtime defects plan §9): apply-in-flight watchdog ──
+    # A failed Apply used to leave the CAN-000 `apply-in-flight` clamp stuck
+    # true (every non-200 path returned `dash.no_update` for
+    # `applied-params-store`, the store whose update released the clamp),
+    # permanently disabling BOTH update intervals — the pre-refresh total
+    # freeze of I-1 root cause 4. The server callback now always releases the
+    # clamp; this clientside watchdog is the safety net for the class no
+    # server response can fix (the `/_dash-update-component` POST itself
+    # failing at the network level). Limit must exceed the worst-case legit
+    # apply: 3 retries × DASHBOARD_LONG_POST_TIMEOUT (10 s) + 2 ×
+    # DASHBOARD_RETRY_AFTER_MAX_SLEEP_S (2 s) + DASHBOARD_GET_TIMEOUT (5 s)
+    # verify ≈ 39 s.
+    APPLY_WATCHDOG_INTERVAL_MS: Final[int] = 5000
+    APPLY_IN_FLIGHT_MAX_MS: Final[int] = 60000
 
 
 class ServerConstants:
@@ -318,9 +658,20 @@ class SecurityConstants:
     MAX_REQUEST_BODY_BYTES: Final[int] = 10 * 1024 * 1024  # 10 MB
 
     # ── Path-based exemption from API key + rate limiter middleware ──
-    # Prefix-based exemptions (Dash app + its static assets).
-    EXEMPT_PATH_PREFIXES: Final[tuple[str, ...]] = ("/dashboard",)
-    # Exact path exemptions (health checks, OpenAPI docs).
+    # Prefix-based exemptions (Dash app + its static assets, Prometheus
+    # /metrics sub-app). /metrics is mounted as an ASGI sub-app via
+    # ``app.mount("/metrics", get_prometheus_app())``; FastAPI's mount
+    # behaviour issues a 307 from ``/metrics`` -> ``/metrics/`` (and
+    # any sub-paths under the sub-app would be ``/metrics/...``), so a
+    # prefix-form exemption is required to keep the whole sub-app
+    # anonymously scrape-able. This matches the convention in
+    # juniper-cascor (no auth on /metrics) and complements
+    # juniper-data's IP-allowlisted variant. The trailing-slash form
+    # is intentional: ``startswith("/metrics")`` covers ``/metrics``,
+    # ``/metrics/``, and any future sub-paths the prometheus_client
+    # ASGI app may add.
+    EXEMPT_PATH_PREFIXES: Final[tuple[str, ...]] = ("/dashboard", "/metrics")
+    # Exact path exemptions (health checks and the dashboard root; NOT the docs -- see below).
     EXEMPT_PATHS: Final[frozenset[str]] = frozenset(
         {
             "/",
@@ -329,17 +680,46 @@ class SecurityConstants:
             "/v1/health",
             "/v1/health/live",
             "/v1/health/ready",
-            "/docs",
-            "/openapi.json",
-            "/redoc",
+            # APD-DATA-024 / service-core 0.6.0: the documentation surface is
+            # deliberately NOT exempt. ``_is_exempt()`` ignores whether a key is
+            # configured, so listing /docs, /openapi.json and /redoc here made
+            # "docs enabled" and "docs public" the same switch: relaxing
+            # ``_docs_enabled`` in main.py (currently: true exactly when API-key auth is off)
+            # would serve the schema to everyone while looking like it sat behind
+            # the key. Removing them decouples the two.
         }
     )
+
+    # ── Key-exempt tier (PR-1, Start-Training 401 fix) ──
+    # Paths that skip the API-key gate but REMAIN rate-limited — distinct from
+    # the fully-exempt sets above, which short-circuit before BOTH the key gate
+    # and the limiter. This is the same-origin browser control surface:
+    # ``/api/csrf`` must be anonymously mintable so the browser can fetch a
+    # token, and ``/api/train/*`` is authenticated by the per-route
+    # ``require_browser_control_auth`` dependency (Origin + CSRF) instead of the
+    # X-API-Key the browser cannot hold. ``/v1/*`` and every other route stay
+    # key-gated (C5). The ``/api/train/`` prefix carries a trailing slash so it
+    # matches only the training-control routes, never a future ``/api/train…``
+    # sibling. See JUNIPER_CANOPY_TRAINING-CONTROL-AUTH_DESIGN_2026-06-30.md §8.1.
+    KEY_EXEMPT_PATH_PREFIXES: Final[tuple[str, ...]] = ("/api/train/",)
+    KEY_EXEMPT_PATHS: Final[frozenset[str]] = frozenset({"/api/csrf"})
 
     # ── Default Content-Security-Policy ──
     # - Dash requires 'unsafe-inline' for styles and scripts.
     # - cdn.jsdelivr.net serves Bootstrap CSS via dash-bootstrap-components.
     # - data: in img-src is needed for Bootstrap inline SVG data URIs.
-    DEFAULT_CSP_POLICY: Final[str] = "default-src 'self'; " "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " "script-src 'self' 'unsafe-inline'; " "img-src 'self' data:; " "frame-ancestors 'none'"
+    # - blob: in img-src is needed for plotly's PNG export (F-CANOPY-047). The
+    #   modebar camera rasterises the figure as SVG -> Blob -> <img> -> canvas ->
+    #   toDataURL. Without blob: the browser refuses that image load, plotly's
+    #   promise rejects with a bare `[object Event]`, no download is ever offered,
+    #   and the user sees nothing but a console error. Measured live: a hand-made
+    #   10x10 SVG failed via blob: and succeeded via data:, on the same page.
+    #
+    #   SCOPE: blob: URLs are minted by this page's own scripts and are opaque
+    #   origins that cannot be forged by a third party; allowing them for IMG only
+    #   does not admit any external content. It is not added to script-src or
+    #   default-src, where it would be materially riskier.
+    DEFAULT_CSP_POLICY: Final[str] = "default-src 'self'; " "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " "script-src 'self' 'unsafe-inline'; " "img-src 'self' data: blob:; " "frame-ancestors 'none'"
 
     # ── Standard security response headers ──
     HEADER_X_CONTENT_TYPE_OPTIONS: Final[str] = "X-Content-Type-Options"
@@ -386,10 +766,105 @@ class BackendConstants:
     # ── Default CasCor service base URL ──
     DEFAULT_CASCOR_SERVICE_URL: Final[str] = "http://localhost:8200"
 
+    # ── Candidate-pool history (F-CANOPY-036) ──
+    # Cap on the server-side pool-history accumulator in ``TrainingState``. Lives
+    # here rather than in the panel because the accumulation moved to the backend;
+    # ``candidate_metrics_panel.MAX_POOL_HISTORY_ENTRIES`` re-exports this so the
+    # panel keeps one source of truth for how much history exists.
+    MAX_POOL_HISTORY_ENTRIES: Final[int] = 20
+
     # ── Circuit breaker (cascor service adapter) ──
     CIRCUIT_BREAKER_NAME: Final[str] = "cascor"
     CIRCUIT_BREAKER_FAILURE_THRESHOLD: Final[int] = 5
     CIRCUIT_BREAKER_RECOVERY_TIMEOUT: Final[float] = 60.0
+
+    # ── Status-refresher circuit breaker (X7 slice 1c) ──
+    # A SECOND breaker instance, not a second name for the first one: ``CircuitBreaker``
+    # keeps its state per instance and uses ``name`` only for logging. The status
+    # refresher needs its own because the shared ``_cb`` fronts five call sites, so five
+    # failing ``get_network_data()`` calls would open it for ``get_training_status()``
+    # too — freezing the status cache for the full 60 s recovery timeout **against a
+    # healthy upstream**. With a dedicated breaker, an open circuit on the refresher's
+    # path is evidence about the status endpoint and nothing else.
+    STATUS_CIRCUIT_BREAKER_NAME: Final[str] = "cascor-status"
+
+    # ── Admission control (X7 slice 1d) ──
+    # Concurrent outbound cascor calls (C4). Bounded BELOW two independent ceilings, and
+    # both matter:
+    #   * the default thread executor, min(32, cpu+4) = 20 here. Bare offload was measured
+    #     peaking at 20/20 with mean occupancy 16.2, turning 3 upstream requests into 42.
+    #   * the cascor client's connection pool, ``DEFAULT_POOL_MAXSIZE = 10``. Exceeding it
+    #     does not fail loudly -- urllib3 discards the surplus connection per request, so
+    #     the symptom is silent connection churn rather than an error.
+    # 4 clears both with room, and is the design's proposed bound (OQ-X3).
+    CASCOR_MAX_CONCURRENT_CALLS: Final[int] = 4
+
+    # Per-route caller budgets, in seconds, for the deadline that decides whether a queued
+    # cascor call is still worth ISSUING (C10).
+    #
+    # Measured, not chosen: extracted by AST from every ``requests.*`` call in
+    # ``dashboard_manager.py`` and its ``timeout=`` argument. Each entry is the MAXIMUM
+    # observed for that route, which makes the table conservative by construction -- it
+    # never declines work earlier than the most patient known caller.
+    #
+    # The maximum is load-bearing rather than tidy: ``/api/state`` is called at THREE
+    # different budgets (1.0 s, 2 s and 5 s) from three sites, so there is no single
+    # "right" per-route value, and a single global constant is worse still -- §5.5 of the
+    # design refutes it because the seven real budgets span 1.0 s to 30 s and one constant
+    # breaks the long ones (a 2 s default would abandon every restart at 2 s of 30).
+    #
+    # A route ABSENT from this table gets no deadline at all: bounded, never declined.
+    # That direction is deliberate. Declining work a caller still wants breaks a feature;
+    # issuing work a caller abandoned wastes an upstream call. The default must be the
+    # second. A caller that knows its own budget can say so with the
+    # ``X-Canopy-Budget-Seconds`` header, which overrides this table.
+    CALLER_BUDGET_SECONDS: Final[dict] = {
+        "/api/train/restart": 30.0,
+        "/api/set_params": 10.0,
+        "/api/stage_dataset": 10.0,
+        "/api/live_dataset_swap": 10.0,
+        "/api/cancel_pending_dataset": 10.0,
+        "/api/dataset/generate": 7.0,
+        "/api/model/select": 7.0,
+        "/api/state": 5.0,
+        "/api/train/status": 5.0,
+        "/api/dataset/generators": 5.0,
+        "/api/v1/workers/list": 2.0,
+        "/api/v1/workers/stats": 2.0,
+    }
+
+    # Header by which a caller declares its own budget, overriding the table above. The
+    # table is a model of canopy's known callers; this is how an unknown one corrects it.
+    CALLER_BUDGET_HEADER: Final[str] = "X-Canopy-Budget-Seconds"
+
+    # An absurd declared budget is a client bug or an attempt to pin a gate slot open;
+    # clamp rather than trust. Below the floor the request could never succeed anyway.
+    CALLER_BUDGET_MIN_SECONDS: Final[float] = 0.1
+    CALLER_BUDGET_MAX_SECONDS: Final[float] = 120.0
+
+    # ── Cascor HTTP client budget (X7 slice 1b) ──
+    # ``JuniperCascorClient`` defaults to ``timeout=30, retries=3``. Left implicit,
+    # those defaults cost ``timeout x (retries + 1) + sum(backoff)`` per call —
+    # measured 123.1 s against a hung cascor and 3.0 s against a stopped one, all of
+    # it on canopy's event loop (X7). Naming them here makes the budget visible and
+    # tunable instead of inherited.
+    #
+    # ``RETRIES = 0`` is the load-bearing half: urllib3's backoff is pure ``sleep``
+    # on the calling thread, so the 3.0 s refused-case cost is ENTIRELY sleep.
+    # Measured 3.005 s -> 0.002 s per ECONNREFUSED tick. Canopy re-polls on its own
+    # interval, so a poller gains nothing from client-level retries — it retries by
+    # definition on the next tick. This also removes the duplicate-request hazard:
+    # the installed client retries every verb (``RETRY_ALLOWED_METHODS`` includes
+    # POST and DELETE), so a timed-out ``POST /v1/training/start`` was measured
+    # reaching the server 4 times.
+    #
+    # TIMEOUT stays at the client's own default. The client applies ONE timeout to
+    # every call, and canopy's slowest legitimate operation (``/api/train/restart``)
+    # budgets 30 s, so lowering it here would abort real work. Bounding per-call
+    # budgets is slice 1d; making the remaining 30 s harmless is slice 1a, which
+    # moves these calls off the event loop.
+    CASCOR_CLIENT_TIMEOUT_SECONDS: Final[float] = 30.0
+    CASCOR_CLIENT_RETRIES: Final[int] = 0
 
     # ── Redis client timeouts (seconds) ──
     REDIS_SOCKET_TIMEOUT: Final[float] = 5.0
@@ -411,9 +886,39 @@ class BackendConstants:
     # ── Training metrics buffer ──
     MAX_METRICS_BUFFER_SIZE: Final[int] = 10000
 
+    # ── N2/CL2: canopy→cascor stream liveness (cascor_service_adapter) ──
+    # Age of the last inbound frame beyond which a *connected* relay stream is
+    # classified "degraded". Full liveness expiry (close + reconnect) is governed
+    # separately by ``settings.ws_stream_liveness_timeout_seconds``.
+    # CL2 (training-runtime defects plan §7): cascor-client >=0.7.0 auto-pongs and
+    # consumes cascor's heartbeat pings at the transport layer, so they no longer
+    # reach the relay to feed its clock — the relay now polls the client's
+    # ``is_alive`` surface every ``RELAY_LIVENESS_POLL_SECONDS`` (below the stale
+    # bound) to keep a healthy-but-idle stream fresh instead of drifting to
+    # "degraded" or churning needless reconnects.
+    RELAY_STALE_AFTER_SECONDS: Final[float] = 60.0
+    # CL2: cadence at which the relay polls the client's ``is_alive`` surface
+    # between (sparse) data frames — the cascor heartbeat interval (~30 s), kept
+    # below RELAY_STALE_AFTER_SECONDS so the health clock never falsely goes stale.
+    RELAY_LIVENESS_POLL_SECONDS: Final[float] = 30.0
+    # Pong deadline for the control-stream protocol-level keepalive probe.
+    CONTROL_PROBE_PONG_TIMEOUT_SECONDS: Final[float] = 10.0
+
     # ── Demo mode timing ──
     DEMO_THREAD_JOIN_TIMEOUT: Final[float] = 5.0
     DEMO_MAIN_LOOP_SLEEP: Final[int] = 30
+
+    # ── N3 restart orchestration (cold-swap: stop → await stopped → start) ──
+    # E-2 pin: a start against an ACTIVE run 409s immediately (staging survives),
+    # so the restart route stops the current run and waits (bounded) for it to
+    # settle before starting. On timeout the caller keeps the pending banner open
+    # with a retriable error (plan §8 stop→start race).
+    RESTART_STOP_WAIT_TIMEOUT_SECONDS: Final[float] = 15.0
+    RESTART_STOP_WAIT_POLL_SECONDS: Final[float] = 0.5
+    # Best-effort peek after a successful start to surface an instant-convergence
+    # (epoch-0, empty-history) run truthfully rather than as a frozen dashboard
+    # (plan folded finding 2). Never authoritative — live status polling corrects.
+    RESTART_INSTANT_COMPLETE_PEEK_SECONDS: Final[float] = 1.0
 
 
 # Convenience imports at module level for commonly used constants

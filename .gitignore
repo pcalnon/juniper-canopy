@@ -154,6 +154,11 @@ Thumbs.db
 *.pt
 *.xcf
 
+# Specific Large Image files
+src/assets/Juniper_Tree_3-ultra-widestance.png
+*/src/assets/Juniper_Tree_3-ultra-widestance.png
+**/src/assets/Juniper_Tree_3-ultra-widestance.png
+
 # Large media files
 *.mp4
 *.tiff

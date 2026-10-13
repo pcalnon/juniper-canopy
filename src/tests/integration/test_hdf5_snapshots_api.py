@@ -121,14 +121,24 @@ class TestGetSnapshotsEndpoint:
             assert timestamp.endswith("Z")
 
     @pytest.mark.integration
-    def test_snapshots_have_positive_sizes(self, client):
-        """Snapshots should have positive size values."""
+    def test_snapshot_sizes_match_whether_a_file_exists(self, client):
+        """A real snapshot reports its bytes; a simulated one reports none.
+
+        X7 PR 2. This asserted ``size > 0`` for *every* row, which under the demo-mode
+        client fixture meant it was pinning the fabrication: the demo path invented
+        ``1 MB + timestamp % 512 KB`` for a file it never wrote, and this test made that
+        look like correct behaviour. The honest contract is conditional on whether bytes
+        were actually written.
+        """
         response = client.get("/api/v1/snapshots")
         data = response.json()
 
         for snapshot in data["snapshots"]:
             size = snapshot.get("size_bytes", 0)
-            assert size > 0
+            if snapshot.get("simulated"):
+                assert size == 0, f"simulated snapshot {snapshot.get('id')} reports {size} bytes it never wrote"
+            else:
+                assert size > 0, f"real snapshot {snapshot.get('id')} reports no size"
 
 
 # =============================================================================

@@ -11,7 +11,7 @@
 # File Path:     JuniperCanopy/juniper_canopy/src/backend/
 #
 # Date Created:  2026-02-26
-# Last Modified: 2026-02-26
+# Last Modified: 2026-10-08
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -26,12 +26,12 @@
 #####################################################################################################################################################################################################
 # Notes:
 #     Phase 5 of the Microservices Architecture Development Roadmap.
-#     See: juniper-ml/notes/MICROSERVICES-ARCHITECTURE_DEVELOPMENT-ROADMAP.md
+#     See: juniper-ml/notes/JUNIPER_2026-04-20_JUNIPER-ECOSYSTEM_MICROSERVICES-ARCHITECTURE-DEVELOPMENT-ROADMAP.md
 #
 #####################################################################################################################################################################################################
 # References:
 #     - PEP 544 — Protocols: Structural subtyping (static duck typing)
-#     - juniper-ml/notes/MICROSERVICES-ARCHITECTURE_DEVELOPMENT-ROADMAP.md §5.4
+#     - juniper-ml/notes/JUNIPER_2026-04-20_JUNIPER-ECOSYSTEM_MICROSERVICES-ARCHITECTURE-DEVELOPMENT-ROADMAP.md §5.4
 #
 #####################################################################################################################################################################################################
 # TODO :
@@ -67,6 +67,30 @@ class StatusResult(TypedDict, total=False):
     learning_rate: float
     max_hidden_units: int
     max_epochs: int
+    # cascor #320 (Issue #3 follow-up): grow_network completion reason carried
+    # through from /v1/training/status (converged / stalled / etc.). Absent or
+    # None when the connected cascor predates the field.
+    completion_reason: str
+    # Partial-data contract: cascor's ``dataset_shortfall`` annotation carried through
+    # from /v1/training/status -- ``None`` when the producer delivered in full (the
+    # overwhelming majority) or when the connected cascor predates the field. Non-null
+    # means THIS run is training on partial data; the dict carries ``dataset_id``,
+    # ``accepted_by_this_run``, ``acceptance_source``, the producer's ``truncation`` and
+    # ``data_quality`` descriptors, and a one-sentence ``summary`` for rendering.
+    dataset_shortfall: Optional[Dict[str, Any]]
+    # §4.10 dataset-axis hydration: WHICH dataset the backend has loaded -- ``None`` when
+    # nothing is, ``{"dataset_type": None}`` when something is but it cannot be named, else
+    # ``{"dataset_type": <name>, **params}``. A backend that cannot report it OMITS the key
+    # (a cascor predating cascor#676), and that absence is itself the answer "unknown";
+    # ``main._backend_dataset_selection`` branches on it, so never default it to ``None``.
+    current_dataset: Optional[Dict[str, Any]]
+    # W1.5 / F-C4 (recurrence): the latest fit's outcome could not be established -- its reply timed out and the
+    # service's status did not attribute a result to canopy's request. ``completion_reason`` says why. Present, and
+    # ``True``, only then; ``failed`` and ``completed`` are both ``False``. Every other backend omits it.
+    outcome_unknown: bool
+    # W1.5 / F-CON2 (recurrence): the service's ``operation_id`` for the fit whose result the backend holds -- the id
+    # ``expect_operation_id`` takes. Absent before a fit, and from a service predating operation identity.
+    operation_id: str
 
 
 class MetricsResult(TypedDict, total=False):
@@ -74,6 +98,12 @@ class MetricsResult(TypedDict, total=False):
 
     epoch: int
     loss: float
+    # A1-iii-b2: the regression metric set returned by RecurrenceBackend.get_metrics for a
+    # one-shot (recurrence / LMU) fit — these models never emit an 'accuracy' key.
+    r2: float
+    mse: float
+    rmse: float
+    mae: float
     accuracy: float
     learning_rate: float
     timestamp: str
@@ -110,6 +140,7 @@ class DatasetResult(TypedDict, total=False):
     targets: Any
     loaded: bool
     train_samples: int
+    val_samples: int
     test_samples: int
     dataset_name: str
 
@@ -218,8 +249,16 @@ class BackendProtocol(Protocol):
 
     # --- Training control ---
 
-    def start_training(self, reset: bool = True, **kwargs: Any) -> ControlResult:
-        """Start or restart training. Returns new training state."""
+    def start_training(self, reset: bool = True, start_fresh: bool = False, **kwargs: Any) -> ControlResult:
+        """Start or restart training. Returns new training state.
+
+        ``start_fresh`` (N3 / Q4 / cascor C5): when True, discard the current
+        model and its retained metrics/history for a clean-launch run (snapshots
+        preserved); when False (default) continue the current model, retaining
+        metrics/history (cross-dataset continual training). Backends translate it
+        to their engine's semantics (service → cascor's ``start_fresh`` body
+        field; demo → its reset path).
+        """
         ...
 
     def stop_training(self) -> ControlResult:
@@ -288,6 +327,92 @@ class BackendProtocol(Protocol):
         """Apply training parameter changes. Returns updated params."""
         ...
 
+    # --- Experimental-functions gate ---
+    #
+    # DECLARED HERE because main.py's two routes call them on ``backend`` unconditionally,
+    # and the read runs on EVERY PAGE MOUNT. They were previously an undeclared de-facto
+    # contract that three of four backends happened to satisfy; the fourth
+    # (``RecurrenceBackend``) did not, and the route's ``except Exception`` turned the
+    # ``AttributeError`` into a 500 with an error_id on every mount (Y1).
+    #
+    # A backend with no such gate implements these and says so -- it does not omit them.
+    # The gate itself is a cascade-correlation concept; "not applicable" is an answer.
+
+    # These two carry no trailing ``...`` while their 22 siblings above do. A docstring is
+    # already a sufficient body, so the ``...`` is a statement with no effect -- which CodeQL's
+    # py/unused-statement flags, and an unresolved CodeQL thread BLOCKS the merge even while
+    # every required check reads green. The siblings are not flagged only because CodeQL reports
+    # on the PR diff, so their identical lines are invisible to it. Match this form when adding
+    # a new protocol method; do not "restore consistency" by adding the ellipsis back.
+
+    def get_experimental_functions(self) -> Dict[str, Any]:
+        """Return the gate state as ``{"enabled": bool}``.
+
+        A backend without the concept returns ``{"enabled": False}`` — the gate is closed,
+        which is the F2.10 safe default, not an error.
+        """
+
+    def set_experimental_functions(self, enabled: bool) -> Dict[str, Any]:
+        """Set the gate; return the state AFTER the write.
+
+        A backend that cannot honour the write returns ``{"ok": False, "error": ...}`` so the
+        route can surface a 502 — it must not report success for a toggle that did nothing.
+        """
+
+    # --- Live dataset swap ---
+    #
+    # DECLARED HERE for the same reason as the gate above, and discovered the same way: the
+    # gate fix (Y1) closed two of FIVE instances of one defect. main.py calls all four of
+    # these on ``backend`` unconditionally — ``:4429``, ``:4455``, ``:4492``, ``:4521`` — inside
+    # a bare ``except Exception`` that turns a missing method into a 500 with an error_id.
+    #
+    # ``get_dataset_swap_events`` is polled on every ``slow-update-interval`` tick
+    # (``SLOW_UPDATE_INTERVAL_MS = 5000``), so a backend missing it produced a 500 every five
+    # seconds for the life of the page — and the callback drops non-200 via ``no_update``, so
+    # nothing surfaced. The gate's version at least only fired once per mount.
+    #
+    # Live swap is a cascade-correlation capability. A backend without it implements these
+    # and says so; "not applicable" is an answer, and omission is not.
+    #
+    # As above: docstring only, no trailing ``...`` (CodeQL py/unused-statement).
+
+    def swap_dataset_live(self, **canopy_params: Any) -> Dict[str, Any]:
+        """Swap the training dataset under a live run; return ``{"ok": bool, ...}``.
+
+        A backend that cannot swap returns ``{"ok": False, "error": ...}`` so the route can
+        surface a 502 — it must not report success for a swap that did not happen.
+        """
+
+    def cancel_swap_dataset_live(self) -> Dict[str, Any]:
+        """Cancel an in-flight live swap; return ``{"ok": bool, ...}``.
+
+        A backend with no live-swap concept returns ``{"ok": False, "error": ...}`` rather than
+        reporting a cancellation it never performed.
+        """
+
+    def get_dataset_swap_events(self, since: Optional[str] = None) -> Dict[str, Any]:
+        """Return the session's swap events as ``{"ok": True, "events": [...]}``.
+
+        A backend that records no swaps returns ``{"ok": True, "events": []}`` — an empty list
+        is the TRUE answer, not a failure. Returning ``{"ok": False}`` here makes the route
+        emit a 502 claiming an error where there is simply nothing to report, on every poll.
+        """
+
+    def get_snapshot_dataset_swaps(self, snapshot_id: str) -> Dict[str, Any]:
+        """Return a stored snapshot's own swap events, same shape as the live feed.
+
+        Same rule: a backend that records no swaps returns ``{"ok": True, "events": []}``.
+        """
+
+    def cancel_pending_dataset(self) -> Dict[str, Any]:
+        """Discard a staged-but-unstarted dataset; return ``{"ok": bool, ...}``.
+
+        Declared because ``main.py:4324`` calls it with no ``hasattr`` guard. Its sibling
+        ``stage_dataset`` IS guarded (``:4299``) and so stays optional — the asymmetry is the
+        whole reason this one needs declaring: all three backends implement it today, so the
+        omission is latent rather than live, and a fourth backend would reintroduce the 500.
+        """
+
     # --- Lifecycle ---
 
     async def initialize(self) -> bool:
@@ -302,5 +427,15 @@ class BackendProtocol(Protocol):
 
     @property
     def backend_type(self) -> str:
-        """Return 'demo' or 'service' for logging/status."""
+        """Return 'demo', 'service', or 'recurrence' for logging/status."""
+        ...
+
+    @property
+    def execution(self) -> str:
+        """Return the execution paradigm: 'live' or 'one_shot' (A1-iii).
+
+        'live' — streamed per-epoch training (demo / cascor). 'one_shot' — a single blocking
+        fit (recurrence / LMU). The dashboard suppresses cascade-only panels and renders a
+        regression result instead of a per-epoch classification view when 'one_shot'.
+        """
         ...

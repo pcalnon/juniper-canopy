@@ -1,8 +1,8 @@
 # Juniper Canopy User Manual
 
-**Version:** 0.26.0
+**Version:** 0.26.3
 **Status:** ✅ Production Ready
-**Last Updated:** May 4, 2026
+**Last Updated:** October 8, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -54,8 +54,11 @@ Juniper Canopy is a real-time monitoring and diagnostic frontend for Cascade Cor
 
 2. **Activate the conda environment:**
 
+   The env name is versioned: each rebuild increments the suffix and renames the
+   old env `*-DEPRECATED`. Discover yours with `conda env list | grep JuniperCanopy`.
+
    ```bash
-   conda activate JuniperCanopy
+   conda activate JuniperCanopy1   # live env; see the note above
    ```
 
 3. **Verify dependencies:**
@@ -81,18 +84,26 @@ This will:
 - Begin simulated training automatically
 - Open the dashboard at <http://127.0.0.1:8050/dashboard/>
 
-#### Production Mode (With Real CasCor Backend)
+#### Service Mode (With the juniper-cascor Service)
 
-To connect to a real CasCor training session:
+To monitor real training, point canopy at a running juniper-cascor service (and at
+juniper-data, which supplies the dataset generators):
 
 ```bash
-# Set backend path (if different from default)
-export CASCOR_BACKEND_PATH=/path/to/cascor
+# The juniper-cascor service: host port 8201 in the standard local layout
+# (8200 inside the juniper-deploy containers)
+export JUNIPER_CANOPY_CASCOR_SERVICE_URL=http://localhost:8201
 
-# Run application
+# The juniper-data service (shared, unprefixed name)
+export JUNIPER_DATA_URL=http://localhost:8100
+
+# Run application (the env name is versioned — see Installation)
 cd src
-/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
+/opt/miniforge3/envs/JuniperCanopy1/bin/python main.py
 ```
+
+Without `JUNIPER_CANOPY_CASCOR_SERVICE_URL` canopy logs
+`No CasCor service URL configured — falling back to demo mode` and runs the demo backend.
 
 ### Accessing the Dashboard
 
@@ -150,6 +161,10 @@ You should see:
 - 🟠 **Orange ● Standby** - Server connected, not healthy
 - 🔴 **Red ● Error** - Connection or server error
 
+#### Training status line
+
+The training status text is separate from the connection dots above. A failed recurrence fit reads `Failed — <reason>`: the status code, method, and path (`recurrence service error 422 on POST /v1/train`), followed by the service's 4xx `detail` when it sent one. When the line cuts the reason at 120 characters it ends in `…`; hover that text for the rest (up to 480 characters). A 5xx failure stays the status code, method, and path.
+
 #### WebSocket Status (Top Right)
 
 - **`N connection(s)`** (Green) - Active WebSocket connections
@@ -176,10 +191,10 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 └─────────────────┘
 ```
 
-- **Action:** Starts or restarts training from beginning
+- **Action:** Starts training. A plain Start sends `reset=false` and continues the current network; it does not rebuild it
 - **Demo Mode:** Begins simulated training with automatic epoch progression
 - **Production Mode:** Initiates training on real CasCor backend
-- **Note:** Automatically resets state on start
+- **Note:** Start does not reset the model. To discard it and rebuild, use **Stop & Restart with new dataset** with **Start fresh** on ([A wider dataset needs Start fresh](#a-wider-dataset-needs-start-fresh))
 
 #### Pause Training
 
@@ -207,21 +222,65 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 - **Production Mode:** Sends stop command to CasCor backend
 - **Warning:** State is preserved but training cannot be resumed (use Start to restart)
 
+### A wider dataset needs Start fresh
+
+**Start** continues the network that is already loaded. It cannot grow that network to more features or outputs. Staging a wider dataset — the tests use `equities` (15 features) and `mnist` (784) — and pressing Start is refused before anything is loaded.
+
+When cascor opens that refusal with `[start_fresh_required]`:
+
+1. The alert names the two controls. It stays until you dismiss it or a later command succeeds. The charts are still the previous run.
+2. The pending-dataset banner, "Dataset change pending — restart training to apply.", stays up, because the dataset is still staged.
+3. Click **Stop & Restart with new dataset**.
+4. Turn **Start fresh** on. It defaults to off. Off would continue the narrow network.
+5. Confirm. Parameter edits in the expanded section are applied first, then the restart. Confirm stops the current run if one is active, waits for it to settle, and starts on the staged dataset.
+
+| Start fresh | Result |
+|-------------|--------|
+| Off | Continue the current model and keep its metrics and history. The network is not rebuilt, so the width mismatch remains. |
+| On | Discard the current model and its retained metrics and history. Rebuild an untrained network from the dataset. Applied parameters, including any you edit in the modal, and on-disk snapshots are kept. |
+
+The modal says those parameters carry over and that snapshots are kept. That is the service-mode contract with a current cascor. Demo mode does not send a `start_fresh` field; a demo restart resets the demo run's epoch and metrics history whichever way the toggle is set.
+
+If you staged a wider dataset and the alert is the ordinary "Start failed." alert (it closes itself after eight seconds) and does not name Start fresh, cascor did not send the marker. There is no second set of instructions for that older service.
+
+### Model summary
+
+Under **Model:** the sidebar shows one line (`nn-model-summary`) and a **▸ change** button, which opens the model-selection table. The line is one of three sentences. **Active** means a round-trip named a backend that serves the selection. **NOT ACTIVE** means the named backend does not, and Start and **Apply Dataset** stay disabled until the selection and the running backend agree. `backend status unknown` means the page has not confirmed a backend yet.
+
+| What you see | What it means | What to do |
+| --- | --- | --- |
+| `Selected: CasCor (Cascade-Correlation) · backend status unknown` | First paint, or `GET /api/selection` failed. This is not a claim that training is down. | Reload. If it stays, the mount read failed. The log says `Selection hydration read failed`. |
+| `Active: CasCor (Cascade-Correlation)` or `Active: Recurrence (LMU)` | The live backend serves that model (`service` or `demo` for CasCor, `recurrence` for the LMU). | Nothing, for this line. |
+| `Selected: … · NOT ACTIVE — the <backend> backend is running` | The selection and the running backend disagree. Start and **Apply Dataset** are disabled. | Select the model that backend serves, or configure `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL` and select Recurrence again. |
+| `No model selected — all datasets shown; choose one to train` | The model was cleared. This is not the unknown sentence. | Choose a model. |
+
+A lifecycle note such as `· coming soon` can sit in front of the liveness clause. Both shipped models are live, so the ordinary CasCor line has none. Developer contract: [AGENTS_REFERENCE.md § Sidebar model summary](AGENTS_REFERENCE.md#sidebar-model-summary-x11).
+
 ### Configuration Parameters
+
+The sidebar's **Meta Parameters** cards (Neural Network, Dataset, Candidate Nodes) hold the full
+parameter set — epochs, learning rate, hidden units, multi-node layers, optimizer, activation,
+output-weight initialisation, dataset generator fields and the candidate-pool settings. The two
+below are the ones most often changed. Their bounds come from `TrainingSettings` in
+`src/settings.py`, and their defaults can be overridden per deployment with
+`JUNIPER_CANOPY_TRAINING__LEARNING_RATE__DEFAULT` / `JUNIPER_CANOPY_TRAINING__HIDDEN_UNITS__DEFAULT`
+(see [Configuration](#configuration)). Edits are staged until you click **Apply** — the button
+enables only when a value differs from the last applied set — and the **Parameters** tab shows the
+applied values.
 
 #### Learning Rate
 
-- **Type:** Decimal number (step: 0.001)
+- **Type:** Decimal number (any step)
 - **Default:** 0.01
-- **Range:** 0.001 - 1.0
+- **Range:** 0.0001 - 1.0
 - **Effect:** Controls training speed and convergence
 
-#### Max Hidden Units
+#### Maximum Hidden Units
 
 - **Type:** Integer (step: 1)
-- **Default:** 10
-- **Range:** 1 - 100
-- **Effect:** Limits maximum cascade units added during training
+- **Default:** 1000
+- **Range:** 0 - 10000
+- **Effect:** Caps the number of cascade units added during training
 
 > **Note:** These controls are active in both demo and service modes.
 > In service mode, current values are also exposed through `GET /api/status` and `GET /api/state`.
@@ -230,7 +289,24 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 
 ## Visualization Tabs
 
-### Tab 1: Training Metrics
+The dashboard ships **15 tabs**, in tab-bar order: [Training Metrics](#training-metrics-tab),
+[Candidate Metrics](#candidate-metrics-tab), [Network Topology](#network-topology-tab),
+[Network Evolution](#network-evolution-tab), [Decision Boundary](#decision-boundary-tab),
+[Dataset View](#dataset-view-tab), [Workers](#workers-tab), [Parameters](#parameters-tab),
+[Snapshots](#snapshots-tab), [Replay](#replay-tab), [Network Editor](#network-editor-tab),
+[Redis](#redis-tab), [Cassandra](#cassandra-tab), [Tutorial](#tutorial-tab) and
+[About](#about-tab). The five cascade-only tabs — Candidate Metrics, Network Topology, Network
+Evolution, Decision Boundary and Workers — are hidden while a one-shot model such as
+*Recurrence (LMU)* is selected.
+
+While Recurrence (LMU) is selected, the Training Metrics tab shows one regression card
+instead of the classification cards and the per-epoch loss and accuracy plots. The card is
+titled `Recurrence (LMU) — in-sample (train split) regression metrics`, over the caption
+`Computed on the training split the fit saw; not a held-out score.` The numbers are R²,
+RMSE, MSE, MAE, and Loss from `POST /v1/train`, scored on the training split the fit saw.
+While the fit is still running, the card is the spinner `Awaiting recurrence (LMU) fit result…`.
+
+### Training Metrics Tab
 
 **Purpose:** Monitor real-time training progress with loss and accuracy curves
 
@@ -268,6 +344,15 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 - Validation loss increases while training loss decreases (overfitting)
 - Erratic fluctuations (learning rate too high)
 - Flat curves (learning rate too low, or convergence)
+
+**Metric Layouts:** name the current zoom/pan view and click **Save Layout**
+(`POST /api/v1/metrics/layouts`); the dropdown lists the saved layouts (`GET /api/v1/metrics/layouts`),
+**Load** re-applies one and **Delete** removes it without a confirmation dialog.
+
+**In-metrics replay:** when training is stopped, paused, completed or failed (never during a live
+run) a replay bar appears under the plots: ⏮ start, ◀ step back, ▶ play / ⏸ pause, step forward,
+⏭ end, a position slider and a `current / max` readout. Playback advances one recorded epoch per
+tick. The base tick is **1000 ms**; the **1x / 2x / 4x** buttons set it to 1000 / 500 / 250 ms.
 
 **Data Source:**
 
@@ -312,6 +397,47 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 - **Zoom** - Scroll to zoom in/out
 - **Pan** - Click and drag to pan view
 - **Hover** - Show node ID and connection details
+- **Hidden depth slider** - Once at least one cascade unit exists, filter the graph to the first `K` hidden units (see below)
+
+**Hidden Depth Filter:**
+
+The **Hidden depth** slider is a view filter, not a training control. CasCor adds hidden units in cascade order (`hidden_0` first), so the slider shows a prefix of that history.
+
+| Slider / label | What you see |
+| --- | --- |
+| Label reads **`all`** | No filter. Every hidden unit and every connection is drawn. |
+| Label reads **`K of N`** | Only the first `K` of `N` hidden units. Edges that touch a hidden unit at or past `K` are dropped. |
+| Slider at rest (`0`) | Same as **`all`**. `0` means "no filter", not "show zero units." |
+| Slider at max (`N`) | Same as **`all`**. |
+
+The slider is hidden until the network has at least one hidden unit. Dragging commits on mouse-up (not on every tick). A chosen `K` survives later `cascade_add` events unless it is now past the new max, in which case the control snaps to "show all." The stats bar's Hidden Units readout shows `K of N` while a filter is active.
+
+The first-run walkthrough highlights this control (`network-visualizer-depth-slider-container`).
+
+If the label stays at `"0 of N"` while the graph is clearly showing every unit, that is F-CANOPY-042 (the label was wired to topology changes, not to the slider, and treated rest-state `0` as a real depth). The graph and stats bar can still be correct. canopy#570 splits the label onto its own clientside callback so it tracks the slider and matches the filter. See [AGENTS_REFERENCE.md § Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020).
+
+- **Click a node** - Opens the selection panel (`Selected: …`, `Layer: Input|Hidden|Output`). Clicking the same node again clears the selection.
+- **Box / lasso** - Mode-bar `select2d` / `lasso2d` select several nodes. The panel lists up to five.
+
+**Node Selection:**
+
+The selection panel is view state. It highlights nodes on the graph; it does not change the trained network.
+
+| Gesture | What happens |
+| --- | --- |
+| Click a node (or the edge vertex that sits on it) | Panel opens. Layer is taken from the node *label* (`Hidden 0` → Hidden), not from the Plotly curve index. |
+| Click the selected node again | Selection clears. This is the only *canvas* click gesture that clears; the **Clear selection** button clears too. |
+| Click any member of a box/lasso set | The *whole* set clears (same toggle). |
+| Click empty canvas | **Nothing.** Plotly emits `plotly_click` only when a point is hit. The callback never runs. |
+
+The panel *used to say* *"(Click again or elsewhere to deselect)"* after a click and *"(Click elsewhere to deselect)"* after a box select. The "elsewhere" half was described but never implemented. canopy#573 fixed it: a **Clear selection** button appears only while something is selected, the click hint reads *"(Click again to deselect)"*, and the box/lasso panel carries no hint, because the button is the affordance. See [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046).
+
+- **Camera (modebar)** — download the current figure as PNG
+  (`canopy_network_<YYYYmmdd>_<HHMMSS>.png`, 2× scale). SVG from the
+  same menu is a different path and does not need `blob:`. If the
+  camera button does nothing, the browser console will show a CSP
+  `img-src` violation — see
+  [troubleshooting #6](#6-modebar-camera-does-nothing-no-png-file).
 
 **Data Source:**
 
@@ -510,12 +636,21 @@ frontend:
 - **Classes:** 2 (binary)
 - **Noise:** Gaussian (σ=0.1)
 
-**Supported Dataset Formats:**
+**Loading a dataset:**
 
-- CSV (with header)
-- JSON (array of objects)
-- NumPy (.npy)
-- HDF5 (.h5)
+- **Service mode (juniper-cascor backend):** datasets come from the juniper-data service. In the
+  sidebar's **Dataset** section pick a generator (the list is `GET /api/dataset/generators`, proxied
+  from juniper-data), fill in its parameters and click **Apply** (`POST /api/stage_dataset`). The
+  staged dataset takes effect through **Restart with new dataset** (`POST /api/train/restart`) or —
+  with **Experimental Functions** enabled and a run in progress — the **Live Switch**
+  (`POST /api/live_dataset_swap`).
+- **Demo mode only:** this tab's **Generate / Upload / URL** modal — `POST /api/dataset/generate`
+  (built-in generators), `POST /api/dataset/import-file` (CSV upload) and
+  `POST /api/dataset/import-url` (a CSV fetched by the server; disabled unless
+  `JUNIPER_CANOPY_DATASET_IMPORT_URL_ENABLED=true`). Both import paths accept **CSV only**: one
+  sample per row, the last column is the integer class label, a header row is auto-detected, and
+  files are capped at 10 MB / 50 000 rows / 100 features. JSON, NumPy `.npy` and HDF5 `.h5` files
+  are **not** accepted. In service mode all three actions are refused with HTTP `400`.
 
 **Data Source:**
 
@@ -541,87 +676,318 @@ frontend:
 
 ---
 
+### Candidate Metrics Tab
+
+**Purpose:** Follow the candidate pool while cascor trains candidate units (the phase between
+output-training passes)
+
+**Display Elements:**
+
+1. **Pool Status Badge**, **Phase** (`Idle` until a pool is active) and **Pool Size**
+2. **Candidate Epoch Progress** — `epoch / total`, shown only while the training state carries
+   `candidate_epoch` and `candidate_total_epochs`
+3. **Current Pool** (collapsible) — "No active candidate pool" or the per-candidate view
+4. **Candidate Loss Plot** — the candidate epochs of the current run, read from the same metrics
+   store as the Training Metrics tab (no extra polling)
+5. **Pool History** (collapsible) — one read-only card per finished pool, capped at the most recent
+   entries
+
+**Data Source:**
+
+- The training-state and metrics stores shared with the Training Metrics tab; the tab's own refresh
+  runs only while it is selected
+
+---
+
+### Network Evolution Tab
+
+**Purpose:** A gallery of the network's cascade growth — one card per hidden unit added during a run
+
+**Display Elements:**
+
+1. **Stats line** — "No snapshots yet" until the first unit is added
+2. **Snapshot grid** — one card per growth step, captured in the browser from the `cascade_add`
+   WebSocket events and the current topology; a step with an unchanged hidden-unit count is skipped,
+   and the gallery clears itself when the input width changes or the hidden-unit count shrinks (a
+   dataset change or a reset)
+3. **Clear** — empties the gallery
+4. **Weight norms** — per-unit weight-norm traces, revealed only while a snapshot replay streams
+   weight samples; none do today (see [Replay Tab](#replay-tab))
+
+The sidebar is hidden on this tab.
+
+**Data Source:**
+
+- WebSocket stream `/ws/training` (`cascade_add` events) and the topology store — no polling
+
+---
+
+### Workers Tab
+
+**Purpose:** Read-only view of the cascor worker registry
+
+**Display Elements:**
+
+1. **Status Badge** — `LOADING`, then `NO WORKERS`, `DEGRADED` (stale workers present) or `HEALTHY`
+2. **Degradation alert** — "Worker data degraded: …" when the upstream call fails (dismissable)
+3. **Six tiles** — total, idle, busy, stale, tasks done (`done / failed fail`) and average health
+4. **Roster table** — id, kind (`local` / `remote`), status, health, last heartbeat, current task —
+   or "No workers connected"
+5. **Local-workers note** — cascor's registry reports remote WebSocket workers only; the in-process
+   candidate pool is not listed individually, and the panel says so rather than inventing rows
+
+**Data Source:**
+
+- `GET /api/v1/workers/list` (roster) plus best-effort aggregate stats, polled on the slow interval
+  only while this tab is selected
+
+---
+
+### Parameters Tab
+
+**Purpose:** At-a-glance, read-only summary of the applied meta-parameters
+
+**Display Elements:**
+
+1. **Network Training**, **Dataset** and **Candidate Training** tables — Pin / Parameter / Current /
+   Min / Max / Default; booleans render as `Enabled` / `Disabled`
+2. **Pin checkboxes** — pinned parameters appear as read-only name + value rows in the sidebar's
+   **Pinned** card; the pin set lives in browser local storage, so it survives a reload
+
+Editing happens in the sidebar; the tables re-render after every **Apply**.
+
+**Data Source:**
+
+- The applied-parameters store (filled by the sidebar's **Apply** round-trip) — no polling
+
+---
+
+### Snapshots Tab
+
+**Purpose:** Create, browse and act on HDF5 training-state snapshots
+
+**Display Elements and Controls:**
+
+1. **Create** — optional name and description, then **Create Snapshot** (`POST /api/v1/snapshots`);
+   the form clears on success and the table refreshes
+2. **Snapshot table** — auto-refreshes every 10 s (`JUNIPER_CANOPY_SNAPSHOTS_REFRESH_INTERVAL_MS`)
+   and on **Refresh**; in service mode the list comes from the cascor service that created the
+   snapshots, with canopy's local snapshot directory as the fallback
+3. **View** — opens the detail panel (`GET /api/v1/snapshots/{id}`)
+4. **Restore / Replay / Resume / Retrain** — per row, or from the right-click context menu; each
+   opens a confirmation modal, and **Confirm** posts `POST /api/v1/snapshots/{id}/{op}`. Training
+   must be paused or stopped first: a running run answers `409`, an unknown id `404`, an operation
+   the backend does not support `501`
+5. **Replay** additionally loads the session into the [Replay Tab](#replay-tab) and switches to it
+6. **History** (collapsible) — `GET /api/v1/snapshots/history`
+7. **Dataset swaps** — paired before / after cards for every live dataset swap recorded in the run
+
+**Data Source:**
+
+- `GET /api/v1/snapshots`, `GET /api/v1/snapshots/{id}`, `GET /api/v1/snapshots/history`,
+  `POST /api/v1/snapshots`, `POST /api/v1/snapshots/{id}/{restore|replay|resume|retrain}`
+
+---
+
+### Replay Tab
+
+**Purpose:** Drive a snapshot replay session opened from the Snapshots tab
+
+**Display Elements and Controls:**
+
+1. **Idle placeholder** — "No active replay session" until a replay is confirmed on the Snapshots tab
+2. **Session header** — snapshot id, FSM badge, and a weights badge (`V2 ✓ weights` when the
+   snapshot carries weights, otherwise `V1 (metrics only)`)
+3. **Transport** — ▶ Play, ⏸ Pause, ⏹ Stop
+4. **Epoch scrubber** — drag and release to seek; readout `current / end`. The max is the
+   last frame. cascor's `snapshot_window.end_epoch` is the history length, so a 12-frame
+   snapshot stops at index 11
+5. **Speed slider** — −10× … 10×; negative values play backwards, 0 pauses (`Paused (0×)`)
+6. **Time range** — restrict playback to a sub-window. The slider is inclusive. The request
+   cascor receives is exclusive: choosing frames 3 through 8 posts `{start: 3, end: 9}`, so
+   frame 8 is inside `[start, end)`
+7. **Status block** — the result of the last control action
+8. **Dataset-swap events** — markers on a wall-clock axis with a count; hover for details
+
+Play, pause, stop, and a slider released on a new value post `POST /api/v1/snapshots/{id}/replay/control`,
+which canopy proxies to the cascor service. Releasing a slider on the value the session already shows
+does not post: the player writes those values when it renders, and a matching write is an echo, not a
+new request. Before canopy#697 a chosen range omitted its last frame, both sliders offered one position
+past the history, and each render sent the scrubber, speed, or range again. Developer contract:
+[AGENTS_REFERENCE.md § Replay index contract](AGENTS_REFERENCE.md#replay-index-contract).
+
+By design, weight samples streamed during playback are drained every 500 ms into the buffer
+that feeds the [Network Evolution](#network-evolution-tab) weight-norm traces. Today no weight sample
+reaches the page, because cascor's replay frames carry none, so those traces stay hidden during a replay.
+The drain starts only once the page has started a replay.
+
+**Data Source:**
+
+- `POST /api/v1/snapshots/{id}/replay/control`; the loaded snapshot's swap history from
+  `GET /api/snapshots/{id}/history/dataset_swaps`
+
+---
+
+### Redis Tab
+
+**Purpose:** Read-only monitoring of the optional Redis cache integration
+
+**Display Elements:**
+
+1. **Status** and **Mode** badges (`DEMO` / `LIVE` / `DISABLED`)
+2. **Unavailable / error display** — when no Redis is deployed the tab shows an unavailable state and
+   leaves the rest of the dashboard untouched
+3. **Eight tiles** — version, uptime, connected clients, latency, memory, ops/sec, hit rate and
+   keyspace (placeholders when unavailable)
+
+**Data Source:**
+
+- `GET /api/v1/redis/status` and `GET /api/v1/redis/metrics`, every 5 s
+
+---
+
+### Cassandra Tab
+
+**Purpose:** Read-only monitoring of the optional Cassandra persistence integration
+
+**Display Elements:**
+
+1. **Status** (`UP` / `DOWN` / `DISABLED` / `UNAVAILABLE`) and **Mode** (`DEMO` / `LIVE` /
+   `DISABLED`) badges
+2. **Error area** — an unavailable render, never a crash, when no cluster is configured
+3. **Cluster overview** — contact points, keyspace, a hosts table, keyspace count, table count and
+   replication strategies (placeholders when unavailable)
+
+**Data Source:**
+
+- `GET /api/v1/cassandra/status` and `GET /api/v1/cassandra/metrics`, every 10 s
+
+---
+
+### Tutorial Tab
+
+**Purpose:** In-app orientation
+
+**Display Elements and Controls:**
+
+1. **▶ Take a guided tour** — launches the walkthrough overlay (Skip / Done to leave it)
+2. **Accordion** — CasCor overview, workflow, UI guide, parameter reference and keyboard shortcuts;
+   sections open independently of each other
+3. Right-clicking a control that has a tooltip offers **View tutorial**, which jumps to this tab
+
+---
+
+### About Tab
+
+**Purpose:** Application information
+
+**Display Elements:**
+
+1. **App Version** — the installed package version, the same value `GET /v1/health` reports
+2. Licence, credits, documentation links and contact information
+3. **System Information** (toggle) — Python version and platform details, built locally without a
+   request
+
+---
+
 ## Configuration
 
 ### Configuration Files
 
-**Primary Config:** `conf/app_config.yaml`
+Settings are typed `pydantic-settings` models in `src/settings.py`; the only configuration *file* the
+application reads is an optional `.env` in the working directory (`.env.example` documents every
+key). Precedence, highest first:
+
+1. Environment variables (`JUNIPER_CANOPY_*`, see below)
+2. The `.env` file
+3. The defaults in `src/settings.py`
+
+`conf/app_config.yaml` is **legacy**: the application settings no longer come from it (only the
+optional Redis client still reads it, through `config_manager.py`).
 
 ### Environment Variables
 
-Override config values using `CASCOR_<SECTION>_<KEY>` format:
+Every setting has a `JUNIPER_CANOPY_`-prefixed environment variable; nested sections use a double
+underscore:
 
 ```bash
 # Server configuration
-export CASCOR_SERVER_PORT=8051
-export CASCOR_SERVER_HOST=0.0.0.0
+export JUNIPER_CANOPY_SERVER__PORT=8051
+export JUNIPER_CANOPY_SERVER__HOST=0.0.0.0   # a non-loopback host needs a SEC-F22 attestation — see .env.example
 
 # Demo mode
-export CASCOR_DEMO_MODE=1
+export JUNIPER_CANOPY_DEMO_MODE=1
 
 # Backend path
-export CASCOR_BACKEND_PATH=/custom/path/to/cascor
+export JUNIPER_CANOPY_CASCOR_SERVICE_URL=http://localhost:8201    # juniper-cascor service (service mode)
+export JUNIPER_DATA_URL=http://localhost:8100                      # juniper-data (shared, unprefixed)
+export JUNIPER_CANOPY_BACKEND_PATH=/custom/path/to/juniper-cascor  # in-process cascor checkout (legacy path)
 
 # Debug mode
-export CASCOR_DEBUG=1
+export JUNIPER_CANOPY_SERVER__DEBUG=true
+export JUNIPER_CANOPY_LOG_LEVEL=DEBUG
+export JUNIPER_CANOPY_LOG_FORMAT=json
+
+# Sidebar defaults for the training parameters
+export JUNIPER_CANOPY_TRAINING__LEARNING_RATE__DEFAULT=0.01
+export JUNIPER_CANOPY_TRAINING__HIDDEN_UNITS__DEFAULT=1000
+export JUNIPER_CANOPY_TRAINING__EPOCHS__DEFAULT=1000000
+
+# Demo-mode pacing
+export JUNIPER_CANOPY_DEMO_CASCADE_EVERY=30      # add a cascade unit every N epochs
+# JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL is declared in settings but not applied: the backend
+# factory creates the demo backend with a fixed 1.0 s epoch interval (a tracked divergence).
 ```
+
+**Legacy `CASCOR_*` names.** `CASCOR_DEMO_MODE`, `CASCOR_SERVICE_URL`, `CASCOR_BACKEND_PATH`,
+`CASCOR_LOG_LEVEL`, `CASCOR_DEMO_UPDATE_INTERVAL` and `CASCOR_DEMO_CASCADE_EVERY` are still honoured,
+with a deprecation warning at startup. **`CASCOR_SERVER_PORT`, `CASCOR_SERVER_HOST` and `CASCOR_DEBUG`
+are read by nothing** — exporting them has no effect; use the `JUNIPER_CANOPY_SERVER__*` names above.
+The sidebar's training defaults additionally honour the unprefixed `CASCOR_TRAINING_LEARNING_RATE`,
+`CASCOR_TRAINING_HIDDEN_UNITS` and `CASCOR_TRAINING_EPOCHS`.
 
 ### Key Configuration Sections
 
+Every setting below lives on `Settings` in `src/settings.py`; the environment name is the field name
+upper-cased under the `JUNIPER_CANOPY_` prefix, with `__` between a nested section and its key.
+
 #### Application Settings
 
-```yaml
-application:
-  server:
-    host: 127.0.0.1      # Server host (use 0.0.0.0 for external access)
-    port: 8050           # Server port
-    debug: true          # Debug mode (verbose logging)
-```
+| Setting (`src/settings.py`)                   | Environment variable                                             | Default                        |
+|-----------------------------------------------|------------------------------------------------------------------|--------------------------------|
+| `server.host` / `server.port` / `server.debug` | `JUNIPER_CANOPY_SERVER__HOST` / `__PORT` / `__DEBUG`            | `127.0.0.1` / `8050` / `false` |
+| `demo_mode`                                   | `JUNIPER_CANOPY_DEMO_MODE`                                       | `false`                        |
+| `cascor_service_url`                          | `JUNIPER_CANOPY_CASCOR_SERVICE_URL`                              | unset (demo fallback)          |
+| `juniper_data_url`                            | `JUNIPER_DATA_URL` (or `JUNIPER_CANOPY_JUNIPER_DATA_URL`)        | `http://localhost:8100`        |
+| `recurrence_service_url`                      | `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL` (fallback `RECURRENCE_SERVICE_URL`) | unset                          |
+| `recurrence_api_key`                          | `JUNIPER_CANOPY_RECURRENCE_API_KEY` or `_FILE` (then the shared `JUNIPER_RECURRENCE_API_KEY` pair) | unset                          |
+| `training.<param>.{min,max,default}`          | `JUNIPER_CANOPY_TRAINING__<PARAM>__{MIN,MAX,DEFAULT}`            | see `TrainingSettings`         |
+| `demo_cascade_every`                          | `JUNIPER_CANOPY_DEMO_CASCADE_EVERY`                              | `30`                           |
+| `demo_update_interval`                        | `JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL` — declared, **not applied** (fixed 1.0 s) | `1.0`           |
 
 #### Frontend Settings
 
-```yaml
-frontend:
-  dashboard:
-    update_interval_ms: 1000  # Fast update interval
-    max_data_points: 10000    # Max points to display
-    theme: plotly_dark        # Plot theme
-
-  training_metrics:
-    smoothing_window: 10      # Rolling average window
-    buffer_size: 5000         # Metrics buffer size
-```
+| Setting                                       | Environment variable                                             | Default                        |
+|-----------------------------------------------|------------------------------------------------------------------|--------------------------------|
+| `enable_ws_control_buttons`                   | `JUNIPER_CANOPY_ENABLE_WS_CONTROL_BUTTONS`                       | `true`                         |
+| `dataset_import_url_enabled`                  | `JUNIPER_CANOPY_DATASET_IMPORT_URL_ENABLED`                      | `false`                        |
+| Snapshots-table refresh (panel-local)         | `JUNIPER_CANOPY_SNAPSHOTS_REFRESH_INTERVAL_MS`                   | `10000`                        |
 
 #### Logging Settings
 
-```yaml
-logging:
-  console:
-    level: DEBUG         # Console log level (DEBUG, INFO, WARNING, ERROR)
-    colored: true        # Colored output
-
-  file:
-    level: DEBUG         # File log level
-    json_format: false   # JSON structured logs
-```
+| Setting                                       | Environment variable                                             | Default                        |
+|-----------------------------------------------|------------------------------------------------------------------|--------------------------------|
+| `log_level` / `log_format`                    | `JUNIPER_CANOPY_LOG_LEVEL` / `JUNIPER_CANOPY_LOG_FORMAT`         | `INFO` / `text`                |
+| `sentry_dsn`                                  | `JUNIPER_CANOPY_SENTRY_DSN`                                      | unset                          |
+| `metrics_enabled`                             | `JUNIPER_CANOPY_METRICS_ENABLED`                                 | `false`                        |
 
 ### Applying Configuration Changes
 
-1. **Edit config file:**
-
-   ```bash
-   nano conf/app_config.yaml
-   ```
-
-2. **Restart application:**
-
-   ```bash
-   ./demo  # or production command
-   ```
-
-3. **Verify changes:**
-   - Check logs in `logs/system.log`
-   - Observe dashboard behavior
+1. Export the variable (or edit `.env`) in the shell that will launch canopy.
+2. Restart the application (`./demo`, or the service-mode command above) — settings are read once at
+   startup.
+3. Verify: the startup log carries a deprecation warning for every legacy name in use, and
+   `GET /v1/health` reports `demo_mode`.
 
 ---
 
@@ -686,16 +1052,17 @@ ModuleNotFoundError: No module named 'uvicorn'
 
 **Solutions:**
 
-✅ **Use conda environment Python explicitly:**
+✅ **Use conda environment Python explicitly:** (the env name is versioned;
+discover yours with `conda env list | grep JuniperCanopy`)
 
 ```bash
-/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
+/opt/miniforge3/envs/JuniperCanopy1/bin/python main.py
 ```
 
 ✅ **Or activate environment first:**
 
 ```bash
-conda activate JuniperCanopy
+conda activate JuniperCanopy1
 python main.py
 ```
 
@@ -735,7 +1102,7 @@ kill -9 <PID>
 ✅ **Use different port:**
 
 ```bash
-export CASCOR_SERVER_PORT=8051
+export JUNIPER_CANOPY_SERVER__PORT=8051
 ./demo
 ```
 
@@ -813,6 +1180,173 @@ ws.onmessage = (e) => console.log('Message:', e.data);
 ```
 
 ---
+
+#### 6. Depth-filter label stuck at "0 of N" (F-CANOPY-042) — **fixed in canopy#570**
+
+Kept for anyone running a build older than canopy#570. On current `main` the
+label follows the slider and reads `"all"` at rest.
+
+**Symptoms (pre-#570):**
+
+- Network Topology tab shows a loaded cascade (for example 40 hidden units)
+- The **Hidden depth** label reads `"0 of 40"` at rest, or does not change when you drag the slider
+- The graph and the Hidden Units stats count still follow the filter
+
+**Cause:**
+
+- The label *was* a fourth output of the clientside slider-bounds sync. That callback fires only when the topology store changes; the slider value was read as State. Rest-state `0` was also rendered as `"0 of N"` even though the filter treats `0` as "show all."
+
+**What to do:**
+
+- Trust the graph and the stats bar for what is actually drawn. `"all"` and a slider at max are the no-filter states.
+- Do not "fix" the label by adding the slider value as an Input of the bounds-sync callback — Dash rejects that as a circular dependency (`-depth-slider.value` is already an Output there).
+- Do not route the label through the topology rebuild (`update_network_graph`); that callback's measured paint is 1.5–31 s.
+- The repair, canopy#570, is on `main`: a dedicated clientside label callback whose rule matches `_apply_hierarchy_filter`. Developer contract: [AGENTS_REFERENCE.md § Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020).
+
+---
+
+#### 6. Topology selection does not clear when you click empty space — **fixed in canopy#573**
+
+Kept for anyone running a build older than canopy#573. Clicking blank canvas
+still does nothing — plotly emits no event — but the panel no longer promises
+that it will, and a **Clear selection** button now carries the gesture.
+
+**Symptoms (pre-#573):**
+
+- After a click the panel read *"(Click again or elsewhere to deselect)"*
+- After a box/lasso it read *"(Click elsewhere to deselect)"*
+- Clicking the blank canvas left the highlight in place
+
+- Plotly emits `plotly_click` only when a *point* is hit. A click on empty canvas produces no event, so `clickData` never changes and `handle_node_selection` (`prevent_initial_call=True`) never runs. The "elsewhere" sentence was never implemented.
+
+**Solutions:**
+
+✅ **Click the selected node again** — that toggle *does* clear (including every member of a box/lasso set).
+
+✅ **Use the Clear selection button.** A clientside click-on-empty handler was considered and rejected (it races Plotly and starves the 1.5–31 s rebuild family); canopy#573 shipped an explicit **Clear selection** button instead, visible only while something is selected.
+
+See [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046).
+
+#### 6. Modebar camera does nothing (no PNG file)
+
+- Topology (or any Plotly) camera button is present and clickable
+- No file is offered; the figure does not change
+- Browser console reports a Content-Security-Policy `img-src` violation
+  for a `blob:http://…` URL
+
+Plotly's PNG export rasterises SVG → Blob → `<img>` → canvas. That
+image load is a `blob:` URL. The shipped policy is
+`img-src 'self' data: blob:` (`SecurityConstants.DEFAULT_CSP_POLICY`,
+served by `SecurityHeadersMiddleware`). Without `blob:`, the promise
+rejects with `[object Event]` and no download is offered. SVG export
+from the same menu still works.
+
+✅ **Confirm the console names `img-src`**, not a missing figure.
+
+✅ **Confirm the constant and the middleware still match:**
+
+```bash
+cd src
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
+```
+
+Do not "fix" this by adding `blob:` to `script-src` or by replacing
+`data:` (Bootstrap icons need `data:`). Developer contract:
+[AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047).
+
+#### 7. Recurrence fit: a status code and no reason
+
+**Symptoms:** The status line is `Failed — recurrence service error <code> on POST /v1/train`, and nothing follows the path.
+
+**Cause:** The recurrence service answered with a 5xx, or with a 4xx that carried no usable `detail`. A 5xx `detail` is never shown: it can quote the recurrence service's upstream header value, so canopy keeps its own status code, method, and path. A 4xx `detail` (for example a non-finite `X_train`) is appended after the path. canopy 0.8.1 and earlier show a bare `Failed` and append no `detail`.
+
+**What to read:**
+
+```bash
+curl -s http://127.0.0.1:8050/api/status | python -m json.tool
+```
+
+`completion_reason` holds the whole message; hover the status line when it ends in `…`. For a 5xx, use the recurrence service log for the reason. See [AGENTS_REFERENCE.md § Recurrence fit refusal and in-sample scores](AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores).
+
+#### 8. Recurrence fit names the API key, or says to retry
+
+**Symptoms:**
+
+- The status bar names the recurrence API key variables, or it says `retry after 30 s`
+- The visible line ends in `…`
+
+**Causes:**
+
+- A 401 or 403 means the key canopy sends as `X-API-Key` is missing or is not a key the service accepts. The message names `JUNIPER_CANOPY_RECURRENCE_API_KEY` and `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`. canopy 0.8.1 and earlier say `check recurrence_api_key` instead.
+- A 429 means the recurrence service rate-limited the call. The wait is the reply's `Retry-After`. The dashboard polls canopy, so another client is usually sharing that key or address.
+- The status line shows 120 characters. Hover it for the rest (up to 480 characters).
+
+**Solutions:**
+
+✅ **Set the key, then restart canopy.** The `_FILE` form is read first. The shared `JUNIPER_RECURRENCE_API_KEY` pair applies when the canopy-prefixed pair is unset.
+
+```bash
+export JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE=/run/secrets/recurrence_api_key
+```
+
+✅ **On `retry after`, wait out that window.** A 429 with no `Retry-After` header has no wait clause. The window is still closed.
+
+✅ **A restored snapshot is a model.** `restored` means the service loaded a snapshot (`restored_from` names it). It does not mean the fit you just started succeeded. The model version is read from the service, and the sidebar shows it once the recurrence model is active: `Active: Recurrence (LMU) · version 0.5.0`.
+
+See [AGENTS_REFERENCE.md § Recurrence key, restored model, and service version](AGENTS_REFERENCE.md#recurrence-key-restored-model-and-service-version).
+
+#### 9. Sidebar says "backend status unknown"
+
+**Symptoms:**
+
+- The **Model:** line reads `Selected: CasCor (Cascade-Correlation) · backend status unknown`
+- It does not say `Active:`, and it does not say `NOT ACTIVE`
+
+**Cause:** Nothing has round-tripped `GET /api/selection` yet, or that read failed. "Active"
+on this line is a claim about the backend, and nothing has answered.
+
+**What to do:** Wait for the page to finish loading. If the line stays unknown, the
+selection read failed and the sidebar kept the default model rather than inventing
+"Active". The log says `Selection hydration read failed`. A line that names `NOT ACTIVE`
+and a backend is a different state: the selection and the running backend disagree, and
+Start is disabled.
+
+**See:** [AGENTS_REFERENCE.md § Sidebar model summary](AGENTS_REFERENCE.md#sidebar-model-summary-x11)
+
+#### 10. Recurrence fit: "Fitting (Upstream)", "Unknown", or busy with another operation
+
+**Symptoms:**
+
+- The status bar reads `Running` with the phase `Fitting (Upstream)`, well after you pressed Start
+- The status bar reads `Unknown — unknown (…): …` in amber
+- Start fails with `recurrence training already in progress (POST /v1/train) — retry when it ends …`
+
+**Causes:**
+
+- **Fitting (Upstream):** the fit outlived canopy's 300 s wait for its reply. The recurrence service cannot cancel a
+  fit, so it is still fitting, and canopy follows it on the service's status every 5 s for up to 30 minutes. The
+  status bar ends at `Completed` or `Failed` when the service says so.
+- **Unknown:** canopy could not establish how that fit ended. The service was unreachable, another operation has run
+  on the service since, the service restarted, or the service is a release that does not say whose operation its
+  status describes (juniper-recurrence 0.5.0). The text after `unknown (…)` says which.
+- **Busy:** another caller holds the service. The message names its operation, since when, and its `requested_by`.
+  An id that starts `juniper-canopy-` is canopy's own earlier fit, still running.
+
+**Solutions:**
+
+✅ **Wait.** A fit cannot be stopped from canopy or from the service. Start again once the status says it ended.
+
+✅ **Read the service's own status for an Unknown outcome:**
+
+```bash
+curl -s -H "X-API-Key: $JUNIPER_CANOPY_RECURRENCE_API_KEY" "$JUNIPER_CANOPY_RECURRENCE_SERVICE_URL/v1/training/status" | python -m json.tool
+```
+
+✅ **Give canopy a recurrence service of its own.** A service is owned by one caller at a time. See
+[juniper-recurrence README § One caller per service](https://github.com/pcalnon/juniper-recurrence/blob/main/juniper-recurrence/README.md#one-caller-per-service).
+
+**See:** [AGENTS_REFERENCE.md § Recurrence fit identity, timeouts, and one caller per service](AGENTS_REFERENCE.md#recurrence-fit-identity-timeouts-and-one-caller-per-service)
 
 ### Diagnostic Commands
 
@@ -1024,9 +1558,10 @@ logs/ui.log        # User interactions
 
 ### Version Information
 
-**Current Version:** 0.25.0
-**Release Date:** January 2026
-**Python:** 3.12+
+The running version comes from the installed package metadata and is shown by `GET /v1/health`
+and the **About** tab (both read the same source); the release history is in `CHANGELOG.md`.
+
+**Python:** 3.11+ (`requires-python` in `pyproject.toml`)
 **License:** MIT
 
 ---
@@ -1044,10 +1579,12 @@ logs/ui.log        # User interactions
 - **CasCor** - Cascade Correlation neural network architecture
 - **Epoch** - One complete pass through the training dataset
 - **Cascade Unit** - Hidden unit added dynamically during training
+- **Hidden depth** - View filter on the Network Topology tab; keeps the first `K` cascade units. Slider `0` and slider-at-max both mean "all" (no filter).
 - **Decision Boundary** - Regions where network changes classification
 - **WebSocket** - Bidirectional real-time communication protocol
 - **FastAPI** - Modern Python web framework for APIs
 - **Dash** - Python framework for interactive web dashboards
+- **Node selection** - Topology click or box/lasso highlight. Clicking empty canvas does not clear (F-CANOPY-046). Click the selected node again, or (after canopy#573) use **Clear selection**.
 
 ### System Requirements
 

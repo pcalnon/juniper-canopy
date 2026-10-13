@@ -65,6 +65,27 @@ def active_state():
     return get_active_training_state()
 
 
+def _wait_for_status(client, predicate, timeout=2.0, interval=0.02):
+    """Poll /api/status until predicate(data) is True or timeout elapses.
+
+    Replaces ``time.sleep(0.2)`` after train control endpoints — that fixed
+    delay is enough on a quiet machine but flaky under heavy load (we observed
+    intermittent failures during full-suite runs because the demo loop had
+    already advanced past the OUTPUT phase before the assertion ran). Polling
+    closes that race without lengthening the happy path.
+    """
+    deadline = time.time() + timeout
+    last_data = None
+    while time.time() < deadline:
+        response = client.get("/api/status")
+        if response.status_code == 200:
+            last_data = response.json()
+            if predicate(last_data):
+                return last_data
+        time.sleep(interval)
+    return last_data
+
+
 class TestStatusBarUpdates:
     """Test Status and Phase indicator updates.
 
@@ -115,15 +136,18 @@ class TestStatusBarUpdates:
         response = client.post("/api/train/start")
         assert response.status_code == 200
 
-        # Give it a moment to update state
-        time.sleep(0.2)
-
-        # Check state reflects valid status
-        response = client.get("/api/state")
-        data = response.json()
-        # In demo mode, status should be one of the valid states (case-insensitive)
-        valid_statuses = ["running", "started", "paused", "stopped"]
-        assert data["status"].lower() in valid_statuses, f"Invalid status: {data['status']}"
+        # Poll for a valid status rather than relying on a fixed sleep — under
+        # heavy load (full-suite runs) 0.2s was occasionally not enough for the
+        # FSM transition to land before the assertion ran.
+        valid_statuses = {"running", "started", "paused", "stopped"}
+        deadline = time.time() + 2.0
+        data = None
+        while time.time() < deadline:
+            data = client.get("/api/state").json()
+            if data["status"].lower() in valid_statuses:
+                break
+            time.sleep(0.02)
+        assert data is not None and data["status"].lower() in valid_statuses, f"Invalid status: {data and data['status']}"
 
     def test_state_contains_training_metrics(self, client):
         """Test state contains expected training metric fields."""
@@ -204,29 +228,28 @@ class TestStatusEndpointFSMIntegration:
         """Test /api/status shows running state after start command."""
         # Start training
         client.post("/api/train/start")
-        time.sleep(0.2)  # Give FSM time to transition
 
-        response = client.get("/api/status")
-        data = response.json()
+        # Poll until FSM reports running. Demo's training loop advances through
+        # OUTPUT → CANDIDATE quickly under load, so we accept any non-idle phase
+        # — the contract being tested is "/api/status reflects start", not the
+        # specific phase the loop happens to be in when we sample.
+        data = _wait_for_status(client, lambda d: d.get("is_running") is True and d.get("phase", "").lower() != "idle")
 
         # After start, should be running
         assert data["is_running"] is True
         assert data["is_paused"] is False
-        # Phase should be 'output' (first phase of training)
-        assert data["phase"] == "output"
+        # Phase should be one of the active training phases
+        assert data["phase"].lower() in {"output", "candidate", "inference"}
 
     def test_api_status_reflects_training_pause(self, client):
         """Test /api/status shows paused state after pause command."""
         # Ensure training is started
         client.post("/api/train/start")
-        time.sleep(0.2)
+        _wait_for_status(client, lambda d: d.get("is_running") is True)
 
         # Pause training
         client.post("/api/train/pause")
-        time.sleep(0.2)
-
-        response = client.get("/api/status")
-        data = response.json()
+        data = _wait_for_status(client, lambda d: d.get("is_paused") is True)
 
         # After pause, should be paused
         assert data["is_paused"] is True
@@ -237,10 +260,7 @@ class TestStatusEndpointFSMIntegration:
         """Test /api/status shows stopped state after stop command."""
         # Stop training
         client.post("/api/train/stop")
-        time.sleep(0.2)
-
-        response = client.get("/api/status")
-        data = response.json()
+        data = _wait_for_status(client, lambda d: d.get("phase", "").lower() == "idle" and d.get("is_running") is False)
 
         # After stop, should be stopped
         assert data["is_running"] is False

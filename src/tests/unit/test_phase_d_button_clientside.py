@@ -58,8 +58,14 @@ class TestClientsideJsContract:
 
         assert "restFallback" in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
         assert "/api/train/" in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
-        # Rejection handler must call the fallback with a reason string.
-        assert "WS rejected" in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+        # F-CANOPY-005: the fallback fires ONLY on transport-class failures
+        # (err.transport, set by websocket_client.js); a business rejection is
+        # surfaced to the operator instead of re-POSTing an adjudicated
+        # state-changing command (the observed resume->409 double-fire).
+        assert "err.transport" in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+        assert "WS transport failure" in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+        assert "WS business rejection" in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+        assert "WS rejected" not in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
 
     def test_js_maps_all_five_training_buttons(self):
         from frontend.dashboard_manager import PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
@@ -88,6 +94,58 @@ class TestClientsideJsContract:
 
         assert "disabled: true" in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
         assert "loading: true" in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+
+    def test_js_reports_failure_via_set_props(self):
+        """The async outcome must be pushed back into ``training-control-action``
+        via ``set_props`` so a rejected command surfaces a UI alert rather than
+        only a console.warn ("dead button" class). See
+        notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md."""
+        from frontend.dashboard_manager import PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+
+        js = PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+        assert "function reportFailure" in js
+        assert "set_props" in js
+        assert "'training-control-action'" in js
+        assert "success: false" in js
+
+    def test_js_report_failure_invoked_from_rest_fallback(self):
+        """``reportFailure`` must actually be wired into the REST-fallback failure
+        branches (non-OK response and network catch), not merely defined."""
+        from frontend.dashboard_manager import PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+
+        js = PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+        # Defined once, invoked at least twice (non-OK body branch + .catch).
+        assert js.count("reportFailure(") >= 3  # 1 definition + >=2 call sites
+        # Surfaces the HTTP status on a non-OK response.
+        assert "'HTTP ' + resp.status" in js
+
+    def test_js_report_failure_carries_the_full_detail_for_the_partial_data_prompt(self):
+        """``detail`` is the alert's 300-char slice; ``detail_full`` keeps the producer's own
+        sentence (which symbols, how many rows) for the three-way prompt, which the slice cuts off."""
+        from frontend.dashboard_manager import PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+
+        js = PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+        assert "detail_full: String(detail || '').slice(0, 4000)" in js
+        assert "detail: String(detail || '').slice(0, 300)" in js
+
+    def test_js_forwards_oneshot_dataset_ref_body(self):
+        """A1-iv-3c: a one-shot (recurrence) Start must carry the dataset-ref body on BOTH the
+        WS send (as the control-message ``params``) and the REST fallback (as the JSON body);
+        every other command and a live (cascor/demo) Start send none. The resolved body arrives
+        as the callback's trailing ``oneshot_start_body`` State, so the JS never re-resolves the
+        registry params client-side."""
+        from frontend.dashboard_manager import PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+
+        js = PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+        # The resolved body arrives as the trailing positional arg (the new State).
+        assert "oneshot_start_body" in js
+        # Gated to the start command only (present in both the WS and REST branches).
+        assert js.count("command === 'start' && oneshot_start_body") >= 2
+        # WS transport attaches it as the control-message ``params``.
+        assert "sendMsg.params = oneshot_start_body" in js
+        # REST fallback attaches it as a JSON body with the matching content type.
+        assert "JSON.stringify(oneshot_start_body)" in js
+        assert "'Content-Type': 'application/json'" in js
 
 
 # =====================================================================
@@ -146,6 +204,15 @@ class TestCallbackRegistration:
             keys = list(dm.app.callback_map.keys())
             assert any("training-control-action" in k for k in keys), f"flag={flag}: callback_map missing training-control-action"
             assert any("button-states.data" in k for k in keys), f"flag={flag}: callback_map missing button-states"
+
+    def test_outcome_alert_render_callback_registered_either_way(self, monkeypatch):
+        """The outcome-alert render callback is wired regardless of the transport
+        flag — both the server-side handler and the clientside JS feed it via the
+        training-control-action store."""
+        for flag in (False, True):
+            dm = _build_dashboard(monkeypatch, flag=flag)
+            keys = list(dm.app.callback_map.keys())
+            assert any("training-control-outcome-alert.children" in k for k in keys), f"flag={flag}: callback_map missing training-control-outcome-alert render callback"
 
 
 # =====================================================================

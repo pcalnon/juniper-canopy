@@ -142,28 +142,37 @@ class TestCascorWsControl:
 
     @pytest.mark.integration
     def test_service_pause_command_calls_protocol(self, cascor_client, mock_service_backend):
-        """'pause' command calls backend.pause_training()."""
+        """'pause' command calls backend.pause_training(); its ok=False result
+        surfaces as an error envelope (2026-07-09 PR-A — previously wrapped
+        in a success envelope, the §S10 dead-button class)."""
         response = _send_ws_command(cascor_client, "pause")
 
-        assert response["ok"] is True
+        assert response["ok"] is False
+        assert "not yet supported" in response["error"]
         assert response["command"] == "pause"
         mock_service_backend.pause_training.assert_called_once()
 
     @pytest.mark.integration
     def test_service_resume_command_calls_protocol(self, cascor_client, mock_service_backend):
-        """'resume' command calls backend.resume_training()."""
+        """'resume' command calls backend.resume_training(); its ok=False result
+        surfaces as an error envelope (2026-07-09 PR-A — previously wrapped
+        in a success envelope, the §S10 dead-button class)."""
         response = _send_ws_command(cascor_client, "resume")
 
-        assert response["ok"] is True
+        assert response["ok"] is False
+        assert "not yet supported" in response["error"]
         assert response["command"] == "resume"
         mock_service_backend.resume_training.assert_called_once()
 
     @pytest.mark.integration
     def test_service_reset_command_calls_protocol(self, cascor_client, mock_service_backend):
-        """'reset' command calls backend.reset_training()."""
+        """'reset' command calls backend.reset_training(); its ok=False result
+        surfaces as an error envelope (2026-07-09 PR-A — previously wrapped
+        in a success envelope, the §S10 dead-button class)."""
         response = _send_ws_command(cascor_client, "reset")
 
-        assert response["ok"] is True
+        assert response["ok"] is False
+        assert "not yet supported" in response["error"]
         assert response["command"] == "reset"
         mock_service_backend.reset_training.assert_called_once()
 

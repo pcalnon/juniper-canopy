@@ -1,0 +1,1345 @@
+#!/usr/bin/env python
+#####################################################################
+# Project:       Juniper
+# Sub-Project:   JuniperCanopy
+# File Name:     test_selection_reachability_guardrails.py
+# Author:        Paul Calnon
+# Version:       0.1.0
+# Date:          2026-09-05
+# License:       MIT License
+# Copyright:     Copyright (c) 2024-2026 Paul Calnon
+# Description:   Guardrails G1-G11 for the selection-reachability
+#                remediation, plus the Y3 read-side guardrail the
+#                design's §5 table lacked. G7 and Y3 landed with
+#                design PR 2 (§4.10 hydration, both axes). §4.5's
+#                restart-modal regate (X2) had no test until
+#                2026-09-23 (TestX2RestartModalIsGatedAgainst...).
+#                X11's unknown-liveness wording, the owner's
+#                2026-09-24 ruling: TestX11UnknownLivenessIsNotActive.
+#####################################################################
+"""Guardrails for the selection-reachability remediation design.
+
+Design of record: ``JUNIPER_2026-09-02_JUNIPER-CANOPY_SELECTION-REACHABILITY-DESIGN.md`` (§5
+names each guardrail and the status it must have before and after its phase). Evaluation of
+record: ``JUNIPER_2026-09-02_JUNIPER-CANOPY_SELECTION-DEADLOCK-PROPOSALS.md``.
+
+**G5 — the model summary reflects the backend that is actually live (X1 / N5).**
+
+``POST /api/model/select`` returns HTTP 200 for a ``recurrence`` selection even when
+``recurrence_service_url`` is unset (the code default): ``_swap_backend`` (``main.py:3891``)
+sees that the selection routes to the same backend type already running, records the selection,
+and no-ops. The response says so — it carries ``backend`` and ``swapped`` — but the sidebar
+summary read only ``nn_model`` and the registry's lifecycle ``status``, both of which are
+"recurrence" and "live", so it rendered *"Active: Recurrence (LMU)"* while cascor trained.
+
+That is silent benchmark misattribution: the run is real, the numbers are real, and the model
+they are filed under is wrong. The design ships this guardrail FIRST for that reason — unblocking
+the deadlock without it would convert a blocked control into a wrong result (§7).
+
+**The predicate under test is deliberately not ``swapped``.** ``swapped is False`` is also the
+correct, healthy answer when the user re-selects the model that is already live, so a summary
+gated on it would report a running CasCor as inactive. ``test_noop_reselect_of_the_live_model_still_reads_active``
+is the false-positive guard that pins that distinction; it fails against the naive predicate.
+"""
+
+from unittest import mock
+
+import dash
+import pytest
+import requests
+from fastapi.testclient import TestClient
+
+import main
+from backend.demo_backend import DemoBackend
+from backend.recurrence_backend import RecurrenceBackend
+from dataset_schema import generator_name_for_type
+from demo_mode import DemoMode
+from frontend.dashboard_manager import DashboardManager
+from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, DatasetTypeSpec, ModelSpec, compatible, compatible_datasets, model_requirement, selection_is_live
+
+
+@pytest.fixture
+def manager():
+    """A DashboardManager instance (also validates the layout + callbacks register cleanly)."""
+    return DashboardManager({})
+
+
+# The X1 payload, shaped exactly as ``main._model_state_response`` builds it (``main.py:3860-3871``)
+# for a recurrence selection over an unconfigured service. ``test_the_real_route_payload_reads_not_active``
+# below re-derives this from the live route rather than trusting the literal.
+X1_PAYLOAD = {
+    "nn_model": "recurrence",
+    "backend": "demo",
+    "execution": "continuous",
+    "status": "live",
+    "swapped": False,
+}
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG5ModelStateTruth:
+    """G5 — the summary must not claim a model is active when another backend is running."""
+
+    def test_recurrence_selected_over_a_non_recurrence_backend_is_not_live(self):
+        assert DashboardManager._selection_is_live(X1_PAYLOAD) is False
+
+    def test_recurrence_selected_over_the_recurrence_backend_is_live(self):
+        data = {**X1_PAYLOAD, "backend": "recurrence", "swapped": True}
+        assert DashboardManager._selection_is_live(data) is True
+
+    @pytest.mark.parametrize("backend_type", ["service", "demo"])
+    def test_cascor_selected_over_a_cascor_family_backend_is_live(self, backend_type):
+        # The REAL domain of ``backend.backend_type`` is exactly {"service", "demo", "recurrence"}
+        # (``service_backend.py:84``, ``demo_backend.py:71``, ``recurrence_backend.py:121``). An
+        # earlier revision of this test parametrised on "cascor", which the property never returns
+        # — so the live-cascor case, the one the predicate most needed pinned, went uncovered while
+        # the suite read green. Both non-recurrence types serve the cascor model.
+        data = {"nn_model": "cascor", "backend": backend_type, "status": "live", "swapped": False}
+        assert DashboardManager._selection_is_live(data) is True
+
+    def test_the_backend_type_domain_is_exactly_three_values(self):
+        # Pins the premise of every case above against the property implementations themselves, so
+        # a fourth backend type cannot appear without this suite noticing.
+        from backend.demo_backend import DemoBackend as _Demo
+        from backend.recurrence_backend import RecurrenceBackend as _Rec
+        from backend.service_backend import ServiceBackend as _Svc
+
+        assert {_Svc.backend_type.fget(None), _Demo.backend_type.fget(None), _Rec.backend_type.fget(None)} == {"service", "demo", "recurrence"}
+
+    def test_an_absent_backend_is_unknown_not_a_disagreement(self):
+        # The first-paint seed has never round-tripped, so it carries no ``backend``. Reporting
+        # "NOT ACTIVE" there would trade a silent lie for a loud one.
+        assert DashboardManager._selection_is_live({"nn_model": "cascor", "status": "live"}) is None
+
+    def test_summary_names_the_backend_that_is_really_running(self):
+        summary = DashboardManager._model_summary_text(X1_PAYLOAD)
+        assert summary.startswith("Selected: Recurrence (LMU)")
+        assert "NOT ACTIVE" in summary
+        assert "demo" in summary
+        # The old, false rendering must be gone outright — not merely supplemented.
+        assert not summary.startswith("Active:")
+
+    def test_noop_reselect_of_the_live_model_still_reads_active(self):
+        # THE FALSE-POSITIVE GUARD. ``swapped`` is False here too, because re-selecting the model
+        # already running is a legitimate no-op. A summary gated on ``swapped`` alone would call a
+        # perfectly healthy CasCor "NOT ACTIVE"; this test fails against that naive predicate.
+        data = {"nn_model": "cascor", "backend": "cascor", "status": "live", "swapped": False}
+        assert DashboardManager._model_summary_text(data) == "Active: CasCor (Cascade-Correlation)"
+
+    def test_lifecycle_status_note_survives_the_truth_up(self):
+        # The pre-existing ``· coming soon`` suffix is orthogonal to backend agreement and must
+        # still render on both branches.
+        live_but_soon = {"nn_model": "recurrence", "backend": "recurrence", "status": "coming_soon", "swapped": True}
+        assert DashboardManager._model_summary_text(live_but_soon) == "Active: Recurrence (LMU) · coming soon"
+        assert "· coming soon" in DashboardManager._model_summary_text({**X1_PAYLOAD, "status": "coming_soon"})
+
+    def test_the_real_route_payload_reads_not_active(self, monkeypatch):
+        """End-to-end: take the ACTUAL wire payload and feed it to the ACTUAL summary.
+
+        The unit cases above assert against a hand-written dict, which pins the summary but not
+        the contract between it and the route. This one closes that gap — if
+        ``_model_state_response`` ever stops carrying ``backend``, the literal above keeps
+        passing and this fails.
+        """
+        # The D-8 condition: no recurrence service URL configured, default backend live.
+        monkeypatch.setattr(main.settings, "recurrence_service_url", None, raising=False)
+        monkeypatch.setattr(main, "backend", DemoBackend(DemoMode(update_interval=1.0)), raising=False)
+
+        resp = TestClient(main.app).post("/api/model/select", json={"nn_model": "recurrence"})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+
+        # Precondition: this really is the X1 state (mirrors test_d8_d11_phase4_truth_up.py).
+        assert body["nn_model"] == "recurrence"
+        assert body["swapped"] is False
+        assert body["backend"] != "recurrence"
+
+        summary = DashboardManager._model_summary_text(body)
+        assert "NOT ACTIVE" in summary, summary
+        assert body["backend"] in summary
+
+
+#: The owner's X11 wording (2026-09-24) for the default model when liveness is unknown.
+X11_UNKNOWN_CASCOR = "Selected: CasCor (Cascade-Correlation) · backend status unknown"
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestX11UnknownLivenessIsNotActive:
+    """X11 — "Active" is a claim about the backend, so it needs a backend that answered.
+
+    ``_selection_is_live`` has three answers, and the summary rendered two of them the same way:
+    ``None`` (nothing has round-tripped, so there is no ``backend``) read *"Active: CasCor"* at
+    first paint, and a mount whose read failed kept that text. The owner ruled (2026-09-24) that
+    the unknown state reads "Selected: … · backend status unknown", never "Active".
+    """
+
+    def test_the_three_liveness_states_render_three_ways(self):
+        cascor = {"nn_model": "cascor", "status": "live"}
+        assert DashboardManager._model_summary_text({**cascor, "backend": "service"}) == "Active: CasCor (Cascade-Correlation)"
+        assert DashboardManager._model_summary_text({**cascor, "backend": "recurrence"}).startswith("Selected: CasCor (Cascade-Correlation) · NOT ACTIVE")
+        assert DashboardManager._model_summary_text(cascor) == X11_UNKNOWN_CASCOR
+
+    @pytest.mark.parametrize("spec", MODELS, ids=lambda spec: spec.key)
+    def test_no_model_reads_active_while_liveness_is_unknown(self, spec):
+        summary = DashboardManager._model_summary_text({"nn_model": spec.key, "status": spec.status})
+        assert summary.startswith(f"Selected: {spec.label}"), summary
+        assert summary.endswith(" · backend status unknown"), summary
+        # Unknown is not disagreement: no backend is named, and nothing claims one is running.
+        assert "NOT ACTIVE" not in summary
+
+    def test_the_lifecycle_note_precedes_the_unknown_note(self):
+        summary = DashboardManager._model_summary_text({"nn_model": "recurrence", "status": "coming_soon"})
+        assert summary == "Selected: Recurrence (LMU) · coming soon · backend status unknown"
+
+    def test_the_first_paint_seed_is_the_unknown_state(self, manager):
+        assert manager._initial_model_summary() == X11_UNKNOWN_CASCOR
+        # And the SHIPPED layout carries it, not merely the helper.
+        (summary,) = [c for c in _components(manager.app.layout) if getattr(c, "id", None) == "nn-model-summary"]
+        assert summary.children == X11_UNKNOWN_CASCOR
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            mock.Mock(side_effect=requests.ConnectionError("canopy restarting")),
+            mock.Mock(return_value=mock.Mock(ok=False, status_code=503)),
+            # A 200 that names no model takes the same fallback as a failed read.
+            mock.Mock(return_value=mock.Mock(ok=True, status_code=200, json=lambda: {"nn_model": None})),
+        ],
+        ids=["transport-error", "http-503", "no-model-in-payload"],
+    )
+    def test_a_failed_mount_read_writes_the_unknown_text(self, manager, failure):
+        with mock.patch("frontend.dashboard_manager.requests.get", failure):
+            store, _model_class, summary, _is_open, state = manager._hydrate_selection_handler()
+        assert store == DEFAULT_MODEL_KEY
+        # Written, not ``no_update``: the summary follows the key store's fallback, and it does
+        # not say "Active" about a backend the read could not reach.
+        assert summary == X11_UNKNOWN_CASCOR
+        assert DashboardManager._selection_is_live(state) is None
+
+    def test_a_hydrated_payload_without_a_backend_reads_unknown(self, manager):
+        payload = {"nn_model": "cascor", "status": "live", "dataset": {"value": None, "source": "unknown", "generator": None}}
+        with mock.patch("frontend.dashboard_manager.requests.get", return_value=mock.Mock(ok=True, status_code=200, json=lambda: dict(payload))):
+            store, _model_class, summary, _is_open, _state = manager._hydrate_selection_handler()
+        assert store == "cascor"
+        assert summary == X11_UNKNOWN_CASCOR
+
+
+# ---------------------------------------------------------------------------
+# G1 / G2 / G6 — reachability, safety, and the Start gate
+# ---------------------------------------------------------------------------
+
+
+def _components(tree):
+    """Flatten a Dash component tree to a list of components (children may be list/tuple/scalar)."""
+    out: list = []
+    seen: set = set()
+
+    def visit(node):
+        if node is None or isinstance(node, (str, int, float, bool)):
+            return
+        if isinstance(node, (list, tuple)):
+            for child in node:
+                visit(child)
+            return
+        if id(node) in seen:
+            return
+        seen.add(id(node))
+        out.append(node)
+        visit(getattr(node, "children", None))
+
+    visit(tree)
+    return out
+
+
+def _dataset_dropdown_is_clearable(manager):
+    """Read ``clearable`` off the SHIPPED layout, so the search loses the ✕ when the layout does.
+
+    Deriving this rather than hard-coding ``True`` keeps the BFS below a description of what the UI
+    admits, not a restatement of the fix: revert the one-keyword change and the clear transition
+    disappears from every search that reads the layout. **That alone does not turn G1a red.**
+    Clearing the model (§4.11) opens the graph by itself -- the two clears are independent cut
+    vertices, and only the pair restores the deadlock -- so a reverted ✕ is caught by
+    ``test_g2_either_clear_alone_opens_the_graph`` with the model clear withheld. Measured
+    2026-09-23 by reverting the keyword: that case is the only test in this module that fails.
+    """
+    for component in _components(manager.app.layout):
+        if getattr(component, "id", None) == "nn-dataset-type-dropdown":
+            return bool(getattr(component, "clearable", False))
+    raise AssertionError("nn-dataset-type-dropdown not found in the layout")
+
+
+def _selectable_models(manager, dataset_value, models=MODELS, dataset_types=DATASET_TYPES):
+    """Model keys whose table Select button is ENABLED for ``dataset_value`` (the real gate)."""
+    enabled = set()
+    for component in _components(manager._build_model_selection_table(dataset_value, None, models=models, dataset_types=dataset_types)):
+        cid = getattr(component, "id", None)
+        if isinstance(cid, dict) and cid.get("type") == "model-select-btn" and not getattr(component, "disabled", False):
+            enabled.add(cid["index"])
+    return enabled
+
+
+#: Availability injections. ``ALL_AVAILABLE`` is the flag-absent fallback (an empty list means
+#: every generator reads available); ``NONE_AVAILABLE`` names every seeded generator as absent,
+#: which is the only way to produce the empty compatible ∩ available set. It was the deployed
+#: container's real state for the LMU when written. Since canopy#612 the LMU's five rank-3
+#: synthetics need no extra and read available everywhere, so it is now a constructed state.
+ALL_AVAILABLE: list = []
+NONE_AVAILABLE = [{"name": generator_name_for_type(spec.value), "available": False} for spec in DATASET_TYPES]
+
+
+def _pickable_datasets(manager, model_key, dataset_value, generators=ALL_AVAILABLE, models=MODELS, dataset_types=DATASET_TYPES):
+    """Dataset values the dropdown will actually let the user choose, given the current model.
+
+    Availability is injected as all-available throughout this module. These are REACHABILITY
+    assertions about the compatibility gate; letting them inherit a live
+    ``/api/dataset/generators`` call would make them depend on whether a service happened to be up,
+    and on a runner with no resolver the DNS failure hangs rather than erroring fast. G1d asserts
+    the opposite extreme (nothing available) by injecting that instead.
+    """
+    options, _value, _notice = manager._gate_dataset_options_handler(model_key, dataset_value, generators=generators, models=models, dataset_types=dataset_types)
+    if options is dash.no_update:
+        return set()
+    return {opt["value"] for opt in options if not opt.get("disabled")}
+
+
+def _model_clear_is_offered(manager):
+    """Whether the shipped layout actually offers the model-clear control (N11 / OQ-N6).
+
+    Read from the layout for the same reason ``_dataset_dropdown_is_clearable`` is: it keeps the
+    BFS a description of what the UI admits, not a restatement of what this PR changed.
+    """
+    return any(getattr(c, "id", None) == "model-selection-clear" for c in _components(manager.app.layout))
+
+
+def _explore(manager, *, clearable=None, model_clearable=None, generators=ALL_AVAILABLE, models=MODELS, dataset_types=DATASET_TYPES, start=None):
+    """BFS the COMPOSED transition relation over the real handlers, from the mount state.
+
+    Transitions, each corresponding to a gesture the UI actually exposes:
+
+    1. choose any ENABLED dataset option — the dropdown does not re-gate, because the dataset
+       rides as ``State`` on the gate callback, so picking one cannot move the model;
+    2. clear the dataset to ``⊥``, only when the shipped dropdown is ``clearable``;
+    3. click any ENABLED model Select, which writes ``model-selection-store`` and therefore FIRES
+       the gate, which may CLEAR the dataset to ``⊥`` (OQ-6, canopy#652; it used to snap it to
+       ``enabled[0]``). Whatever the gate writes is applied here exactly as the callback applies
+       it — which is why this must run at handler level. Written over ``model_registry`` alone,
+       the same assertion goes green against the deadlocked code;
+    4. click "Clear model", which writes ``None`` to the same store and re-fires the same gate.
+
+    Transition 4 is why ``⊥`` had to be extended to the model axis. The design defined ``⊥`` on the
+    dataset axis only, so ``Reach ⊆ compatible ∪ {(m, ⊥)}`` has no term for a cleared MODEL and
+    would fail against the very affordance §4.11 ships.
+    """
+    if clearable is None:
+        clearable = _dataset_dropdown_is_clearable(manager)
+    if model_clearable is None:
+        model_clearable = _model_clear_is_offered(manager)
+    # The start is a MOUNT state, and the layout alone does not decide it. The dropdown mounts at
+    # ``⊥`` (OQ-N2, canopy#667); the mount hydration then writes ``model-state-store`` on every load,
+    # a failed read included, and that write runs the gate's first-paint pass (the gate has had no
+    # ``params-init-interval`` Input since canopy#662). The pass lands on the backend's dataset
+    # (G7), stays at ``⊥`` when the backend holds nothing, or falls back to ``DEFAULT_DATASET_TYPE``
+    # when the read failed (D-N10). The default start below is that fallback, sent through the same
+    # first-paint gate, so where the seeded dataset is unavailable G1d asserts about the state after
+    # the gate cleared it, not about a pre-gate snapshot.
+    #
+    # Measured 2026-09-23: with the clears the layout ships, every one of those mount states reaches
+    # the same set, so G1a and G1b do not depend on the start. The trap tests do. At ``⊥`` every
+    # model's Select is enabled, so with BOTH clears withheld a ``⊥`` start still reaches both
+    # components; only a start that already holds a dataset exhibits the deadlock G2 pins.
+    seed_model, seed_dataset = start if start is not None else (DEFAULT_MODEL_KEY, DEFAULT_DATASET_TYPE)
+    _options, mounted, _notice = manager._gate_dataset_options_handler(seed_model, seed_dataset, generators=generators, models=models, dataset_types=dataset_types)
+    start = (seed_model, seed_dataset if mounted is dash.no_update else mounted)
+    seen = {start}
+    queue = [start]
+    while queue:
+        model_key, dataset_value = queue.pop()
+        successors = {(model_key, ds) for ds in _pickable_datasets(manager, model_key, dataset_value, generators, models, dataset_types)}
+        if clearable:
+            successors.add((model_key, None))
+        if model_clearable:
+            # The clear writes None to the store, which re-fires the gate exactly as a Select does.
+            _options, gated, _notice = manager._gate_dataset_options_handler(None, dataset_value, generators=generators, models=models, dataset_types=dataset_types)
+            successors.add((None, dataset_value if gated is dash.no_update else gated))
+        for target in _selectable_models(manager, dataset_value, models, dataset_types):
+            _options, gated, _notice = manager._gate_dataset_options_handler(target, dataset_value, generators=generators, models=models, dataset_types=dataset_types)
+            successors.add((target, dataset_value if gated is dash.no_update else gated))
+        for state in successors:
+            if state not in seen:
+                seen.add(state)
+                queue.append(state)
+    return seen
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG1Reachability:
+    """G1a/G1b — every compatible pair reachable, and nothing invalid reachable."""
+
+    def test_g1a_every_compatible_and_available_pair_is_reachable(self, manager):
+        missing = {(m.key, d.value) for m in MODELS for d in compatible_datasets(m)} - _explore(manager)
+        assert not missing, f"compatible but unreachable: {sorted(missing)}"
+
+    def test_g1a_names_the_pair_this_arc_exists_for(self, manager):
+        # Kept separate from the set-difference case so a regression reports the SUBJECT.
+        assert ("recurrence", "equities_seq") in _explore(manager)
+
+    def test_g1b_no_reachable_state_is_invalid(self, manager):
+        # ``⊥`` must be admitted EXPLICITLY: it is not in compatible(), so a bare
+        # ``Reach ⊆ compatible`` would fail on this design's own change. The ``∪ {(m, ⊥)}`` term is
+        # the whole difference between "incomplete" and "invalid", and belongs in the assertion
+        # rather than only in the prose.
+        allowed = {(m.key, d.value) for m in MODELS for d in compatible_datasets(m)} | {(m.key, None) for m in MODELS}
+        # N11 extends ``⊥`` to the MODEL axis. A cleared model is incomplete, never invalid: no
+        # dataset can disagree with a model that has not been chosen, and Start is disabled there.
+        # Without these terms the assertion fails against §4.11's own affordance.
+        allowed |= {(None, d.value) for d in DATASET_TYPES} | {(None, None)}
+        invalid = _explore(manager) - allowed
+        assert not invalid, f"reachable but not compatible: {sorted(invalid)}"
+
+    def test_g2_the_deadlock_returns_only_when_BOTH_clears_are_withheld(self, manager):
+        # Ties G1a's pass to a mechanism rather than to coincidence. Withhold both clear
+        # affordances and the target pair is unreachable again: this is the deadlock, in-suite.
+        reach = _explore(manager, clearable=False, model_clearable=False)
+        assert ("recurrence", "equities_seq") not in reach
+        assert reach == {("cascor", d.value) for d in compatible_datasets(MODELS[0])}
+
+    @pytest.mark.parametrize(
+        "withheld,kept",
+        [
+            ({"clearable": False}, "the model clear"),
+            ({"model_clearable": False}, "the dataset ✕"),
+        ],
+    )
+    def test_g2_either_clear_alone_opens_the_graph(self, manager, withheld, kept):
+        # MEASURED, and contrary to how the design frames §4.11: the two affordances are not a fix
+        # plus a companion, they are TWO INDEPENDENT CUT VERTICES. Clearing the model ungates the
+        # dataset list, from which equities_seq can be picked directly and Recurrence then
+        # selected — reaching the target without ever touching the dataset ✕.
+        #
+        # Consequence worth keeping pinned: removing either one alone does NOT resurface the
+        # deadlock, so neither can be regression-tested by its own absence. Only the pair can.
+        assert ("recurrence", "equities_seq") in _explore(manager, **withheld), f"{kept} should still reach it"
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestX2RestartModalIsGatedAgainstTheSelectedModel:
+    """§4.5 (X2): the restart modal composes its dataset list as the sidebar does, against the model
+    actually SELECTED.
+
+    Every test that opened the modal passed the default model or none, so gating it against
+    ``DEFAULT_MODEL_KEY`` instead of the selected model passed the whole CI unit lane -- the
+    selection-design ship map's M6, reproduced 2026-09-23. These open it under every model.
+    """
+
+    @staticmethod
+    def _open(manager, model_key, dataset_type=None):
+        # No backend: the generators fetch reads "all available", and the param-seed read degrades
+        # to blank fields exactly as it does when the service is down.
+        with mock.patch.object(manager, "_fetch_generators", return_value=ALL_AVAILABLE), mock.patch("frontend.dashboard_manager.requests.get", side_effect=requests.RequestException("no backend")):
+            result = manager._open_restart_confirm_modal_handler(n_clicks=1, dataset_type=dataset_type, model_key=model_key)
+        options, value = result[5], result[6]
+        return {option["value"] for option in options if not option.get("disabled")}, value
+
+    @pytest.mark.parametrize("model", MODELS, ids=lambda model: model.key)
+    def test_the_modal_offers_what_the_sidebar_offers_for_the_selected_model(self, manager, model):
+        enabled, _value = self._open(manager, model.key)
+        assert enabled == _pickable_datasets(manager, model.key, None)
+        assert enabled == {spec.value for spec in compatible_datasets(model)}
+
+    def test_a_dataset_the_selected_model_cannot_use_is_swapped_within_that_model_s_list(self, manager):
+        # The swap itself is the owner-ruled OQ-6 exception (point 4 of §5.6.1 of juniper-ml's
+        # JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md). What this pins is
+        # WHICH list it swaps within: the selected model's, so a spiral carried over from a CasCor
+        # session lands on a dataset the LMU can train.
+        enabled, value = self._open(manager, "recurrence", dataset_type="spirals")
+        assert value != "spirals"
+        assert value in enabled
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG6StartRequiresACompleteSelection:
+    """G6 / X5 — Start is disabled at ``⊥`` on EITHER axis."""
+
+    @staticmethod
+    def _appearance(manager, model_key, dataset_value):
+        states = {"start": {"disabled": False, "loading": False, "timestamp": 0}}
+        return manager._update_button_appearance_handler(button_states=states, model_key=model_key, dataset_value=dataset_value)
+
+    def test_a_complete_selection_leaves_start_enabled(self, manager):
+        assert self._appearance(manager, "cascor", "spirals")[0] is False
+
+    @pytest.mark.parametrize("empty", [None, ""])
+    def test_start_is_disabled_with_no_dataset(self, manager, empty):
+        # Before the ✕ this state could not exist. Now it can, and an unguarded cascor start would
+        # train on whatever was LAST STAGED while the sidebar showed no dataset.
+        assert self._appearance(manager, "cascor", empty)[0] is True
+
+    @pytest.mark.parametrize("empty", [None, ""])
+    def test_start_is_disabled_with_no_model(self, manager, empty):
+        # ``model_is_trainable(None)`` answers True by design, so the model axis needs its own
+        # check — otherwise the "clear model / show all" affordance ships an ungated Start.
+        assert self._appearance(manager, empty, "spirals")[0] is True
+
+    def test_apply_dataset_is_disabled_exactly_when_the_dataset_is_unset(self, manager):
+        assert self._appearance(manager, "cascor", "spirals")[-1] is False
+        assert self._appearance(manager, "cascor", None)[-1] is True
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestCommitPathsAreGuarded:
+    """Every path that could COMMIT a ``⊥`` refuses it — and none of them was merely vacuous."""
+
+    def test_apply_dataset_refuses_and_does_not_post(self, manager):
+        with mock.patch("frontend.dashboard_manager.requests.post") as post:
+            banner, alert = manager._apply_dataset_handler(1, None, 100, 0.1, 2.0, 2)
+        # An empty body is not a no-op: cascor documents it as clearing any prior staging, so this
+        # click used to DISCARD a dataset change the operator had already staged.
+        post.assert_not_called()
+        assert banner is False
+        assert alert is not None
+
+    def test_restage_refuses_and_does_not_post(self, manager):
+        with mock.patch("frontend.dashboard_manager.requests.post") as post:
+            ok, detail = manager._restage_dataset({"dataset_type": None, "n_samples": 100})
+        post.assert_not_called()
+        assert ok is False
+        assert "No dataset" in detail
+
+    def test_live_swap_refuses_and_does_not_post(self, manager):
+        # The most expensive path: the backend's live swap stops the training future and discards
+        # in-flight candidates, so an unguarded empty body destroys a running experiment — and
+        # rendered "Live dataset swap complete." while doing it.
+        with mock.patch("frontend.dashboard_manager.requests.post") as post:
+            modal, _progress, alert, in_flight = manager._accept_live_switch_handler(1, None, 100, 0.1, 2, 2.0)
+        post.assert_not_called()
+        assert modal is False and in_flight is False
+        assert alert is not None
+
+    def test_the_live_swap_confirmation_names_the_missing_dataset(self, manager):
+        # N4: name the consequence at the locus. The row used to be skipped like any other absent
+        # field, so the user confirmed a swap whose target was unset without being told.
+        _is_open, rows = manager._open_live_switch_modal_handler(1, None, 100, 0.1, 2, 2.0)
+        assert "none selected" in " ".join(str(row) for row in rows)
+
+
+# ---------------------------------------------------------------------------
+# G8 / Y9 — the model axis clears, ungates its peer, and stops overclaiming
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG8ClearedModelUngatesTheDataset:
+    """G8 — a cleared model renders ungated dataset options, not ``no_update``."""
+
+    def test_the_clear_control_exists_in_the_layout(self, manager):
+        # §5.5's second affordance was specified at canopy#394, deferred on a premise that #397
+        # falsified 13 hours later, and never revisited. Pin its existence.
+        assert _model_clear_is_offered(manager)
+
+    @pytest.mark.parametrize("empty", [None, ""])
+    def test_a_cleared_model_ungates_every_compatible_dataset(self, manager, empty):
+        options, _value, _notice = manager._gate_dataset_options_handler(empty, "spirals", generators=[])
+        assert options is not dash.no_update
+        enabled = {o["value"] for o in options if not o.get("disabled")}
+        # Ungated means the union of both models' datasets is offered — in particular the one the
+        # deadlock hid, which no single model's gate would enable alongside the others.
+        assert "equities_seq" in enabled
+        assert "spirals" in enabled
+
+    def test_clearing_the_model_keeps_the_dataset(self, manager):
+        # §5.6's dataset-primary conflict policy, expressible for the first time now that BOTH
+        # axes can be cleared.
+        _options, value, _notice = manager._gate_dataset_options_handler(None, "equities_seq", generators=[])
+        assert value is dash.no_update
+
+    def test_the_clear_writes_none_and_does_not_post(self, manager):
+        # Clearing is a statement about the UI's filter, not a request to change the live backend,
+        # and there is no "no model" for /api/model/select to select.
+        with mock.patch("frontend.dashboard_manager.requests.post") as post:
+            store, model_class, summary, is_open, state = manager._select_model_from_table_handler([], "model-selection-clear", 1)
+        post.assert_not_called()
+        assert store is None
+        assert model_class is dash.no_update
+        assert is_open is False
+        assert "No model selected" in summary
+        # N5: no selection has round-tripped, so the payload store is unknown, not stale.
+        assert state is None
+
+    def test_the_clear_is_inert_before_it_is_clicked(self, manager):
+        # The button is in the DOM from first paint; its callback must not fire on the no-click.
+        assert manager._select_model_from_table_handler([], "model-selection-clear", None) == (dash.no_update,) * 5
+
+    def test_start_stays_disabled_at_a_cleared_model(self, manager):
+        # The ungated-Start hole that §4.11 would otherwise have shipped. Pinned here, at the
+        # affordance that opens it, as well as in the G6 suite.
+        states = {"start": {"disabled": False, "loading": False, "timestamp": 0}}
+        assert manager._update_button_appearance_handler(button_states=states, model_key=None, dataset_value="spirals")[0] is True
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestY9ModelTableDoesNotOverclaimAtBottom:
+    """Y9 — at ``⊥`` the table must not report every model as compatible."""
+
+    def test_no_row_claims_compatibility_without_a_dataset(self, manager):
+        rendered = " ".join(str(c) for c in _components(manager._build_model_selection_table(None, "cascor")))
+        assert "✓ compatible" not in rendered
+
+    def test_each_row_states_what_it_would_require(self, manager):
+        rendered = " ".join(str(c) for c in _components(manager._build_model_selection_table(None, "cascor")))
+        # The requirement is stated per model, from the registry, not hard-coded here.
+        for model in MODELS:
+            assert model_requirement(model) in rendered
+
+    def test_every_select_stays_enabled_without_a_dataset(self, manager):
+        # THE guard on the Y9 fix. ``⊥`` is compatible with every model — that is what makes it the
+        # cut vertex — so correcting the CLAIM must not re-disable the control. Re-disabling here
+        # would silently restore the deadlock while the compatibility cell read honestly.
+        assert _selectable_models(manager, None) == {model.key for model in MODELS}
+
+    def test_a_real_dataset_still_reports_compatibility_normally(self, manager):
+        rendered = " ".join(str(c) for c in _components(manager._build_model_selection_table("spirals", "cascor")))
+        assert "✓ compatible" in rendered
+
+
+# ---------------------------------------------------------------------------
+# G3 / G1d — the empty compatible ∩ available set, and the notices
+# ---------------------------------------------------------------------------
+
+
+def _alert_text(component):
+    """Flatten an alert component tree to its rendered text."""
+    return " ".join(str(c) for c in _components(component))
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG3EmptySetRecovery:
+    """G3 — an empty compatible ∩ available set renders a recovery state, never ``no_update``."""
+
+    def test_the_empty_set_clears_the_dataset_instead_of_parking_on_it(self, manager):
+        # The old code returned ``no_update`` here, so the dropdown kept showing a dataset its OWN
+        # list disables — a committed state the gate had already judged unusable.
+        _options, value, notice = manager._gate_dataset_options_handler("recurrence", "equities_seq", generators=NONE_AVAILABLE)
+        assert value is None
+        assert notice is not None
+
+    def test_the_empty_set_notice_is_persistent_not_transient(self, manager):
+        # N12: "persistent until resolved" applies to THIS event and only this one. A duration
+        # would auto-dismiss a blocking state the operator has not resolved.
+        _options, _value, notice = manager._gate_dataset_options_handler("recurrence", "equities_seq", generators=NONE_AVAILABLE)
+        assert getattr(notice, "duration", None) is None
+        assert "No dataset is available" in _alert_text(notice)
+
+    def test_the_empty_set_notice_names_the_model_and_the_remedy(self, manager):
+        _options, _value, notice = manager._gate_dataset_options_handler("recurrence", "equities_seq", generators=NONE_AVAILABLE)
+        text = _alert_text(notice)
+        assert "Recurrence (LMU)" in text
+        assert "juniper-data" in text
+
+    def test_clearing_the_dataset_here_disables_start_and_apply(self, manager):
+        # The recovery state must not merely be legible; it must be safe. Clearing to ⊥ reaches the
+        # gates that already exist rather than adding a third one.
+        _options, value, _notice = manager._gate_dataset_options_handler("recurrence", "equities_seq", generators=NONE_AVAILABLE)
+        states = {"start": {"disabled": False, "loading": False, "timestamp": 0}}
+        appearance = manager._update_button_appearance_handler(button_states=states, model_key="recurrence", dataset_value=value)
+        assert appearance[0] is True
+        assert appearance[-1] is True
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestDatasetRepairNotice:
+    """§4.3 / D5 — the notice the conflict resolution was always specified to render.
+
+    Updated 2026-09-22 for OQ-6's ratification: **model-primary, resolved by CLEARING.** These
+    tests previously asserted the snap (``value == "multi_sine"``), and they were not wrong at
+    the time — they ratified the shipped behaviour. §5.6's two candidate policies both resolve
+    by clearing, and neither was implementable while the axes were un-clearable (N7); the snap
+    was that workaround. Changed rather than deleted, because the NOTICE's contract survives
+    the policy change intact.
+    """
+
+    def test_a_cleared_gate_names_what_was_dropped_and_why(self, manager):
+        _options, value, notice = manager._gate_dataset_options_handler("recurrence", "spirals", generators=ALL_AVAILABLE)
+        # The dataset is cleared to ⊥, not replaced. Start and Apply are already disabled there
+        # (``selection_axis_unset``), so the operator chooses deliberately from the gated list.
+        assert value is None, "OQ-6 resolves a conflict by clearing the dataset, not by choosing one for the operator"
+        text = _alert_text(notice)
+        # "The dataset changed" without saying WHAT was dropped and WHY is an alarm, not a notice.
+        assert "Spirals" in text
+        assert "Recurrence (LMU)" in text
+        # And it must not name a replacement it did not make.
+        assert "Multi-Sine (sequence)" not in text
+
+    def test_the_cleared_notice_is_transient(self, manager):
+        # N12's other half: a resolved conflict is informational — there is nothing to fix.
+        # (Contrast the EMPTY-SET notice, which is persistent because it IS blocking.)
+        _options, _value, notice = manager._gate_dataset_options_handler("recurrence", "spirals", generators=ALL_AVAILABLE)
+        assert getattr(notice, "duration", None) is not None
+        assert notice.dismissable is True
+
+    def test_clearing_is_distinguishable_from_the_empty_set(self, manager):
+        """Both branches now return ``None`` — the NOTICE is what tells them apart.
+
+        Before OQ-6 only the empty-set branch cleared, so the returned value alone identified
+        it. Now a conflict clears too, and an operator who cannot tell "pick another dataset"
+        from "this deployment has none" has been given the same screen for two different
+        problems.
+        """
+        _o, conflict_value, conflict_notice = manager._gate_dataset_options_handler("recurrence", "spirals", generators=ALL_AVAILABLE)
+        _o, empty_value, empty_notice = manager._gate_dataset_options_handler("recurrence", "spirals", generators=NONE_AVAILABLE)
+        assert conflict_value is None and empty_value is None
+        assert conflict_notice.id != empty_notice.id, "the two states must be separately identifiable in the DOM"
+        # The blocking one persists; the informational one does not.
+        assert getattr(empty_notice, "duration", None) is None
+        assert getattr(conflict_notice, "duration", None) is not None
+
+    def test_no_notice_when_the_gate_changes_nothing(self, manager):
+        # And it must CLEAR a stale one rather than leaving the last repair on screen forever.
+        _options, value, notice = manager._gate_dataset_options_handler("cascor", "spirals", generators=ALL_AVAILABLE)
+        assert value is dash.no_update
+        assert notice is None
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG1dNothingAvailable:
+    """G1d — with nothing available, assert the RECOVERY state, not reachability.
+
+    The design filed G1d under "must pass after" with a reachability assertion, which is
+    unsatisfiable: with no dataset available there is nothing to reach. It asserts §4.7 instead.
+    """
+
+    def test_no_pair_is_reachable_and_that_is_correct(self, manager):
+        reach = _explore(manager, generators=NONE_AVAILABLE)
+        # Every reachable state is incomplete on the dataset axis — there is no available dataset
+        # to complete it with. This is a vacuous pass FOR REACHABILITY and a real assertion about ⊥.
+        assert all(dataset is None for _model, dataset in reach), sorted(map(repr, reach))
+
+    def test_i_safe_still_holds_with_nothing_available(self, manager):
+        # G1b's assertion must survive the degenerate case: incomplete, never invalid.
+        allowed = {(m.key, None) for m in MODELS} | {(None, None)}
+        assert _explore(manager, generators=NONE_AVAILABLE) - allowed == set()
+
+    def test_every_model_still_reports_the_recovery_state(self, manager):
+        for model in MODELS:
+            _options, value, notice = manager._gate_dataset_options_handler(model.key, DEFAULT_DATASET_TYPE, generators=NONE_AVAILABLE)
+            assert value is None, model.key
+            assert notice is not None, model.key
+
+
+# ---------------------------------------------------------------------------
+# G1c — the invariants over a synthetic >=3-component registry
+# ---------------------------------------------------------------------------
+
+# Three models over four datasets, partitioned into THREE components by rank and task. The shipped
+# registry has exactly two, so the Confinement Lemma's reach is only ever exercised at n=2 there —
+# and a fix that happened to work for two components could pass every other guardrail while leaving
+# a three-component registry trapped. §12.2 argues the seeded expansion keeps the component count
+# at two; this is the case that argument does NOT cover.
+SYNTH_MODELS = (
+    ModelSpec(key="m_flat", label="Flat", category="c", input_ndim=frozenset({2}), supported_task_types=frozenset({"classification"}), family="f", status="live", provider="in-process", description=""),
+    ModelSpec(key="m_seq", label="Seq", category="c", input_ndim=frozenset({3}), supported_task_types=frozenset({"regression"}), family="f", status="live", provider="in-process", description=""),
+    ModelSpec(key="m_vol", label="Vol", category="c", input_ndim=frozenset({4}), supported_task_types=frozenset({"regression"}), family="f", status="live", provider="in-process", description=""),
+)
+SYNTH_DATASETS = (
+    DatasetTypeSpec(value="d_flat_a", label="Flat A", task_type="classification", ndim=2),
+    DatasetTypeSpec(value="d_flat_b", label="Flat B", task_type="classification", ndim=2),
+    DatasetTypeSpec(value="d_seq", label="Seq", task_type="regression", ndim=3),
+    DatasetTypeSpec(value="d_vol", label="Vol", task_type="regression", ndim=4),
+)
+SYNTH_START = ("m_flat", "d_flat_a")
+
+
+def _synth_explore(manager, **kwargs):
+    return _explore(manager, models=SYNTH_MODELS, dataset_types=SYNTH_DATASETS, start=SYNTH_START, **kwargs)
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG1cThreeComponents:
+    """G1c — I-cover and I-safe over a registry with three disjoint components."""
+
+    def test_the_fixture_really_has_three_components(self, manager):
+        # Guard the guard. If a future edit collapses these into two, G1c silently stops testing
+        # the thing it exists for while still passing.
+        pairs = {(m.key, d.value) for m in SYNTH_MODELS for d in SYNTH_DATASETS if compatible(d, m)}
+        by_model = {m.key: {d for mk, d in pairs if mk == m.key} for m in SYNTH_MODELS}
+        assert by_model["m_flat"] == {"d_flat_a", "d_flat_b"}
+        assert by_model["m_seq"] == {"d_seq"}
+        assert by_model["m_vol"] == {"d_vol"}
+        # Disjoint: no dataset accepts two models.
+        assert len({d for ds in by_model.values() for d in ds}) == 4
+
+    def test_g1c_every_compatible_pair_is_reachable(self, manager):
+        reach = _synth_explore(manager)
+        compatible_pairs = {(m.key, d.value) for m in SYNTH_MODELS for d in SYNTH_DATASETS if compatible(d, m)}
+        assert not compatible_pairs - reach, f"unreachable: {sorted(compatible_pairs - reach)}"
+
+    def test_g1c_no_reachable_state_is_invalid(self, manager):
+        allowed = {(m.key, d.value) for m in SYNTH_MODELS for d in SYNTH_DATASETS if compatible(d, m)}
+        allowed |= {(m.key, None) for m in SYNTH_MODELS} | {(None, d.value) for d in SYNTH_DATASETS} | {(None, None)}
+        assert not _synth_explore(manager) - allowed
+
+    def test_g1c_is_the_case_the_shipped_registry_cannot_produce(self, manager):
+        # Without BOTH clears, a three-component registry strands TWO components, not one — which
+        # is the whole reason a synthetic case is needed: the shipped two-component registry can
+        # only ever strand one, so it cannot distinguish a fix that generalises from one that does
+        # not.
+        trapped = _synth_explore(manager, clearable=False, model_clearable=False)
+        assert trapped == {("m_flat", "d_flat_a"), ("m_flat", "d_flat_b")}
+        stranded = {("m_seq", "d_seq"), ("m_vol", "d_vol")}
+        assert not (trapped & stranded)
+
+
+# ---------------------------------------------------------------------------
+# N5 — Start requires the selected model to be the one that would RUN
+# ---------------------------------------------------------------------------
+#
+# G5 (above) made the sidebar tell the truth about ``X1_PAYLOAD``; nothing stopped the run. The
+# Start gate read ``model_is_trainable`` (registry lifecycle, "live" for both shipped models) plus
+# both axes being set, and ``(recurrence, equities_seq)`` passes every one of those -- so with
+# ``recurrence_service_url`` unset a user selected Recurrence, read "NOT ACTIVE", pressed Start,
+# and got a cascor/demo run filed under Recurrence (LMU). Handoff item 1; design N5 / §4.4.
+
+# The healthy no-op re-select: ``swapped`` is False here too. Any predicate that disables Start on
+# this payload has re-introduced the false positive G5's ``test_noop_reselect...`` guards.
+LIVE_RESELECT_PAYLOAD = {"nn_model": "cascor", "backend": "demo", "execution": "continuous", "status": "live", "swapped": False}
+RECURRENCE_LIVE_PAYLOAD = {"nn_model": "recurrence", "backend": "recurrence", "execution": "one_shot", "status": "live", "swapped": True}
+
+
+def _text_of(component):
+    """Concatenate every string reachable through ``.children`` of a Dash component tree."""
+    if component is None:
+        return ""
+    if isinstance(component, str):
+        return component
+    if isinstance(component, (list, tuple)):
+        return "".join(_text_of(child) for child in component)
+    return _text_of(getattr(component, "children", None))
+
+
+def _callback_writing(manager, output_ref):
+    """The single ``callback_map`` entry whose output key mentions ``output_ref`` (``"<id>.<prop>"``)."""
+    keys = [key for key in manager.app.callback_map if output_ref in key]
+    assert len(keys) == 1, f"expected exactly one writer of {output_ref!r}, found {keys}"
+    return keys[0], manager.app.callback_map[keys[0]]
+
+
+def _string_input_ids(callback_info):
+    return {entry.get("id") for entry in callback_info.get("inputs", []) if isinstance(entry.get("id"), str)}
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestN5StartRequiresBackendAgreement:
+    """N5 — a model that is selected but not ACTIVE must not be startable: the gate, not the label."""
+
+    @staticmethod
+    def _appearance(manager, model_key, dataset_value, model_state):
+        states = {"start": {"disabled": False, "loading": False, "timestamp": 0}}
+        return manager._update_button_appearance_handler(button_states=states, model_key=model_key, dataset_value=dataset_value, model_state=model_state)
+
+    def test_the_predicate_is_provider_agreement_over_the_real_backend_domain(self):
+        # The full truth table over {"service", "demo", "recurrence"} -- no "cascor".
+        assert selection_is_live("recurrence", "demo") is False
+        assert selection_is_live("recurrence", "service") is False
+        assert selection_is_live("recurrence", "recurrence") is True
+        assert selection_is_live("cascor", "demo") is True
+        assert selection_is_live("cascor", "service") is True
+        assert selection_is_live("cascor", "recurrence") is False
+
+    def test_unknown_on_either_side_is_not_disagreement(self):
+        assert selection_is_live("cascor", None) is None
+        assert selection_is_live("cascor", "") is None
+        assert selection_is_live(None, "demo") is None
+        assert selection_is_live("", "demo") is None
+
+    def test_the_sidebar_and_the_gate_share_the_predicate(self):
+        # canopy#592 fixed the label with a private predicate the gate never saw. The summary now
+        # delegates to the registry function, so the two cannot answer differently again.
+        assert DashboardManager._selection_is_live(X1_PAYLOAD) is False
+        assert DashboardManager._selection_is_live(LIVE_RESELECT_PAYLOAD) is True
+        assert DashboardManager._selection_is_live(None) is None
+        assert DashboardManager.RECURRENCE_BACKEND_TYPE == "recurrence"
+
+    def test_start_is_disabled_for_a_selected_but_inactive_model(self, manager):
+        # THE defect. (recurrence, equities_seq) is complete, compatible and lifecycle-live --
+        # every gate that existed passes -- and the backend that would run is demo.
+        assert self._appearance(manager, "recurrence", "equities_seq", X1_PAYLOAD)[0] is True
+
+    def test_start_stays_enabled_on_the_noop_reselect(self, manager):
+        # The false-positive guard: ``swapped`` is False here as well.
+        assert self._appearance(manager, "cascor", "spirals", LIVE_RESELECT_PAYLOAD)[0] is False
+
+    def test_start_is_enabled_when_the_recurrence_backend_really_runs(self, manager):
+        assert self._appearance(manager, "recurrence", "equities_seq", RECURRENCE_LIVE_PAYLOAD)[0] is False
+
+    def test_first_paint_is_unknown_and_stays_enabled(self, manager):
+        # Nothing has round-tripped; the boot backend serves the default model by construction.
+        assert self._appearance(manager, "cascor", "spirals", None)[0] is False
+
+    def test_the_other_controls_are_untouched(self, manager):
+        out = self._appearance(manager, "recurrence", "equities_seq", X1_PAYLOAD)
+        assert out[0] is True
+        # pause / stop / resume / reset follow button-states untouched.
+        assert (out[2], out[4], out[6], out[8]) == (False, False, False, False)
+        # Apply Dataset follows the same gate as Start since the staging fix (X6 / §4.9): staging
+        # toward a backend the selection does not target is exactly how a rank-3 dataset reached
+        # cascor. Pinned in full in test_recurrence_staging.py.
+        assert out[-1] is True
+
+    def test_the_notice_names_the_model_the_backend_and_the_consequence(self):
+        notice = DashboardManager._train_gate_notice_handler("recurrence", model_state=X1_PAYLOAD)
+        assert notice is not None
+        text = _text_of(notice)
+        assert "Recurrence (LMU)" in text
+        assert "demo" in text
+        assert "Start and Apply Dataset are disabled" in text
+        assert "filed under Recurrence (LMU)" in text
+
+    def test_the_notice_is_hidden_while_the_two_agree(self):
+        assert DashboardManager._train_gate_notice_handler("cascor", model_state=LIVE_RESELECT_PAYLOAD) is None
+        assert DashboardManager._train_gate_notice_handler("recurrence", model_state=RECURRENCE_LIVE_PAYLOAD) is None
+        assert DashboardManager._train_gate_notice_handler("cascor", model_state=None) is None
+        assert DashboardManager._train_gate_notice_handler("cascor") is None
+
+    def test_the_select_handler_mirrors_the_whole_payload(self, manager):
+        with mock.patch("frontend.dashboard_manager.requests.post") as post:
+            post.return_value = mock.Mock(ok=True, json=lambda: dict(X1_PAYLOAD))
+            store, model_class, summary, state = manager._select_model_handler("recurrence")
+        assert store == "recurrence"
+        assert state == X1_PAYLOAD
+        assert "NOT ACTIVE" in summary
+
+    def test_the_state_store_has_one_writer_and_it_is_the_selection_writer(self, manager):
+        # The duplicate-writer hazard N11 names: the key and the payload must come from the same
+        # callback, or a stale payload could gate a fresh key (or the reverse).
+        key, _info = _callback_writing(manager, "model-state-store.data")
+        assert "model-selection-store.data" in key
+
+    def test_both_gate_callbacks_read_the_state_store_as_an_input(self, manager):
+        # An Input, not a State: State does not trigger, so the gate would be real in the handler
+        # and absent in the UI (the X5 lesson on the dataset axis).
+        _key, start_gate = _callback_writing(manager, "start-button.disabled")
+        assert {"model-selection-store", "model-state-store", "nn-dataset-type-dropdown"} <= _string_input_ids(start_gate)
+        _key, notice = _callback_writing(manager, "train-gate-notice.children")
+        assert {"model-selection-store", "model-state-store"} <= _string_input_ids(notice)
+
+    def test_the_store_is_seeded_unknown(self, manager):
+        stores = [c for c in _components(manager.app.layout) if getattr(c, "id", None) == "model-state-store"]
+        assert len(stores) == 1
+        assert stores[0].data is None
+        assert stores[0].storage_type == "memory"
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestN5TheServerRefusesAnInactiveSelection:
+    """The gate is at the control; this is what stops the run when anything else sends it.
+
+    Both transports the Start button uses (REST fallback and ``/ws/control``), plus the restart
+    orchestration the dataset modal uses, and ``curl``. The condition is recorded on the server
+    exactly as the D-8 tests record it: Recurrence selected over the demo backend with no service
+    URL, which ``/api/model/select`` accepts with 200.
+    """
+
+    @pytest.fixture
+    def demo_over_recurrence(self, monkeypatch):
+        with TestClient(main.app) as client:
+            monkeypatch.setattr(main.settings, "recurrence_service_url", None, raising=False)
+            fake = mock.MagicMock()
+            fake.backend_type = "demo"
+            fake.execution = "continuous"
+            fake.is_training_active.return_value = False
+            fake.start_training.return_value = {"ok": True}
+            fake.stop_training.return_value = {"ok": True}
+            monkeypatch.setattr(main, "backend", fake, raising=False)
+            monkeypatch.setattr(main, "current_nn_model", None, raising=False)
+            resp = client.post("/api/model/select", json={"nn_model": "recurrence"})
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["swapped"] is False and resp.json()["backend"] == "demo"
+            yield client, fake
+            # Hand the real backend back before the lifespan shuts it down.
+            monkeypatch.undo()
+
+    def test_rest_start_is_refused_and_nothing_starts(self, demo_over_recurrence):
+        client, fake = demo_over_recurrence
+        resp = client.post("/api/train/start")
+        assert resp.status_code == 409, resp.text
+        detail = resp.json()["detail"]
+        assert "Recurrence (LMU)" in detail
+        assert "demo" in detail
+        fake.start_training.assert_not_called()
+
+    def test_restart_is_refused_before_anything_is_stopped(self, demo_over_recurrence):
+        client, fake = demo_over_recurrence
+        fake.is_training_active.return_value = True
+        resp = client.post("/api/train/restart", json={"start_fresh": True, "reset": True})
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["success"] is False
+        assert body["was_active"] is True  # reported truthfully...
+        fake.stop_training.assert_not_called()  # ...and NOT acted on
+        fake.start_training.assert_not_called()
+        assert [step["step"] for step in body["steps"]] == ["start"]
+        assert "demo" in body["message"]
+
+    def test_ws_start_is_refused_with_an_error_envelope(self, demo_over_recurrence):
+        client, fake = demo_over_recurrence
+        with client.websocket_connect("/ws/control") as websocket:
+            assert websocket.receive_json().get("type") == "connection_established"
+            websocket.send_json({"command": "start", "command_id": "n5-1", "reset": True})
+            for _ in range(100):
+                response = websocket.receive_json()
+                if response.get("type") == "command_response":
+                    break
+            else:
+                raise AssertionError("no command_response")
+        assert response["data"]["status"] == "error"
+        assert response["data"]["command_id"] == "n5-1"
+        assert "demo" in response["data"]["error"]
+        assert response["ok"] is False
+        fake.start_training.assert_not_called()
+
+    def test_a_live_selection_still_starts(self, demo_over_recurrence):
+        # The false-positive guard at the server: re-selecting cascor over demo is a no-op swap
+        # (``swapped`` False) and must start normally.
+        client, fake = demo_over_recurrence
+        assert client.post("/api/model/select", json={"nn_model": "cascor"}).status_code == 200
+        resp = client.post("/api/train/start")
+        assert resp.status_code == 200, resp.text
+        fake.start_training.assert_called_once()
+
+    def test_nothing_selected_yet_is_not_a_refusal(self, monkeypatch):
+        fake = mock.MagicMock()
+        fake.backend_type = "demo"
+        monkeypatch.setattr(main, "backend", fake, raising=False)
+        monkeypatch.setattr(main, "current_nn_model", None, raising=False)
+        assert main._selection_inactive_reason() is None
+        monkeypatch.setattr(main, "current_nn_model", "cascor", raising=False)
+        assert main._selection_inactive_reason() is None
+        monkeypatch.setattr(main, "current_nn_model", "recurrence", raising=False)
+        reason = main._selection_inactive_reason()
+        assert reason is not None and "demo" in reason and "Recurrence (LMU)" in reason
+
+    def test_the_selection_does_not_leak_into_the_next_test(self):
+        # conftest resets ``main.current_nn_model`` between tests; without that, the two D-8 tests
+        # that select Recurrence over demo would 409 every later ``/api/train/start``.
+        assert main.current_nn_model is None
+
+
+# ---------------------------------------------------------------------------
+# G7 + Y3 — the mount state IS the backend's state (§4.10, design PR 2)
+# ---------------------------------------------------------------------------
+#
+# Before PR 2 the selection had no read side on EITHER axis. ``model-selection-store`` is
+# memory-scoped and seeded ``DEFAULT_MODEL_KEY``; ``current_nn_model`` lives in the server; the
+# dataset dropdown's value is its layout default. So every reload showed the seed over whatever
+# the backend held -- *"Active: CasCor"* over a Recurrence selection the server refuses to start
+# (Y3), and ``spirals`` over whatever dataset cascor had staged or loaded (X1's dataset sibling).
+#
+# G7 (design §5): "the mount dataset value equals the backend's staged dataset". Y3 had NO
+# guardrail in the design's table at all -- G7 compares a dataset against a dataset and no Y3
+# defect can make it fail -- so ``TestY3TheModelAxisHasAReadSide`` is that missing guardrail.
+#
+# Both drive the REGISTERED callbacks in their real argument order (``_mount``). A handler-only
+# test passes with the wiring wrong, and the wiring is exactly what changed: the gate lost its
+# ``params-init-interval`` Input so its first-paint pass cannot race the hydration.
+
+
+def _registered(manager, name):
+    """The raw function Dash registered as callback ``name`` -- the wiring, not just the handler."""
+    found = []
+    for entry in manager.app.callback_map.values():
+        fn = entry.get("callback")
+        raw = getattr(fn, "__wrapped__", fn)
+        if getattr(raw, "__name__", None) == name:
+            found.append(raw)
+    assert len(found) == 1, f"expected one callback named {name!r}, found {len(found)}"
+    return found[0]
+
+
+def _mount(manager, selection_payload, *, seed_dataset=None, generators=ALL_AVAILABLE):
+    """Replay the browser's mount: ``select_model``'s hydration pass, then the gate pass it triggers.
+
+    ``GET /api/selection`` answers ``selection_payload``; ``None`` makes the read fail. Returns
+    ``(model_store, summary, model_state, dataset_value, notice)``, where ``dataset_value`` is what
+    the dropdown shows afterwards (the seed when the gate wrote nothing).
+    """
+    select_model = _registered(manager, "select_model")
+    gate = _registered(manager, "gate_dataset_options")
+    ctx = mock.MagicMock()
+    ctx.triggered_id = "params-init-interval"
+    if selection_payload is None:
+        get = mock.patch("frontend.dashboard_manager.requests.get", side_effect=ConnectionError("canopy restarting"))
+    else:
+        get = mock.patch("frontend.dashboard_manager.requests.get", return_value=mock.Mock(ok=True, status_code=200, json=lambda: dict(selection_payload)))
+    with get, mock.patch.object(dash, "callback_context", ctx):
+        store, model_class, summary, is_open, state = select_model([], None, 1)
+    # The mount pass must never touch the modal or the model class (``hydrate_model_class`` owns
+    # the latter at mount; a second write rebuilds the tab bar, F-CANOPY-027).
+    assert model_class is dash.no_update and is_open is dash.no_update
+    manager._fetch_generators = lambda: generators
+    options, value, notice = gate(store, seed_dataset, state)
+    return store, summary, state, (seed_dataset if value is dash.no_update else value), notice
+
+
+def _selection(nn_model, backend, *, value, source, execution="continuous", selected=True):
+    """A ``GET /api/selection`` payload, shaped as ``main.api_selection`` builds it."""
+    return {
+        "nn_model": nn_model,
+        "backend": backend,
+        "execution": execution,
+        "status": "live",
+        "swapped": False,
+        "selected": selected,
+        "dataset": {"value": value, "source": source, "generator": value},
+    }
+
+
+class _FitRecorder:
+    """Stand-in for ``RecurrenceServiceAdapter``: records the fit, touches no network."""
+
+    service_url = "http://rec.test:8210"
+
+    def train(self, **kwargs):
+        from backend.recurrence_service_adapter import RecurrenceTrainResult
+
+        return RecurrenceTrainResult(final_metrics={"r2": 0.9, "mse": 0.1, "loss": 0.1}, n_epochs=1, stopped_reason="fit_complete", dataset={"name": kwargs.get("generator")})
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG7MountDatasetIsTheBackendsDataset:
+    """G7 — the dataset the dropdown shows after a reload is the one the backend holds."""
+
+    def test_a_loaded_dataset_is_the_mount_value(self, manager):
+        _store, _summary, _state, dataset, notice = _mount(manager, _selection("cascor", "service", value="circles", source="loaded"))
+        assert dataset == "circles"  # not the seed, spirals
+        assert notice is None
+
+    def test_a_pending_dataset_is_the_mount_value(self, manager):
+        payload = _selection("recurrence", "recurrence", value="mackey_glass", source="pending", execution="one_shot")
+        store, _summary, _state, dataset, _notice = _mount(manager, payload)
+        assert store == "recurrence"
+        assert dataset == "mackey_glass"
+
+    def test_the_hydrated_dataset_is_gated_against_the_HYDRATED_model(self, manager):
+        # Recurrence selected over a cascor backend that holds spirals. Against the SEED model
+        # (cascor) spirals is compatible and would survive; against the hydrated model it is not.
+        # Gating it against the seed is exactly the race the removed interval Input allowed.
+        payload = _selection("recurrence", "service", value="spirals", source="loaded")
+        store, _summary, _state, dataset, notice = _mount(manager, payload)
+        assert store == "recurrence"
+        assert dataset is None  # OQ-6: a conflict clears
+        assert "Spirals" in _text_of(notice) and "Recurrence (LMU)" in _text_of(notice)
+
+    def test_a_backend_holding_nothing_mounts_at_bottom(self, manager):
+        # G7's other half, and OQ-N2 itself: with nothing staged or loaded, the backend's dataset
+        # IS ``⊥`` -- so the mount is ``⊥``, and the first interaction is an explicit choice.
+        _store, _summary, _state, dataset, notice = _mount(manager, _selection("cascor", "service", value=None, source="none"))
+        assert dataset is None
+        assert notice is None  # nothing happened that needs saying
+
+    def test_a_dataset_canopy_cannot_name_mounts_at_bottom_and_says_what_it_is(self, manager):
+        # ``⊥`` because the dropdown cannot show it, but NOT silently: a silent ``⊥`` over a busy
+        # backend reads as "nothing is loaded".
+        payload = {**_selection("cascor", "service", value=None, source="loaded"), "dataset": {"value": None, "source": "loaded", "generator": "arc_agi"}}
+        _store, _summary, _state, dataset, notice = _mount(manager, payload)
+        assert dataset is None
+        assert notice is not None and notice.id == "dataset-gate-unnameable-alert"
+        assert "arc_agi" in _text_of(notice)
+
+    def test_a_backend_that_cannot_say_falls_back_to_the_old_default(self, manager):
+        # D-N10: ``⊥`` over a backend that may be staged and ready would disable Start AND Apply
+        # after every reload. A cascor predating cascor#676 cannot say what it holds, so the
+        # mount degrades to the pre-OQ-N2 default instead of to ``⊥``.
+        payload = {**_selection("cascor", "service", value=None, source="unknown"), "dataset": {"value": None, "source": "unknown", "generator": None}}
+        _store, _summary, _state, dataset, notice = _mount(manager, payload)
+        assert dataset == DEFAULT_DATASET_TYPE
+        assert notice is None
+
+    def test_the_layout_seeds_bottom_on_both_dataset_dropdowns(self, manager):
+        # OQ-N2: no seeded dataset anywhere. The sidebar's is the mount state; the restart modal's
+        # is overwritten on every open, and is ``None`` so nobody finds a seeded default to copy.
+        by_id = {getattr(c, "id", None): c for c in _components(manager.app.layout)}
+        assert by_id["nn-dataset-type-dropdown"].value is None
+        assert by_id["restart-ds-type"].value is None
+        assert manager._initial_dataset_model_hint() == ""
+
+    def test_the_hydration_block_is_honoured_once(self, manager):
+        # After the mount, ``model-state-store`` is replaced by ``/api/model/select`` payloads,
+        # which carry no dataset block -- so a later model change gates the dataset the operator
+        # is LOOKING AT, not the one the backend held at mount.
+        assert DashboardManager._hydrated_dataset_value(X1_PAYLOAD) is None
+        assert DashboardManager._hydrated_dataset_value(None) is None
+        assert DashboardManager._hydrated_dataset_value(_selection("cascor", "demo", value="xor", source="loaded")) == "xor"
+
+    def test_the_gate_has_one_trigger_and_reads_the_payload_as_state(self, manager):
+        # One mount pass, pinned: re-adding ``params-init-interval`` as an Input schedules a second
+        # pass against the SEED model beside the hydrated one. The renderer's dedup lets the later
+        # request win, but a seed pass that already completed paints a state gated against the
+        # wrong model first.
+        _key, gate = _callback_writing(manager, "nn-dataset-type-dropdown.options")
+        assert _string_input_ids(gate) == {"model-selection-store"}
+        assert {entry.get("id") for entry in gate.get("state", [])} >= {"nn-dataset-type-dropdown", "model-state-store"}
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG7AcrossTheRealSeams:
+    """G7 end to end: the real route, the real backend, the real mount -- no hand-built payload.
+
+    The unit cases above feed ``_mount`` a literal, which pins the dashboard half but not the
+    contract between it and ``/api/selection``. canopy#653's fixture mocked the NEAR seam and
+    shipped a state that could never fire; these go through every seam the value crosses.
+    """
+
+    @pytest.fixture
+    def client(self):
+        with TestClient(main.app) as client:
+            yield client
+
+    def _read(self, client):
+        resp = client.get("/api/selection")
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    def test_a_dataset_staged_on_the_recurrence_backend_is_the_mount_value(self, manager, client, monkeypatch):
+        monkeypatch.setattr(main, "backend", RecurrenceBackend(_FitRecorder()), raising=False)
+        monkeypatch.setattr(main, "current_nn_model", "recurrence", raising=False)
+        # Staged the way the dashboard stages it: the juniper-data generator name.
+        assert client.post("/api/stage_dataset", json={"nn_dataset_type": generator_name_for_type("multi_sine")}).status_code == 200
+        payload = self._read(client)
+        assert payload["dataset"] == {"value": "multi_sine", "source": "pending", "generator": "multi_sine"}
+        store, summary, _state, dataset, _notice = _mount(manager, payload)
+        assert (store, dataset) == ("recurrence", "multi_sine")
+        assert summary == "Active: Recurrence (LMU)"
+
+    def test_the_dataset_of_the_last_fit_is_the_mount_value(self, manager, client, monkeypatch):
+        backend = RecurrenceBackend(_FitRecorder())
+        monkeypatch.setattr(main, "backend", backend, raising=False)
+        monkeypatch.setattr(main, "current_nn_model", "recurrence", raising=False)
+        assert backend.start_training(generator="mackey_glass")["ok"]
+        backend._thread.join(timeout=5)
+        payload = self._read(client)
+        assert payload["dataset"]["source"] == "loaded"
+        assert _mount(manager, payload)[3] == "mackey_glass"
+        # A reset discards the result, and the claim about which dataset produced it goes too.
+        assert backend.reset_training()["ok"]
+        assert self._read(client)["dataset"]["source"] == "none"
+
+    def test_the_demo_simulator_reports_the_generator_it_loaded(self, manager, client, monkeypatch):
+        demo = DemoMode(update_interval=1.0)
+        demo.dataset = {**demo.dataset, "source": "generator:xor"}
+        monkeypatch.setattr(main, "backend", DemoBackend(demo), raising=False)
+        payload = self._read(client)
+        assert payload["dataset"] == {"value": "xor", "source": "loaded", "generator": "xor"}
+        assert _mount(manager, payload)[3] == "xor"
+
+    def test_a_demo_spiral_resolves_through_the_alias_to_canopy_s_value(self, manager, client, monkeypatch):
+        # The spiral builders stamp ``generator:spiral``; the dropdown's value is ``spirals``.
+        monkeypatch.setattr(main, "backend", DemoBackend(DemoMode(update_interval=1.0)), raising=False)
+        payload = self._read(client)
+        assert payload["dataset"] == {"value": "spirals", "source": "loaded", "generator": "spiral"}
+        # D-N13: demo mode keeps landing on spirals under the ``⊥`` seed -- because the simulator
+        # HOLDS spirals, through the same hydration as every backend, not through a seed.
+        assert _mount(manager, payload)[3] == "spirals"
+
+    def test_cascor_s_field_survives_normalisation_and_its_absence_reads_unknown(self):
+        # ``ServiceBackend.normalize_status`` is a WHITELIST -- the one place the field could be
+        # lost between cascor and the dashboard -- and absent must not collapse into ``None``.
+        from backend.service_backend import ServiceBackend
+
+        nested = {"state_machine": {"status": "STOPPED"}, "training_state": {}, "monitor": {}}
+        with_field = ServiceBackend.normalize_status({**nested, "current_dataset": {"dataset_type": "circles", "n_samples": 100}})
+        assert main._backend_dataset_selection(with_field) == {"value": "circles", "source": "loaded", "generator": "circles"}
+        assert main._backend_dataset_selection(ServiceBackend.normalize_status({**nested, "current_dataset": None}))["source"] == "none"
+        assert main._backend_dataset_selection(ServiceBackend.normalize_status(nested))["source"] == "unknown"
+
+    def test_pending_wins_over_loaded_and_an_unseeded_dataset_is_named_not_invented(self):
+        status = {"pending_dataset": {"dataset_type": "moon"}, "current_dataset": {"dataset_type": "xor"}}
+        assert main._backend_dataset_selection(status) == {"value": "moons", "source": "pending", "generator": "moon"}
+        # Another client staged a generator canopy does not seed: say which, pick nothing.
+        assert main._backend_dataset_selection({"current_dataset": {"dataset_type": "arc_agi"}}) == {"value": None, "source": "loaded", "generator": "arc_agi"}
+        # Loaded, identity unknown (raw inline tensors) is not "nothing loaded".
+        assert main._backend_dataset_selection({"current_dataset": {"dataset_type": None}}) == {"value": None, "source": "loaded", "generator": None}
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestY3TheModelAxisHasAReadSide:
+    """Y3 — a reload shows the model the server has recorded, and gates Start on it."""
+
+    @pytest.fixture
+    def recurrence_over_demo(self, monkeypatch):
+        """The D-8 / X1 state, recorded by the real route: Recurrence selected, demo running."""
+        with TestClient(main.app) as client:
+            monkeypatch.setattr(main.settings, "recurrence_service_url", None, raising=False)
+            monkeypatch.setattr(main, "backend", DemoBackend(DemoMode(update_interval=1.0)), raising=False)
+            monkeypatch.setattr(main, "current_nn_model", None, raising=False)
+            resp = client.post("/api/model/select", json={"nn_model": "recurrence"})
+            assert resp.status_code == 200 and resp.json()["swapped"] is False
+            yield client
+            monkeypatch.undo()
+
+    def test_the_read_route_returns_the_recorded_selection(self, recurrence_over_demo):
+        payload = recurrence_over_demo.get("/api/selection").json()
+        assert payload["nn_model"] == "recurrence"
+        assert payload["backend"] == "demo"
+        assert payload["selected"] is True
+        assert payload["swapped"] is False  # a read swaps nothing
+
+    def test_a_reload_over_an_inactive_selection_says_so_and_disables_start(self, manager, recurrence_over_demo):
+        # THE defect: before the read side existed this reload rendered "Active: CasCor" from the
+        # seed and left Start enabled -- and the server then refused the start it offered.
+        payload = recurrence_over_demo.get("/api/selection").json()
+        store, summary, state, _dataset, _notice = _mount(manager, payload)
+        assert store == "recurrence"
+        assert "NOT ACTIVE" in summary and "demo" in summary
+        states = {"start": {"disabled": False, "loading": False, "timestamp": 0}}
+        start_disabled = manager._update_button_appearance_handler(button_states=states, model_key=store, dataset_value="multi_sine", model_state=state)[0]
+        assert start_disabled is True
+        assert DashboardManager._train_gate_notice_handler(store, model_state=state) is not None
+
+    def test_nothing_selected_reads_the_boot_model_and_says_it_was_not_chosen(self, monkeypatch):
+        monkeypatch.setattr(main, "current_nn_model", None, raising=False)
+        with TestClient(main.app) as client:
+            payload = client.get("/api/selection").json()
+        assert payload["nn_model"] == DEFAULT_MODEL_KEY
+        assert payload["selected"] is False
+
+    def test_a_live_selection_reads_active(self, manager):
+        payload = _selection("recurrence", "recurrence", value="multi_sine", source="loaded", execution="one_shot")
+        store, summary, _state, _dataset, _notice = _mount(manager, payload)
+        assert store == "recurrence"
+        assert summary == "Active: Recurrence (LMU)"
+
+    def test_a_failed_read_falls_back_and_still_runs_the_first_paint_gate(self, manager):
+        # The key store is WRITTEN (with the seed) even though the read failed: that write is the
+        # gate's only first-paint trigger now, so skipping it would lose N7's availability gate.
+        store, summary, state, dataset, _notice = _mount(manager, None)
+        assert store == DEFAULT_MODEL_KEY
+        # X11: the summary is written too, and it does not claim the unreached backend is active.
+        assert summary == X11_UNKNOWN_CASCOR
+        # Unknown on both axes: no model fields (so no agreement claim), and an ``unknown``
+        # dataset block, which is what lets the gate tell this from "the backend holds nothing".
+        assert state == {"dataset": {"value": None, "source": "unknown", "generator": None}}
+        assert DashboardManager._selection_is_live(state) is None
+        assert dataset == DEFAULT_DATASET_TYPE  # D-N10's fallback, not ⊥
+
+    def test_the_failed_read_s_gate_pass_really_runs(self, manager):
+        # With nothing available the fallback default is cleared again and the BLOCKING notice
+        # renders -- visible proof the availability gate ran on a mount whose read failed.
+        _store, _summary, _state, dataset, notice = _mount(manager, None, generators=NONE_AVAILABLE)
+        assert dataset is None
+        assert notice is not None and "No dataset is available" in _text_of(notice)

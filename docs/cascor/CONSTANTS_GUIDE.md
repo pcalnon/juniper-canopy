@@ -1,8 +1,8 @@
 # Constants Management Guide
 
-**Version:** 0.25.0
+**Version:** 0.25.1
 **Status:** Active
-**Last Updated:** March 3, 2026
+**Last Updated:** September 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ## Overview
@@ -83,6 +83,7 @@ class ServerConstants:
 | `TrainingConstants`  | Neural network training parameters | Epochs, learning rates, hidden units    |
 | `DashboardConstants` | UI behavior and limits             | Update intervals, timeouts, data limits |
 | `ServerConstants`    | Server configuration               | Host, port, WebSocket paths             |
+| `SecurityConstants`  | HTTP security headers and CSP      | `DEFAULT_CSP_POLICY` (`img-src 'self' data: blob:`) |
 
 ## When to Use Constants, in Application
 
@@ -143,6 +144,7 @@ Determine which existing class best fits the constant:
 - **Training-related** → `TrainingConstants`
 - **UI/Display-related** → `DashboardConstants`
 - **Server/Network-related** → `ServerConstants`
+- **HTTP headers / CSP / rate-limit copy** → `SecurityConstants` (`DEFAULT_CSP_POLICY` is the production CSP; `blob:` is img-only — see [AGENTS_REFERENCE.md § Plotly PNG Export](../AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047))
 
 If no class fits, consider creating a new class (see [Creating New Classes](#example-2-creating-a-new-constant-class)).
 
@@ -738,6 +740,15 @@ Choose one based on whether it's environment-specific:
 # If code-level default → constant only
 # If both → constant provides default for config
 ```
+
+### Pitfall 6: Widening the wrong CSP directive
+
+`SecurityConstants.DEFAULT_CSP_POLICY` is the production Content-Security-Policy.
+`img-src` must keep **both** `data:` (Bootstrap SVG icons) and `blob:` (plotly
+PNG export, F-CANOPY-047). Adding `blob:` to `script-src` or `default-src`, or
+swapping `data:` for `blob:`, is a different defect — not a fix. There is no
+CSP environment variable. See
+[AGENTS_REFERENCE.md § Plotly PNG Export](../AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047).
 
 ## Migration Checklist
 

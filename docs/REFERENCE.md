@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.0
+**Version:** 0.25.4
 **Status:** Active
-**Last Updated:** March 3, 2026
+**Last Updated:** October 8, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -12,10 +12,21 @@
 ## Table of Contents
 
 - [Overview](#overview)
+- [Topology Node Selection](#topology-node-selection)
+- [AGENTS Reference](#agents-reference)
+- [Hierarchy Depth Filter](#hierarchy-depth-filter)
+- [Plotly PNG Export / CSP](#plotly-png-export--csp)
+- [Sidebar model summary (X11)](#sidebar-model-summary-x11)
 - [API Reference](#api-reference)
 - [Configuration Reference](#configuration-reference)
 - [WebSocket Reference](#websocket-reference)
 - [Testing Reference](#testing-reference)
+- [Event-loop I/O discipline (X7)](#event-loop-io-discipline-x7)
+- [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
+- [Replay index contract](#replay-index-contract)
+- [Recurrence fit refusal and in-sample scores](#recurrence-fit-refusal-and-in-sample-scores)
+- [Recurrence key, restored model, and service version](#recurrence-key-restored-model-and-service-version)
+- [Start-fresh refusal (F1, F2)](#start-fresh-refusal-f1-f2)
 - [CI/CD Reference](#cicd-reference)
 - [CasCor Backend Reference](#cascor-backend-reference)
 - [Demo Mode Reference](#demo-mode-reference)
@@ -31,6 +42,80 @@ This document serves as a central index for all technical reference documentatio
 For comprehensive usage guides, see the corresponding manuals linked from [DOCUMENTATION_OVERVIEW.md](DOCUMENTATION_OVERVIEW.md).
 
 ---
+
+## Topology Node Selection
+
+Click / box / lasso highlight on the Network Topology tab. The panel once promised "click elsewhere to deselect", which plotly cannot deliver (`plotly_click` fires only on a point hit). canopy#573 retired it: the hint now reads "(Click again to deselect)", a **Clear selection** button carries the gesture, and the callback returns `dash.no_update` when nothing is selected. That guard matters: `-selected-nodes` is an Input of `update_network_graph`, so an unguarded `[]` write costs a 1.5–31 s rebuild.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046) | Developer contract: F-044 `customdata` fallback, F-045 label-derived layer, F-046 empty-canvas no-event, store-write cost, incoming #573 |
+| [USER_MANUAL.md § Network Topology Tab](USER_MANUAL.md#network-topology-tab) | Operator gestures and the false "elsewhere" hint |
+
+---
+
+## AGENTS Reference
+
+Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan (juniper-ml plan §P5 step e), so it is read on demand rather than loaded into every session. Nothing was rewritten; each relocated section carries a provenance line naming where it came from.
+
+| Document | Purpose | Lines |
+|----------|---------|-------|
+| [AGENTS_REFERENCE.md](AGENTS_REFERENCE.md) | Layered architecture and callback topology, the three-level configuration hierarchy, and the REST/WebSocket contract | ~580 |
+
+The same cut sent documentation-about-documentation to [DOCUMENTATION_OVERVIEW.md](DOCUMENTATION_OVERVIEW.md) instead, which is the file whose subject that already is.
+
+**Hazards were deliberately not relocated.** Directives whose non-application destroys work stay resident in [`AGENTS.md` § Hazards](../AGENTS.md#hazards-resident--do-not-relocate), because a pointer only helps an agent that already knows to look.
+
+---
+
+## Hierarchy Depth Filter
+
+CAN-020 view filter on the Network Topology tab. `_apply_hierarchy_filter` is the oracle (`0` / `None` / `>= N` → `"all"`). F-CANOPY-042 is the label-wiring defect (slider value was State, not Input; rest-state `0` rendered `"0 of N"`). Repair lands in canopy#570 as a dedicated clientside callback — do not merge it back into the bounds-sync callback (circular dependency).
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020) | Developer contract: filter arms, label split, tests, pitfalls |
+| [USER_MANUAL.md § Network Topology Tab](USER_MANUAL.md#network-topology-tab) | Operator: slider, `"all"` vs `"K of N"`, rest-state `0` |
+| [DEVELOPER_CHEATSHEET.md § 6](DEVELOPER_CHEATSHEET.md#6-change-the-depth-filter-label-or-filter) | Short procedure + troubleshooting row |
+
+---
+
+## Plotly PNG Export / CSP
+
+The Topology modebar camera is a Plotly PNG export. It rasterises SVG →
+Blob → `<img>` → canvas, so `img-src` must allow `blob:` **and** `data:`
+(Bootstrap icons). `blob:` belongs on `img-src` only — not `script-src`
+or `default-src`. There is no CSP environment variable; the shipped
+string is `SecurityConstants.DEFAULT_CSP_POLICY`, aliased as
+`middleware._DEFAULT_CSP`.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) | Operator runbook (F-CANOPY-047) |
+| [USER_MANUAL.md troubleshooting #6](USER_MANUAL.md#6-modebar-camera-does-nothing-no-png-file) | Silent-camera symptom |
+| [`test_csp_plotly_image_export.py`](../src/tests/regression/test_csp_plotly_image_export.py) | Pins `blob:` on `img-src` only |
+| [`test_csp_bootstrap_cdn.py`](../src/tests/regression/test_csp_bootstrap_cdn.py) | Pins `data:` + Bootstrap CDN |
+
+```bash
+cd src
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
+```
+
+## Sidebar model summary (X11)
+
+The sidebar line `nn-model-summary` says **Active** only after a round-trip includes a `backend` that serves the selected model. First paint, and a failed `GET /api/selection`, read `Selected: CasCor (Cascade-Correlation) · backend status unknown`. **NOT ACTIVE** is the other sentence: it names the backend that is running and disables Start. Unknown does neither. Predicate: `model_registry.selection_is_live`. Landed in canopy#680.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Sidebar model summary](AGENTS_REFERENCE.md#sidebar-model-summary-x11) | The three answers of `selection_is_live`, the failed-mount write, and what must not be collapsed |
+| [USER_MANUAL.md § Model summary](USER_MANUAL.md#model-summary) | What the operator should do with each sentence |
+| [`test_selection_reachability_guardrails.py`](../src/tests/regression/test_selection_reachability_guardrails.py) | `TestX11UnknownLivenessIsNotActive` |
+
+```bash
+cd src
+pytest tests/regression/test_selection_reachability_guardrails.py -k X11 -v
+```
 
 ## API Reference
 
@@ -51,17 +136,17 @@ Detailed REST API endpoint specifications and response schemas.
 
 Configuration follows a three-level hierarchy (highest to lowest priority):
 
-1. **Environment variables** (`CASCOR_*`, `JUNIPER_CANOPY_*`)
-2. **YAML configuration** (`conf/app_config.yaml`)
+1. **Pydantic settings** (`JUNIPER_CANOPY_*` environment variables)
+2. **YAML configuration** (`conf/app_config.yaml`) for legacy `ConfigManager` callers
 3. **Constants module** (`src/canopy_constants.py`)
 
 | Setting Category | Prefix | Examples |
 |-----------------|--------|---------|
-| Server | `CASCOR_SERVER_*` | `CASCOR_SERVER_HOST`, `CASCOR_SERVER_PORT` |
-| Training | `CASCOR_TRAINING_*` | `CASCOR_TRAINING_EPOCHS`, `CASCOR_TRAINING_LEARNING_RATE` |
-| WebSocket | `CASCOR_WEBSOCKET_*` | `CASCOR_WEBSOCKET_MAX_CONNECTIONS` |
-| Demo Mode | `CASCOR_DEMO_*` | `CASCOR_DEMO_MODE`, `CASCOR_DEMO_UPDATE_INTERVAL` |
-| Frontend | `JUNIPER_CANOPY_*` | `JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS` |
+| Server | `JUNIPER_CANOPY_SERVER__*` | `JUNIPER_CANOPY_SERVER__HOST`, `JUNIPER_CANOPY_SERVER__PORT` |
+| Training | `JUNIPER_CANOPY_TRAINING__*` | `JUNIPER_CANOPY_TRAINING__EPOCHS__DEFAULT`, `JUNIPER_CANOPY_TRAINING__LEARNING_RATE__DEFAULT` |
+| WebSocket | `JUNIPER_CANOPY_WEBSOCKET__*` | `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS`, `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS_PER_SESSION` |
+| Demo Mode | `JUNIPER_CANOPY_DEMO_*` | `JUNIPER_CANOPY_DEMO_MODE`, `JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL` |
+| Security | `JUNIPER_CANOPY_*` | `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED`, `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED`, `JUNIPER_CANOPY_BROWSER_CONTROL_AUTH_ENABLED` |
 
 See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for the complete environment variable reference.
 
@@ -75,6 +160,12 @@ Real-time communication channels for training updates and control.
 |---------|------|-----------|---------|
 | Training | `/ws/training` | Server -> Client | Metrics, state, topology updates |
 | Control | `/ws/control` | Bidirectional | Start, stop, pause, resume, reset commands |
+
+**Connection limits:** `/ws/training`, `/ws/control`, and legacy `/ws` all admit through
+`WebSocketManager`. The stack-wide `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS` cap defaults to `50`;
+per-IP and per-session caps default to `5` each. Over-cap connections close with code `1013`.
+The per-IP cap is DoS dampening only and is not per-client identity behind NAT; the per-session cap
+uses the anonymous `canopy_session` cookie for best-effort fairness.
 
 **Message format:**
 
@@ -110,6 +201,122 @@ pytest tests/ -v                    # All tests
 pytest -m unit -v                   # Unit tests only
 pytest -m "not slow" -v             # Exclude slow tests
 pytest tests/ --cov=. --cov-report=html  # Coverage report
+```
+
+---
+
+## Event-loop I/O discipline (X7)
+
+Canopy is a single-worker uvicorn. Synchronous `requests` I/O inside `async def` stalls
+every route, including `/v1/health/live`. Slice 1b (`#566`) bounds the cascor client
+budget; slice 1a (`#567`) moves remaining calls off the loop.
+
+| Surface | Purpose |
+| --- | --- |
+| [AGENTS_REFERENCE.md § Event-loop I/O discipline](AGENTS_REFERENCE.md#event-loop-io-discipline-x7) | Operator runbook: idiom, gate, T-A2/T-A3/T-A4, callgraph, pitfalls |
+| [`AGENTS.md` § Hazards](../AGENTS.md#hazards-resident--do-not-relocate) | Resident one-line hazard |
+| `src/tests/regression/test_x7_client_budget.py` | Slice 1b — T-B1 / T-B2 (on `main`) |
+| `src/tests/regression/test_x7_off_loop_discipline.py` | Slice 1a structural gate (`main.py` only) |
+| `src/tests/regression/test_x7_loop_responsiveness.py` | Slice 1a behavioural tests |
+| `util/ad-hoc/2026-09-04_async_blocking_callgraph.py` | Adapter-wide census (instrument, not a gate) |
+
+```bash
+cd src && pytest tests/regression/test_x7_client_budget.py -v
+```
+
+---
+
+## Cascor status cache (X7 slice 1c)
+
+Landed with `#578`. One background task polls cascor; `/api/status` and the status bar
+serve its **class** (`ok` / `unreachable` / `indeterminate`), not a raw payload. That is
+what keeps a half-dead 200 from rendering as a healthy **"Stopped"**.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c) | Operator runbook: intervals, classifier, dedicated breaker, C6 / C7 / C9, T-C1–T-C4 |
+
+# X7 slice 1c status cache (landed with #578)
+cd src && pytest tests/regression/test_x7_status_cache.py -v
+
+Distinct from the 1a / 1b off-loop runbook, which landed via the docs
+consolidation `#583` (`#568` was closed superseded).
+
+---
+
+## Replay index contract
+
+Snapshots Replay tab index space. Cascor's range `end` is exclusive and
+`snapshot_window.end_epoch` is a history length; the scrubber and range slider are
+inclusive. `render_session` writes those slider values, and they are Inputs of
+`queue_control`, so a paint would re-queue a control without the equality guard that
+canopy#697 added; the guard returns `dash.no_update`. The player's earlier fixes are #694
+(dict `range`) and #696 (control results and Stop).
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Replay index contract](AGENTS_REFERENCE.md#replay-index-contract) | Ends, echo guard, before and since #697, pitfalls |
+| [USER_MANUAL.md § Replay Tab](USER_MANUAL.md#replay-tab) | What the scrubber and time-range control do |
+
+```bash
+cd src && pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v
+```
+
+Distinct from the metrics-panel replay bar
+([CASCOR_BACKEND_MANUAL](cascor/CASCOR_BACKEND_MANUAL.md#metrics-panel-handler-contract-service-mode)).
+
+---
+
+## Recurrence fit refusal and in-sample scores
+
+Landed with canopy#702 (W0.5 / W0.7). A refused recurrence fit's `completion_reason` is the status code, method, and path, followed by a 4xx `detail` (300 characters; a validation `input` is omitted). A 5xx `detail` is never appended. The status bar cuts the reason at 120 characters, and a hover holds it up to 480 (the bound canopy#722 raised from 400). The one-shot card is titled `Recurrence (LMU) — in-sample (train split) regression metrics`, because `POST /v1/train` scores the training split.
+
+| Surface | Purpose |
+| --- | --- |
+| [AGENTS_REFERENCE.md § Recurrence fit refusal and in-sample scores](AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores) | Operator runbook: 4xx suffix, 5xx omission, status-bar tooltip, in-sample card |
+| `src/backend/recurrence_service_adapter.py` | `_parse` / `_service_detail` |
+| `src/backend/recurrence_backend.py` | `_run_fit` log and `completion_reason` |
+| `src/frontend/dashboard_manager.py` | 120-character label; 480-character hover when the label cuts |
+| `src/frontend/components/metrics_panel.py` | `_build_oneshot_result` |
+
+```bash
+curl -s http://127.0.0.1:8050/api/status | python -m json.tool
+```
+
+Distinct from the cascor status cache. Recurrence does not use it.
+
+---
+
+## Recurrence key, restored model, and service version
+
+Landed with canopy#722 (W1.6 / W1.7). A refused recurrence key names `JUNIPER_CANOPY_RECURRENCE_API_KEY` and `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`, a 429 carries `Retry-After`, `restored` counts as a model, and the model version is read from the service rather than seeded.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Recurrence key, restored model, and service version](AGENTS_REFERENCE.md#recurrence-key-restored-model-and-service-version) | 401 variable names, 429 `Retry-After`, `restored` as a model, version read from the service |
+| [API_REFERENCE.md § Recurrence Service Contract (Recurrence Mode)](api/API_REFERENCE.md#recurrence-service-contract-recurrence-mode) | The contract floor (`RECURRENCE_SERVICE_CONTRACT_FLOOR`, juniper-recurrence 0.5.0) and the status states |
+| [API_REFERENCE.md § Upstream Failures](api/API_REFERENCE.md#upstream-failures) | What a caller reads when an upstream HTTP call fails |
+
+```bash
+cd src
+pytest tests/unit/test_recurrence_service_adapter.py \
+       tests/unit/test_model_registry.py \
+       tests/unit/frontend/test_completion_reason_status_bar.py -q
+```
+
+---
+
+## Start-fresh refusal (F1, F2)
+
+A plain Start continues the current network. Cascor refuses a wider staged dataset with `[start_fresh_required]` before loading it (juniper-cascor#687). Since canopy#681 the alert names **Stop & Restart with new dataset** and **Start fresh**. Confirm re-stages edits, applies parameter edits, then `POST /api/train/restart`.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Start-fresh refusal](AGENTS_REFERENCE.md#start-fresh-refusal-f1-f2) | Marker, alert, modal wording, confirm order, demo vs service |
+| [USER_MANUAL.md § A wider dataset](USER_MANUAL.md#a-wider-dataset-needs-start-fresh) | What to click |
+
+```bash
+cd src && pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
 ```
 
 ---
@@ -151,18 +358,19 @@ Technical reference for the demo mode simulation system.
 | [DEMO_MODE_REFERENCE.md](demo/DEMO_MODE_REFERENCE.md) | Demo mode technical reference | ~895 |
 | [DEMO_MODE_ENVIRONMENT_SETUP.md](demo/DEMO_MODE_ENVIRONMENT_SETUP.md) | Demo environment configuration | ~340 |
 
-**Activation:** `CASCOR_DEMO_MODE=1` (set automatically by `./demo` script)
+**Activation:** `JUNIPER_CANOPY_DEMO_MODE=1` (set automatically by the `./demo` script; the legacy `CASCOR_DEMO_MODE` alias still works, with a deprecation warning)
 
 ---
 
 ## Integration References
 
-Planned integration documentation for future subsystems.
+Documentation for the shipped Redis and Cassandra monitoring tabs, and for the planned Kubernetes
+deployment.
 
 | Document | Purpose | Status |
 |----------|---------|--------|
-| [REDIS_INTEGRATION_REFERENCE.md](redis/REDIS_INTEGRATION_REFERENCE.md) | Redis cache integration | Planned |
-| [CASSANDRA_INTEGRATION_REFERENCE.md](cassandra/CASSANDRA_INTEGRATION_REFERENCE.md) | Cassandra persistence integration | Planned |
+| [REDIS_INTEGRATION_REFERENCE.md](redis/REDIS_INTEGRATION_REFERENCE.md) | Redis cache integration | Shipped — read-only **Redis** tab backed by `GET /api/v1/redis/status` and `GET /api/v1/redis/metrics` |
+| [CASSANDRA_INTEGRATION_REFERENCE.md](cassandra/CASSANDRA_INTEGRATION_REFERENCE.md) | Cassandra persistence integration | Shipped — read-only **Cassandra** tab backed by `GET /api/v1/cassandra/status` and `GET /api/v1/cassandra/metrics` |
 | [KUBERNETES_DEPLOYMENT_PLAN.md](deployment/KUBERNETES_DEPLOYMENT_PLAN.md) | Kubernetes deployment architecture | Planning |
 
 ---
@@ -176,6 +384,7 @@ Application constants are centralized in `src/canopy_constants.py`:
 | `TrainingConstants` | Training parameters (epochs, learning rates, hidden units) |
 | `DashboardConstants` | UI behavior (update intervals, timeouts, data limits) |
 | `ServerConstants` | Server configuration (host, port, WebSocket paths) |
+| `SecurityConstants` | HTTP headers and `DEFAULT_CSP_POLICY` (`img-src 'self' data: blob:`) |
 
 See [CONSTANTS_GUIDE.md](cascor/CONSTANTS_GUIDE.md) for the complete constants management guide.
 
@@ -188,23 +397,29 @@ The most commonly used environment variables for juniper-canopy configuration. F
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `JUNIPER_CANOPY_DEMO_MODE` | unset | Set `1` to enable demo mode (simulated training) |
-| `CASCOR_SERVER_HOST` | `127.0.0.1` | Server bind address |
-| `CASCOR_SERVER_PORT` | `8050` | Server port |
-| `CASCOR_SERVER_DEBUG` | `0` | Enable debug mode |
-| `CASCOR_BACKEND_PATH` | `../juniper-cascor` | Path to CasCor backend |
-| `CASCOR_TRAINING_EPOCHS` | `500` | Maximum training epochs |
-| `CASCOR_TRAINING_LEARNING_RATE` | `0.01` | Learning rate |
-| `CASCOR_TRAINING_HIDDEN_UNITS` | `40` | Max hidden units |
-| `CASCOR_WEBSOCKET_MAX_CONNECTIONS` | `50` | Max concurrent WebSocket connections |
-| `CASCOR_WEBSOCKET_HEARTBEAT_INTERVAL` | `30` | Heartbeat interval (seconds) |
-| `CASCOR_DEMO_UPDATE_INTERVAL` | `1.0` | Demo simulation step interval (seconds) |
-| `JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS` | `1000` | Dashboard metrics refresh (ms) |
+| `JUNIPER_CANOPY_SERVER__HOST` | `127.0.0.1` | Server bind address; non-loopback requires `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true` or `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true` |
+| `JUNIPER_CANOPY_SERVER__PORT` | `8050` | Server port |
+| `JUNIPER_CANOPY_SERVER__DEBUG` | `false` | Enable debug mode |
+| `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED` | `false` | Operator attestation: non-loopback bind is reachable only via a loopback-only host publish (containerized default) |
+| `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED` | `false` | Operator attestation: a fronting authenticating reverse proxy terminates access (Phase 4) |
+| `JUNIPER_CANOPY_BACKEND_PATH` | `../juniper-cascor` | Path to CasCor backend |
+| `JUNIPER_CANOPY_TRAINING__EPOCHS__DEFAULT` | `1000000` | Default maximum training epochs |
+| `JUNIPER_CANOPY_TRAINING__LEARNING_RATE__DEFAULT` | `0.01` | Default learning rate |
+| `JUNIPER_CANOPY_TRAINING__HIDDEN_UNITS__DEFAULT` | `1000` | Default max hidden units |
+| `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS` | `50` | Stack-wide WebSocket cap across all endpoints |
+| `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS_PER_SESSION` | `5` | Per-session WebSocket fairness cap keyed on `canopy_session` |
+| `JUNIPER_CANOPY_WEBSOCKET__HEARTBEAT_INTERVAL` | `30` | Heartbeat interval (seconds) |
+| `JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL` | `1.0` | Demo simulation step interval (seconds) |
+| `JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS` | `1000` | Unused: parsed, drives nothing (its timer had no consumer and was removed); the metrics refresh is `metrics-store-interval` |
 | `JUNIPER_CANOPY_LOG_FORMAT` | `text` | Set `json` for structured JSON logging |
 | `JUNIPER_CANOPY_SENTRY_DSN` | unset | Sentry error tracking DSN |
 | `JUNIPER_CANOPY_METRICS_ENABLED` | `false` | Enable Prometheus metrics (`juniper_canopy_*`) |
+| `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL` | unset | juniper-recurrence base URL. Shared fallback: `RECURRENCE_SERVICE_URL` |
+| `JUNIPER_CANOPY_RECURRENCE_API_KEY` | unset | Outbound `X-API-Key`. A 401 names this variable and the `_FILE` form (canopy#722) |
+| `JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE` | unset | File whose contents are the recurrence key. Read before the direct variable |
 
 ---
 
-**Last Updated:** March 3, 2026
-**Version:** 0.25.0
+**Last Updated:** October 8, 2026
+**Version:** 0.25.4
 **Maintainer:** Paul Calnon

@@ -401,7 +401,7 @@ Three files in `notes/development/` are broken symlinks whose targets no longer 
 
 | File                                  | Target                                                                      | Status            |
 |---------------------------------------|-----------------------------------------------------------------------------|-------------------|
-| `DASHBOARD_AUGMENTATION_PLAN.md`      | `../../../juniper-ml/notes/DASHBOARD_AUGMENTATION_PLAN.md`                  | ⚠️ Target missing |
+| `DASHBOARD_AUGMENTATION_PLAN.md`      | `../../../juniper-ml/notes/JUNIPER_2026-04-20_JUNIPER-CANOPY_DASHBOARD-AUGMENTATION-PLAN.md`                  | ⚠️ Target missing |
 | `DATASET_DISPLAY_FAILURE_ANALYSIS.md` | `../../../juniper-ml/notes/development/DATASET_DISPLAY_FAILURE_ANALYSIS.md` | ⚠️ Target missing |
 | `DATASET_DISPLAY_FIX_PLAN.md`         | `../../../juniper-ml/notes/development/DATASET_DISPLAY_FIX_PLAN.md`         | ⚠️ Target missing |
 

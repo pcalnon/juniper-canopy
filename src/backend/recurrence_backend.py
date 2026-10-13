@@ -1,0 +1,659 @@
+#!/usr/bin/env python
+#####################################################################################################################################################################################################
+# Project:       Juniper
+# Sub-Project:   JuniperCanopy
+# Application:   juniper_canopy
+# Purpose:       BackendProtocol adapter wrapping RecurrenceServiceAdapter (one-shot fit)
+#
+# Author:        Paul Calnon
+# Version:       0.1.0
+# File Name:     recurrence_backend.py
+# File Path:     JuniperCanopy/juniper_canopy/src/backend/
+#
+# Date Created:  2026-06-22
+# Last Modified: 2026-10-08
+#
+# License:       MIT License
+# Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
+#
+# Description:
+#     A1-ii of the model-selection A1 enabler (design-of-record: juniper-ml
+#     notes/JUNIPER_CANOPY_MODEL_SELECTION_A1_ENABLER_SCOPE_2026-06-18.md, decisions D1-A /
+#     D5 / D6). ``RecurrenceBackend`` adapts ``RecurrenceServiceAdapter`` to
+#     ``BackendProtocol`` so the dashboard can drive a recurrence (LMU) fit through the
+#     same interface it uses for cascor — without canopy's poll-and-chart machinery
+#     fabricating per-epoch progress the model does not have.
+#
+#     The recurrence service's ``POST /v1/train`` is a SYNCHRONOUS one-shot fit (it blocks
+#     until the LMU is solved). ``BackendProtocol.start_training`` must return immediately
+#     (it runs on a Dash callback), so this backend runs the blocking ``adapter.train`` on
+#     a daemon thread and reports a BINARY status — idle -> training -> trained|failed — via
+#     ``get_status`` / ``is_training_active``. There are no per-epoch metrics to stream and
+#     none are invented (D1-A: honest one-shot, not a faked feed). The cascade-only surface
+#     (network topology, decision boundary, candidate metrics) returns ``None`` / empty
+#     because LMU has no growing topology and no 2-D decision boundary (D6).
+#
+#     Scope (A1-ii, per the ratified slice cadence): this backend + its routing through
+#     ``create_backend`` only. Wiring it into ``main.py``'s route layer (which branches on
+#     ``backend_type``) and the one-shot result view / panel suppression are A1-iii.
+#
+#####################################################################################################################################################################################################
+# Notes:
+#     - Concurrency: a ``threading.Lock`` guards the small state machine; the blocking
+#       ``adapter.train`` call runs OUTSIDE the lock so ``get_status`` can be polled while a
+#       fit is in flight. The worker is a daemon thread (never blocks process exit).
+#     - Regression-generic: recurrence metrics are mse / rmse / mae / r2 / loss — never
+#       accuracy. ``get_metrics`` returns the raw final-metrics dict; the metrics-panel
+#       accuracy->regression switch is A1-iii.
+#     - ``completion_reason`` (an existing ``StatusResult`` field) carries the failure
+#       message on failure and the service's ``stopped_reason`` on success.
+#     - A fit whose reply times out is FOLLOWED, not failed (W1.5 / F-C4): the service does
+#       not cancel it, so the backend stays ``training`` (phase ``fitting (upstream)``) and
+#       polls ``GET /v1/training/status`` by its ``X-Request-ID`` until the service says how
+#       it ended -- ``trained``, ``failed``, or ``unknown`` when canopy cannot tell. Never
+#       ``trained`` unless the service names canopy's request as the model's producer.
+#
+#####################################################################################################################################################################################################
+# References:
+#     - backend/service_backend.py (the cascor ServiceBackend, the delegation template).
+#     - backend/recurrence_service_adapter.py (the REST client wrapped here, A1-i).
+#     - backend/recurrence_request.py (W1.2 / ruling R7: what the fit request carries, and its preview).
+#     - backend/protocol.py (BackendProtocol + the total=False TypedDict return types).
+#
+#####################################################################################################################################################################################################
+# TODO :
+#     - A1-iii: handle ``backend_type == "recurrence"`` in main.py's route branches; the
+#       one-shot result view; cascade-panel suppression driven by model-class metadata.
+#
+#####################################################################################################################################################################################################
+# COMPLETED:
+#
+#####################################################################################################################################################################################################
+"""``BackendProtocol`` wrapper for the juniper-recurrence one-shot fit (A1-ii, D1-A/D5/D6).
+
+Runs the adapter's blocking ``train`` on a daemon thread and reports a binary
+idle/training/trained/failed status; stubs the cascade-only surface to ``None``/empty.
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+import time
+from typing import Any, Dict, List, Mapping, Optional, cast
+
+from backend import recurrence_request
+from backend.protocol import (
+    ApplyParamsResult,
+    ControlResult,
+    DatasetResult,
+    DecisionBoundaryResult,
+    MetricsResult,
+    NetworkStatsResult,
+    RawTopologyResult,
+    StatusResult,
+    TopologyResult,
+)
+from backend.recurrence_service_adapter import (
+    OUTCOME_FAILED,
+    OUTCOME_RUNNING,
+    OUTCOME_SUCCEEDED,
+    OUTCOME_UNKNOWN,
+    RecurrenceServiceAdapter,
+    RecurrenceServiceError,
+    RecurrenceServiceTimeoutError,
+    RecurrenceTrainOutcome,
+    RecurrenceTrainResult,
+    new_request_id,
+)
+from outbound_errors import outbound_error_text
+
+logger = logging.getLogger("juniper_canopy.backend.recurrence_backend")
+
+# Keys extracted from ``start_training(**kwargs)`` and forwarded to ``adapter.train``.
+_DATASET_REF_KEYS = ("dataset_id", "name", "generator", "params", "split")
+_HYPERPARAM_KEYS = ("d", "theta", "ridge")
+# Internal fit state -> the dashboard "phase" label. ``unknown`` (W1.5) is a fit whose outcome canopy could not
+# establish: its reply timed out and the service's status did not attribute the result to canopy's request.
+_PHASE_BY_STATE = {"idle": "idle", "training": "fitting", "trained": "complete", "failed": "error", "unknown": "unknown"}
+# W1.5 / F-C4: the phase while canopy follows a fit whose reply timed out. The service is still fitting -- the plan's
+# ``running (upstream)`` -- and the status bar renders a phase it does not map as ``.title()``: ``Fitting (Upstream)``.
+_UPSTREAM_PHASE = "fitting (upstream)"
+# How often a followed fit's status is read, and for how long. The status route is an in-memory read; one call per
+# interval is well inside juniper-service-core's default 60 requests a minute. The window bounds the follower thread:
+# a fit still running when it closes is reported ``unknown``, with the service's status as the place to look.
+_RECONCILE_INTERVAL_S = 5.0
+_RECONCILE_TIMEOUT_S = 1800.0
+# A status read that fails outright -- unreachable, refused, unreadable -- is tried this many times in a row before the
+# fit is settled ``unknown``: one network blip during a long fit is no evidence that its outcome cannot be known. A read
+# that answers resets the count; one that answers with a verdict settles the fit at once.
+_RECONCILE_READ_ATTEMPTS = 3
+
+
+def dataset_ref_from_staged(cfg: Mapping[str, Any]) -> Dict[str, Any]:
+    """Translate a canopy-dialect staged dataset config into a recurrence ``DatasetRef``.
+
+    The staging channel speaks canopy's dialect (``nn_dataset_type`` + typed fields +
+    ``nn_dataset_params``) because ``/api/stage_dataset`` was built for cascor, whose
+    ``StageDatasetRequest`` is the authoritative validator there. The recurrence service takes the
+    one-shot ``DatasetRef`` -- ``generator`` in juniper-data's vocabulary plus ``params`` -- so the
+    alias map is applied HERE (``spirals`` -> ``spiral``), exactly where the one-shot Start body
+    applies it (X3 / design §4.6), and never on the cascor-bound payload.
+
+    W1.2 / ruling R7 (``backend/recurrence_request.py``, which holds the rules): the registry seed is
+    the base; a parameter the generator does not declare is never forwarded (F-C3 -- this used to
+    translate ``nn_dataset_elements`` / ``nn_dataset_noise`` into ``n_samples`` / ``noise`` for
+    generators that have neither); and a form value is forwarded only when it differs from what the
+    form rendered for it, so an untouched form stages nothing but the seed (F-C2). A staged fit and an
+    un-staged fit of the same dataset therefore differ only by what the operator actually edited.
+    """
+    return recurrence_request.shape_staged_ref(cfg).dataset_ref
+
+
+class RecurrenceBackend:
+    """``BackendProtocol`` implementation wrapping :class:`RecurrenceServiceAdapter`.
+
+    A one-shot execution paradigm: ``start_training`` backgrounds the blocking
+    ``POST /v1/train`` and the backend reports a binary status until the fit completes.
+    The cascade-specific protocol methods (topology / decision boundary) return ``None``.
+
+    ``reconcile_interval`` / ``reconcile_timeout`` (seconds) pace and bound the following of a
+    fit whose reply timed out (W1.5; see :meth:`_follow_upstream`).
+    """
+
+    def __init__(self, adapter: RecurrenceServiceAdapter, *, reconcile_interval: float = _RECONCILE_INTERVAL_S, reconcile_timeout: float = _RECONCILE_TIMEOUT_S) -> None:
+        self._adapter = adapter
+        self._lock = threading.Lock()
+        self._state = "idle"  # "idle" | "training" | "trained" | "failed" | "unknown"
+        self._thread: Optional[threading.Thread] = None
+        self._result: Optional[RecurrenceTrainResult] = None
+        self._error: Optional[str] = None
+        # W1.5 / F-C4: whether the latest fit's reply timed out and canopy is following it on the service's status
+        # (True only while ``_state`` is ``training``), and the event that stops the following at shutdown.
+        self._upstream = False
+        self._stopping = threading.Event()
+        self._reconcile_interval = reconcile_interval
+        self._reconcile_timeout = reconcile_timeout
+        self._pending_hyperparams: Dict[str, Any] = {}
+        # X6 / §4.9: the canopy-dialect dataset config staged for the NEXT fit (see the
+        # "Dataset staging" section). Consumed by ``start_training``; surfaced on ``get_status``
+        # as ``pending_dataset`` for the banner.
+        self._pending_dataset_config: Optional[Dict[str, Any]] = None
+        # §4.10: the dataset reference the latest fit ran on -- what the displayed result was
+        # produced from, reported as ``current_dataset``. Set when a fit starts, cleared by
+        # :meth:`reset_training` along with the result it describes.
+        self._fit_dataset_ref: Optional[Dict[str, Any]] = None
+
+    @property
+    def backend_type(self) -> str:
+        # A distinct type (not "service") so A1-iii can drive one-shot rendering + panel
+        # suppression off it; main.py's backend_type branches are audited in A1-iii.
+        return "recurrence"
+
+    @property
+    def execution(self) -> str:
+        """One-shot fit paradigm — drives A1-iii cascade-panel suppression + regression metrics."""
+        return "one_shot"
+
+    # --- Training control ---
+
+    def start_training(self, reset: bool = True, **kwargs: Any) -> ControlResult:
+        """Background a one-shot ``POST /v1/train``; return immediately.
+
+        Dataset reference (``dataset_id`` / ``name`` / ``generator`` / ``params`` /
+        ``split``) and LMU hyperparameters (``d`` / ``theta`` / ``ridge``) are read from
+        ``kwargs``; hyperparameters fall back to any previously :meth:`apply_params`-staged
+        values. ``reset`` is accepted for protocol parity (each fit is independent).
+
+        **A staged dataset config is the dataset of the next fit** (X6 / §4.9), and it takes
+        precedence over a dataset reference in ``kwargs``. That is cascor's contract for
+        ``POST /v1/training/dataset`` too, and it is the only honest order here: the one-shot
+        Start body carries the registry's *defaults* for the dropdown value and knows nothing of
+        what the operator edited and applied, so preferring it would discard the applied change
+        while reporting success. Start consumes the staged config, as cascor's does, so the
+        pending-dataset banner closes.
+
+        **The request itself is shaped by W1.2 / ruling R7** (``backend/recurrence_request.py``):
+        only parameters the generator declares are forwarded, and a staged form value only when the
+        operator edited it. It is logged at INFO before the fit thread starts -- the same computation
+        :meth:`preview_train_request` shows before Start.
+        """
+        with self._lock:
+            if self._state == "training":
+                return ControlResult(ok=False, error="a recurrence fit is already in progress", is_training=True)
+            staged = self._pending_dataset_config
+            request = self._resolve_request_locked(kwargs)
+            dataset_ref, hyperparams = request.dataset_ref, request.hyperparams
+            if not request.has_dataset_ref:
+                return ControlResult(ok=False, error=recurrence_request.NO_DATASET_REF_ERROR)
+            if staged and request.start_body_generator not in (None, dataset_ref["generator"]):
+                logger.info("recurrence fit uses the staged dataset %r over the start body's %r", dataset_ref["generator"], request.start_body_generator)
+            self._pending_dataset_config = None  # consumed by this start (cascor parity)
+            self._fit_dataset_ref = dict(dataset_ref)
+            self._result = None
+            self._error = None
+            self._state = "training"
+            thread = threading.Thread(target=self._run_fit, args=(dataset_ref, hyperparams), name="recurrence-fit", daemon=True)
+            self._thread = thread
+        request.log("start")  # W1.2 / R7: the body about to be POSTed, exactly as the preview showed it
+        thread.start()  # outside the lock — never hold it across thread start / the blocking call
+        return ControlResult(ok=True, is_training=True, message="recurrence fit started")
+
+    def _resolve_request_locked(self, kwargs: Mapping[str, Any]) -> recurrence_request.FitRequest:
+        """Resolve the next fit's request for these Start kwargs. The caller holds ``self._lock``.
+
+        Hyperparameters are whatever :meth:`apply_params` staged, overridden by the kwargs. They are
+        read under the lock: ``start_training`` used to copy ``_pending_hyperparams`` before taking
+        it, while :meth:`apply_params` writes the dict inside it.
+        """
+        explicit_ref = {k: kwargs[k] for k in _DATASET_REF_KEYS if kwargs.get(k) is not None}
+        hyperparams = dict(self._pending_hyperparams)
+        for key in _HYPERPARAM_KEYS:
+            if kwargs.get(key) is not None:
+                hyperparams[key] = kwargs[key]
+        return recurrence_request.resolve_fit_request(explicit_ref=explicit_ref, staged_cfg=self._pending_dataset_config, hyperparams=hyperparams)
+
+    def preview_train_request(self, **kwargs: Any) -> Dict[str, Any]:
+        """Return, without starting anything, the request ``start_training(**kwargs)`` would send.
+
+        W1.2 / ruling R7: the read-only "effective request" the dashboard shows before Start. Nothing
+        is consumed or changed. It is resolved by the same :meth:`_resolve_request_locked` the fit
+        uses, so the preview cannot disagree with the request. Returns
+        :meth:`FitRequest.describe <backend.recurrence_request.FitRequest.describe>` (``ok``,
+        ``source``, ``request``, ``not_forwarded``, ``edited``) plus ``fit_in_progress``, true when a
+        Start now would be refused because a fit is running. Logged at INFO.
+        """
+        with self._lock:
+            request = self._resolve_request_locked(kwargs)
+            fit_in_progress = self._state == "training"
+        request.log("preview")
+        preview = request.describe()
+        preview["fit_in_progress"] = fit_in_progress
+        return preview
+
+    def _run_fit(self, dataset_ref: Dict[str, Any], hyperparams: Dict[str, Any]) -> None:
+        """Daemon-thread target: run the blocking fit, then record terminal state."""
+        # W1.5 / F-C4: name the request, so that if its reply never arrives the service's status can
+        # still say what became of it -- the id comes back there as ``requested_by``.
+        request_id = new_request_id()
+        with self._lock:
+            self._upstream = False
+        # ``_error`` becomes ``completion_reason`` on /api/status, which an anonymous caller
+        # reads: the service's answer, or the exception's type -- never transport text, which
+        # quoted the recurrence key when httpx refused to send it (#683 validation). The
+        # service's answer includes its ``detail`` -- the adapter folds it into the message
+        # (W0.5 / F-C1) -- so the reason a 422 gives reaches the operator, not just its code.
+        try:
+            result = self._adapter.train(**dataset_ref, **hyperparams, request_id=request_id)
+        except RecurrenceServiceError as exc:
+            if isinstance(exc, RecurrenceServiceTimeoutError) and exc.reply_pending:
+                # The request reached the service; only its reply is late, and the service does not
+                # cancel a fit because canopy stopped waiting. Recording ``failed`` here was F-C4: the
+                # fit often went on to succeed, and the next Start met a 409 from a lock canopy
+                # believed free. Follow it on the service's status instead.
+                logger.warning("recurrence fit: no reply to POST /v1/train within its read timeout (request %s); the service keeps fitting, so canopy follows GET /v1/training/status: %s", request_id, exc)
+                self._follow_upstream(request_id)
+                return
+            with self._lock:
+                self._error = outbound_error_text(exc)
+                self._state = "failed"
+            # The full message names the method, path and the service's detail; the status code
+            # is logged on its own so a 422 (a refused request) reads apart from a 5xx or a
+            # transport failure (``status=None``) without parsing the text.
+            logger.warning("recurrence fit failed (status=%s): %s", exc.status_code, exc)
+            return
+        except Exception as exc:  # defensive: never leave the state stuck in "training"
+            with self._lock:
+                self._error = f"unexpected error during recurrence fit: {outbound_error_text(exc)}"
+                self._state = "failed"
+            logger.exception("recurrence fit crashed")
+            return
+        with self._lock:
+            self._result = result
+            self._state = "trained"
+        logger.info("recurrence fit complete (final_metrics=%s)", result.final_metrics)
+
+    def _follow_upstream(self, request_id: str) -> None:
+        """Follow a fit whose reply timed out until the service says how it ended (W1.5 / F-C4). Runs on the fit thread.
+
+        The backend stays ``training`` meanwhile, so Start, reset and a model swap are refused here just as the service
+        would refuse a second fit with a 409, and ``get_status`` reports the phase ``fitting (upstream)``. Every
+        ``reconcile_interval`` seconds :meth:`RecurrenceServiceAdapter.train_outcome` reads ``GET /v1/training/status``
+        against the request id; the first outcome other than running settles the fit (:meth:`_settle`) -- except a read
+        that failed outright (no status at all), which settles it only on the ``_RECONCILE_READ_ATTEMPTS``-th in a row.
+        The ``reconcile_timeout`` window and shutdown end the following early, as ``unknown``: canopy stopped watching,
+        which says nothing about how the fit ended.
+        """
+        with self._lock:
+            self._upstream = True
+        deadline = time.monotonic() + self._reconcile_timeout
+        unread = 0
+        try:
+            while True:
+                outcome = self._adapter.train_outcome(request_id)
+                if outcome.status is None and outcome.state == OUTCOME_UNKNOWN:
+                    unread += 1
+                    if unread >= _RECONCILE_READ_ATTEMPTS:
+                        self._settle(outcome)
+                        return
+                elif outcome.state != OUTCOME_RUNNING:
+                    self._settle(outcome)
+                    return
+                else:
+                    unread = 0
+                if time.monotonic() >= deadline:
+                    if unread:  # the last read failed: say that, not "still running"
+                        self._settle(outcome)
+                        return
+                    reason = f"unknown (still running upstream): the service was still fitting canopy's request {request_id} when canopy stopped following it after {self._reconcile_timeout:g} s; the service's GET /v1/training/status has the outcome"
+                    self._settle(RecurrenceTrainOutcome(OUTCOME_UNKNOWN, reason))
+                    return
+                if self._stopping.wait(self._reconcile_interval):
+                    reason = f"unknown (no longer followed): canopy's recurrence backend shut down before the service reported how its request {request_id} ended"
+                    self._settle(RecurrenceTrainOutcome(OUTCOME_UNKNOWN, reason))
+                    return
+        except Exception:  # defensive: never leave the state stuck in "training"
+            logger.exception("recurrence fit: following request %s on the service's status crashed", request_id)
+            self._settle(RecurrenceTrainOutcome(OUTCOME_UNKNOWN, f"unknown (follow-up failed): canopy could not follow its request {request_id} on the service's status"))
+
+    def _settle(self, outcome: RecurrenceTrainOutcome) -> None:
+        """Record how a followed fit ended (W1.5). ``trained`` only on a succeeded outcome that carries its result.
+
+        A failed outcome's ``reason`` reads as the request's own error would have, and an unknown one says why canopy
+        cannot tell; either becomes ``completion_reason``. Both are built from canopy's words and the service's answer,
+        so they may go where ``outbound_error_text`` output goes. The exception behind an unreadable status can carry
+        transport text, and goes to the log only.
+        """
+        if outcome.state == OUTCOME_SUCCEEDED and outcome.result is not None:
+            with self._lock:
+                self._result = outcome.result
+                self._state = "trained"
+                self._upstream = False
+            logger.info("recurrence fit complete upstream (operation_id=%s, final_metrics=%s)", outcome.result.operation_id, outcome.result.final_metrics)
+            return
+        state = "failed" if outcome.state == OUTCOME_FAILED else "unknown"
+        with self._lock:
+            self._error = outcome.reason
+            self._state = state
+            self._upstream = False
+        if outcome.error is not None:
+            logger.warning("recurrence fit %s after its reply timed out: %s (%s: %s)", state, outcome.reason, type(outcome.error).__name__, outcome.error)
+        else:
+            logger.warning("recurrence fit %s after its reply timed out: %s", state, outcome.reason)
+
+    def stop_training(self) -> ControlResult:
+        # A one-shot ridge/lstsq solve is not interruptible.
+        return ControlResult(ok=False, message="a recurrence fit is a non-interruptible one-shot solve and cannot be stopped")
+
+    def pause_training(self) -> ControlResult:
+        return ControlResult(ok=False, message="pause is not supported for one-shot (recurrence) models")
+
+    def resume_training(self) -> ControlResult:
+        return ControlResult(ok=False, message="resume is not supported for one-shot (recurrence) models")
+
+    def reset_training(self) -> ControlResult:
+        with self._lock:
+            if self._state == "training":
+                return ControlResult(ok=False, error="cannot reset while a recurrence fit is in progress")
+            self._state = "idle"
+            self._result = None
+            self._error = None
+            self._fit_dataset_ref = None
+        return ControlResult(ok=True, is_training=False)
+
+    def is_training_active(self) -> bool:
+        with self._lock:
+            return self._state == "training"
+
+    # --- Status and metrics ---
+
+    def get_status(self) -> StatusResult:
+        with self._lock:
+            state = self._state
+            result = self._result
+            error = self._error
+            pending = self._pending_dataset_config
+            fit_ref = self._fit_dataset_ref
+            upstream = self._upstream
+        status: Dict[str, Any] = {
+            "is_training": state == "training",
+            "is_running": state == "training",
+            "is_paused": False,
+            "completed": state == "trained",
+            "failed": state == "failed",
+            "fsm_status": state,
+            "phase": _PHASE_BY_STATE[state],
+            "network_connected": state == "trained",
+            "monitoring_active": state == "training",
+            # X6 / §4.9: the pending-dataset banner reconciles off this field for every backend
+            # (cascor carries it through from /v1/training/status; demo reads its simulator).
+            "pending_dataset": dict(pending) if pending else None,
+            # §4.10: the dataset the latest fit ran on, in cascor's ``current_dataset`` shape so
+            # one reader serves every backend. ``None`` before any fit and after a reset. A fit
+            # referenced by ``dataset_id`` / ``name`` has no generator to name, which is the
+            # ``{"dataset_type": None}`` reading: something is loaded, canopy cannot say what.
+            "current_dataset": {"dataset_type": fit_ref.get("generator"), **dict(fit_ref.get("params") or {})} if fit_ref else None,
+        }
+        if state in ("failed", "unknown") and error is not None:
+            status["completion_reason"] = error
+        elif result is not None:
+            status["current_epoch"] = result.n_epochs
+            if result.stopped_reason:
+                status["completion_reason"] = result.stopped_reason
+        # W1.5 / F-C4. A fit whose reply timed out and that canopy now follows on the service's status: still running
+        # (``is_training``), and said to be running there rather than here.
+        if state == "training" and upstream:
+            status["phase"] = _UPSTREAM_PHASE
+        # A fit whose outcome canopy could not establish is neither ``failed`` nor ``completed``, and "Stopped" would
+        # not be true of it either: ``outcome_unknown`` lets the status bar say "Unknown", with ``completion_reason``.
+        if state == "unknown":
+            status["outcome_unknown"] = True
+        # F-CON2: which service operation produced the result shown -- the id ``expect_operation_id`` takes.
+        if result is not None and result.operation_id:
+            status["operation_id"] = result.operation_id
+        return cast(StatusResult, status)
+
+    def get_metrics(self) -> MetricsResult:
+        with self._lock:
+            result = self._result
+        if result is None:
+            return cast(MetricsResult, {})
+        # Regression metric set (mse / rmse / mae / r2 / loss) carried through verbatim;
+        # the panel renders these as regression metrics in A1-iii. ``loss`` is surfaced so
+        # the generic loss readout has a value even if the service omits an explicit key.
+        metrics: Dict[str, Any] = dict(result.final_metrics)
+        metrics["epoch"] = result.n_epochs
+        if "loss" not in metrics:
+            metrics["loss"] = result.final_metrics.get("mse", result.final_metrics.get("rmse", 0.0))
+        return cast(MetricsResult, metrics)
+
+    def get_metrics_history(self, count: int = 100) -> List[MetricsResult]:
+        # A one-shot fit has no per-epoch history: a single terminal point, or nothing yet.
+        metrics = self.get_metrics()
+        return [metrics] if metrics else []
+
+    # --- Network and data ---
+
+    def has_network(self) -> bool:
+        with self._lock:
+            return self._state == "trained"
+
+    def get_network_topology(self) -> Optional[TopologyResult]:
+        return None  # LMU has no growing cascade topology (D6)
+
+    def get_raw_topology(self) -> Optional[RawTopologyResult]:
+        return None
+
+    def get_network_stats(self) -> NetworkStatsResult:
+        with self._lock:
+            return cast(NetworkStatsResult, {"network_loaded": self._state == "trained", "training_active": self._state == "training"})
+
+    def get_dataset(self) -> Optional[DatasetResult]:
+        with self._lock:
+            result = self._result
+        if result is None or not result.dataset:
+            return None
+        descriptor = result.dataset
+        return cast(
+            DatasetResult,
+            {
+                "num_samples": descriptor.get("n_windows", 0),
+                "num_features": descriptor.get("n_features", 0),
+                "num_classes": descriptor.get("output_dim", 0),
+                "loaded": True,
+                "dataset_name": descriptor.get("name") or descriptor.get("dataset_id") or "",
+            },
+        )
+
+    def get_decision_boundary(self, resolution: int = 50) -> Optional[DecisionBoundaryResult]:
+        return None  # 2-D-classification only; meaningless for an LMU sequence regressor (D6)
+
+    # --- Parameters ---
+
+    def apply_params(self, **params: Any) -> ApplyParamsResult:
+        """Stage recognised LMU hyperparameters (``d`` / ``theta`` / ``ridge``) for the next fit.
+
+        Recurrence hyperparameters apply at fit time (not live), so they are stored and
+        consumed by the next :meth:`start_training`. Unrecognised params are ignored.
+        """
+        applied: Dict[str, Any] = {}
+        with self._lock:
+            for key in _HYPERPARAM_KEYS:
+                if params.get(key) is not None:
+                    self._pending_hyperparams[key] = params[key]
+                    applied[key] = params[key]
+        return cast(ApplyParamsResult, {"ok": True, "data": applied})
+
+    # --- Dataset staging (X6 / design §4.9) ---
+    #
+    # ``/api/stage_dataset`` / ``/api/cancel_pending_dataset`` and the pending-dataset banner were
+    # built for cascor's server-side staging surface (cascor #242), and DemoMode mirrors them
+    # in-process. This backend does the same. The recurrence service is one-shot -- the dataset
+    # reference travels in ``POST /v1/train`` -- so "staged for the next start" is a canopy-side
+    # fact: held here, consumed by ``start_training``, no service endpoint involved. Before this,
+    # the pair the selection arc made reachable could be selected but not staged (the route
+    # answered 501), and the restart modal's bare start had nothing to fit.
+
+    def stage_dataset(self, **canopy_params: Any) -> Dict[str, Any]:
+        """Record a canopy-dialect dataset config for the next fit; an empty body clears it."""
+        cfg = {k: v for k, v in canopy_params.items() if v is not None}
+        with self._lock:
+            if not cfg:
+                # cascor documents an empty body as "clears any prior staging"; keep the contract.
+                self._pending_dataset_config = None
+                return {"ok": True, "data": {"status": "cleared", "config": None}}
+            if not cfg.get("nn_dataset_type"):
+                return {"ok": False, "error": "a staged dataset needs nn_dataset_type"}
+            self._pending_dataset_config = dict(cfg)
+            return {"ok": True, "data": {"status": "staged", "config": dict(cfg), "dataset_ref": dataset_ref_from_staged(cfg)}}
+
+    def cancel_pending_dataset(self) -> Dict[str, Any]:
+        with self._lock:
+            prior = self._pending_dataset_config
+            self._pending_dataset_config = None
+        return {"ok": True, "data": {"status": "cleared", "discarded": dict(prior) if prior else None}}
+
+    def get_pending_dataset(self) -> Dict[str, Any]:
+        with self._lock:
+            cfg = self._pending_dataset_config
+        return {"ok": True, "pending": dict(cfg) if cfg else None}
+
+    # --- Experimental-functions gate (Y1) ---
+    #
+    # These exist because ``main.py``'s two experimental-functions routes call them on
+    # ``backend`` UNCONDITIONALLY, and the gate is read on every page mount. ``BackendProtocol``
+    # never declared them, so the requirement was a de-facto contract that ServiceBackend,
+    # DemoBackend and demo_mode happened to satisfy and this backend did not -- and the
+    # ``except Exception`` around the call turned the resulting ``AttributeError`` into a
+    # **500 with an error_id on every page mount under recurrence**. The gate is a CASCOR
+    # concept (cascor's ``/v1/admin/experimental_functions``); the recurrence tier has no
+    # equivalent, which is a reason to say so, not a reason to raise.
+    #
+    # The read and the write answer DIFFERENTLY on purpose:
+    #   * read  -> ``enabled: False``. Not an error: the gate is genuinely closed here, which
+    #     is exactly the F2.10 safe default the route's own docstring describes ("no Live
+    #     Switch affordance until we can confirm"). A 502 would be a lie about a failure.
+    #   * write -> ``ok: False``. A toggle that cannot be honoured must NOT report success --
+    #     the route maps ``ok: False`` to a 502 carrying this message, and the Dash layer
+    #     reconciles to the returned state. Silently answering ``enabled: False`` to a write
+    #     would leave the operator's UI disagreeing with the backend (N6: fail closed and
+    #     SAY SO; N9: a control that cannot be honoured is refused at the control).
+
+    def get_experimental_functions(self) -> Dict[str, Any]:
+        """Report the gate as closed. The recurrence tier has no experimental functions."""
+        return {"enabled": False}
+
+    def set_experimental_functions(self, enabled: bool) -> Dict[str, Any]:
+        """Refuse the write explicitly rather than pretending it landed."""
+        return {
+            "ok": False,
+            "error": "the recurrence backend has no experimental-functions gate (it is a cascade-correlation feature); nothing was changed",
+            "enabled": False,
+        }
+
+    # --- Live dataset swap (four more of the same undeclared de-facto contract) ---
+    #
+    # The block above fixed the experimental-functions pair. It was two of FIVE: ``main.py``
+    # also calls ``swap_dataset_live`` (:4429), ``cancel_swap_dataset_live`` (:4455),
+    # ``get_dataset_swap_events`` (:4492) and ``get_snapshot_dataset_swaps`` (:4521) on
+    # ``backend`` with no ``hasattr`` guard, inside the same bare ``except Exception`` that
+    # turns a missing method into a 500 + error_id. ``BackendProtocol`` declares none of the
+    # four, so again ServiceBackend and DemoBackend happened to satisfy a contract that was
+    # never written down and this backend did not.
+    #
+    # ``get_dataset_swap_events`` is the worst of the five, and worse than the gate ever was:
+    # ``_setup_dataset_swap_observers_callbacks`` polls ``/api/history/dataset_swaps`` on every
+    # ``slow-update-interval`` tick -- ``SLOW_UPDATE_INTERVAL_MS = 5000`` -- so under recurrence
+    # this was a fresh 500 and a fresh error_id every five seconds for the life of the page.
+    # The callback discards non-200 via ``no_update``, so nothing surfaced; the cost was
+    # invisible in the UI and unbounded in the log.
+    #
+    # Live dataset swap is a CASCOR capability (cascor's ``/v1/training/dataset/live``, P2-1b).
+    # The recurrence service is one-shot: it has no in-flight run to swap under. So the same
+    # read/write asymmetry as the gate applies, and here the read's safe default is not merely
+    # safe but TRUE -- a tier that cannot swap has genuinely recorded no swap events:
+    #   * read  -> ``{"ok": True, "events": []}``. The route renders that as a 200 with empty
+    #     state, which is what the panels already show for "no swaps yet". Returning
+    #     ``ok: False`` instead would be a 502 claiming a FAILURE where there is simply
+    #     nothing to report, and would reinstate the five-second error cadence in 502 form.
+    #   * write -> ``{"ok": False, ...}``. The route maps it to a 502 whose error string the
+    #     Dash layer surfaces in a toast. A swap that cannot happen must not report success
+    #     (N6: fail closed and SAY SO; N9: refuse at the control).
+
+    def swap_dataset_live(self, **canopy_params: Any) -> Dict[str, Any]:
+        """Refuse a live swap: the recurrence tier has no in-flight run to swap under."""
+        return {
+            "ok": False,
+            "error": "the recurrence backend does not support live dataset swap (it is a cascade-correlation feature, and the recurrence service is one-shot); nothing was changed",
+        }
+
+    def cancel_swap_dataset_live(self) -> Dict[str, Any]:
+        """Refuse the cancel: there is no live swap to cancel, and saying 'cancelled' would lie."""
+        return {
+            "ok": False,
+            "error": "the recurrence backend does not support live dataset swap, so there is no in-flight swap to cancel",
+        }
+
+    def get_dataset_swap_events(self, since: Optional[str] = None) -> Dict[str, Any]:
+        """Report an empty event list. Not a degraded answer -- this tier records no swaps."""
+        return {"ok": True, "events": []}
+
+    def get_snapshot_dataset_swaps(self, snapshot_id: str) -> Dict[str, Any]:
+        """Report no swap markers for the snapshot, for the same reason as the live feed."""
+        return {"ok": True, "events": []}
+
+    # --- Lifecycle ---
+
+    async def initialize(self) -> bool:
+        """No eager connection — the adapter surfaces connection errors at fit time."""
+        logger.info("RecurrenceBackend ready (lazy connect) for %s", self._adapter.service_url)
+        return True
+
+    async def shutdown(self) -> None:
+        """Join an in-flight fit thread (bounded) so shutdown does not race the worker."""
+        self._stopping.set()  # W1.5: a fit followed on the service's status stops at its next wait
+        with self._lock:
+            thread = self._thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5.0)
+        logger.info("RecurrenceBackend shut down")

@@ -121,8 +121,9 @@ class TestRESTDelegation:
         mock_client.create_network.assert_called_once_with()
 
     def test_start_training_background(self, adapter, mock_client):
+        # PR-B2: (started, error) tuple — the cascor 409 detail rides back.
         result = adapter.start_training_background()
-        assert result is True
+        assert result == (True, None)
         mock_client.start_training.assert_called_once()
 
     def test_is_training_in_progress(self, adapter, mock_client):
@@ -287,12 +288,43 @@ class TestCanopyParamsMapping:
                 "candidate_pool_size": 9,
             }
         )
-        assert result == {"ok": True, "data": {"ok": True}}
+        # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1a — apply_params now always
+        # surfaces dropped (canopy-only) keys via the ``skipped`` field so the
+        # toast can flag them. canopy_only_param has no cascor mapping.
+        # N5 (I-4/T3): the return additionally always carries cascor's C2a
+        # ``applied`` / ``skipped_detail`` partition (empty here — the mock's
+        # ``{"ok": True}`` echo has no C2a fields).
+        assert result == {
+            "ok": True,
+            "data": {"ok": True},
+            "skipped": ["canopy_only_param"],
+            "applied": [],
+            "skipped_detail": [],
+        }
 
     def test_param_map_values_are_unique(self):
         """Forward map values must be unique to avoid reverse-map collisions."""
         cascor_param_names = list(CascorServiceAdapter._CANOPY_TO_CASCOR_PARAM_MAP.values())
         assert len(cascor_param_names) == len(set(cascor_param_names))
+
+    def test_apply_params_returns_skipped_empty_list_when_all_mapped(self, adapter, mock_client):
+        """``skipped`` is always present in the return value, even when empty.
+
+        Locks in the canopy toast contract: callers can read ``result["skipped"]``
+        unconditionally without falling back through ``.get()``.
+        """
+        mock_client.update_params.return_value = {"ok": True}
+        result = adapter.apply_params(cn_patience=10)
+        assert "skipped" in result
+        assert result["skipped"] == []
+
+    def test_apply_params_skipped_only_no_rest_call(self, adapter, mock_client):
+        """When every key is canopy-only, no REST call is made and skipped lists them all."""
+        result = adapter.apply_params(canopy_a=1, canopy_b=2)
+        mock_client.update_params.assert_not_called()
+        assert result["ok"] is True
+        # sorted for deterministic toast ordering (FRONTEND_ISSUES_PLAN §1.5 C1a)
+        assert result["skipped"] == ["canopy_a", "canopy_b"]
 
 
 # =========================================================================
@@ -443,7 +475,11 @@ class TestErrorHandling:
         from juniper_cascor_client.exceptions import JuniperCascorConnectionError
 
         mock_client.start_training.side_effect = JuniperCascorConnectionError("fail")
-        assert adapter.start_training_background() is False
+        started, error = adapter.start_training_background()
+        assert started is False
+        # #683 validation: a connection failure's text is transport text (it quoted a padded
+        # key); the caller-visible error names its type only.
+        assert error == "JuniperCascorConnectionError"
 
     def test_is_training_on_error(self, adapter, mock_client):
         from juniper_cascor_client.exceptions import JuniperCascorConnectionError
@@ -557,7 +593,7 @@ class TestSnapshotOperationsB5:
     def test_replay_snapshot_calls_replay_endpoint(self, adapter, mock_client):
         mock_client._post.return_value = {"snapshot_id": "demo_001", "operation": "replay"}
         result = adapter.replay_snapshot("demo_001")
-        mock_client._post.assert_called_once_with("/v1/snapshots/demo_001/replay")
+        mock_client._post.assert_called_once_with("/snapshots/demo_001/replay")
         assert result["operation"] == "replay"
 
     def test_replay_control_passes_action_and_params(self, adapter, mock_client):
@@ -565,7 +601,7 @@ class TestSnapshotOperationsB5:
         adapter.replay_control("demo_001", "seek", time_index=42)
         mock_client._post.assert_called_once()
         args, kwargs = mock_client._post.call_args
-        assert args[0] == "/v1/snapshots/demo_001/replay/control"
+        assert args[0] == "/snapshots/demo_001/replay/control"
         assert kwargs["json"] == {"action": "seek", "time_index": 42}
 
     def test_replay_control_drops_none_params(self, adapter, mock_client):
@@ -577,12 +613,12 @@ class TestSnapshotOperationsB5:
     def test_resume_snapshot_calls_resume_endpoint(self, adapter, mock_client):
         mock_client._post.return_value = {"snapshot_id": "demo_001", "operation": "resume"}
         adapter.resume_snapshot("demo_001")
-        mock_client._post.assert_called_once_with("/v1/snapshots/demo_001/resume")
+        mock_client._post.assert_called_once_with("/snapshots/demo_001/resume")
 
     def test_retrain_snapshot_calls_retrain_endpoint(self, adapter, mock_client):
         mock_client._post.return_value = {"snapshot_id": "demo_001", "operation": "retrain"}
         adapter.retrain_snapshot("demo_001")
-        mock_client._post.assert_called_once_with("/v1/snapshots/demo_001/retrain")
+        mock_client._post.assert_called_once_with("/snapshots/demo_001/retrain")
 
     def test_replay_snapshot_propagates_client_error(self, adapter, mock_client):
         from juniper_cascor_client import JuniperCascorClientError
@@ -606,7 +642,7 @@ class TestNetworkMutationsH4:
         result = adapter.patch_weights(target="output", field="weights", values=[[0.1], [0.2]])
         mock_client._patch.assert_called_once()
         args, kwargs = mock_client._patch.call_args
-        assert args[0] == "/v1/network/weights"
+        assert args[0] == "/network/weights"
         assert kwargs["json"] == {
             "target": "output",
             "field": "weights",
@@ -650,7 +686,7 @@ class TestNetworkMutationsH4:
         result = adapter.add_hidden_unit(weights=[0.1, 0.2, 0.3], bias=0.0, activation="Tanh")
         mock_client._post.assert_called_once()
         args, kwargs = mock_client._post.call_args
-        assert args[0] == "/v1/network/hidden-units"
+        assert args[0] == "/network/hidden-units"
         assert kwargs["json"] == {
             "weights": [0.1, 0.2, 0.3],
             "bias": 0.0,
@@ -676,7 +712,7 @@ class TestNetworkMutationsH4:
     def test_remove_hidden_unit_calls_delete(self, adapter, mock_client):
         mock_client._delete.return_value = {"operation": "remove_hidden_unit", "removed_index": 1, "num_hidden_units": 2}
         result = adapter.remove_hidden_unit(idx=1)
-        mock_client._delete.assert_called_once_with("/v1/network/hidden-units/1")
+        mock_client._delete.assert_called_once_with("/network/hidden-units/1")
         assert result["removed_index"] == 1
         assert result["num_hidden_units"] == 2
 
@@ -686,3 +722,145 @@ class TestNetworkMutationsH4:
         mock_client._delete.side_effect = JuniperCascorClientError("404 out of range")
         with pytest.raises(JuniperCascorClientError):
             adapter.remove_hidden_unit(idx=99)
+
+
+# =========================================================================
+# Topology completeness — defense against count-only WS stubs
+# =========================================================================
+
+
+class TestIsCompleteTopology:
+    """Regression for the cascade_add stub-payload bug.
+
+    Pre-fix cascor servers broadcast a count-only stub on cascade_add
+    (``hidden_units`` as an int). Passing such a payload to
+    ``_transform_topology`` collapses the topology to inputs+outputs only —
+    the transform's ``isinstance(int, list) is False`` path drops every
+    hidden node and every cascade connection. ``_is_complete_topology``
+    is the gate the dashboard callback uses to fall through to REST when
+    a stub is detected.
+    """
+
+    def test_cascor_format_with_list_hidden_units_is_complete(self):
+        raw = {
+            "input_size": 2,
+            "output_size": 2,
+            "hidden_units": [{"id": 0, "weights": [0.1, 0.2, 0.3], "bias": 0.0, "activation": "sigmoid"}],
+            "output_weights": [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]],
+            "output_bias": [0.0, 0.0],
+        }
+        assert CascorServiceAdapter._is_complete_topology(raw) is True
+
+    def test_cascor_format_with_empty_list_hidden_units_is_complete(self):
+        # Untrained network — list is empty, but still structurally complete.
+        raw = {
+            "input_size": 2,
+            "output_size": 2,
+            "hidden_units": [],
+            "output_weights": [[0.1, 0.2], [0.3, 0.4]],
+            "output_bias": [0.0, 0.0],
+        }
+        assert CascorServiceAdapter._is_complete_topology(raw) is True
+
+    def test_graph_format_with_nodes_is_complete(self):
+        raw = {
+            "input_units": 2,
+            "output_units": 2,
+            "hidden_units": 1,  # Graph format uses an int count here, by design.
+            "nodes": [{"id": "input_0", "type": "input", "layer": 0}],
+            "connections": [],
+        }
+        assert CascorServiceAdapter._is_complete_topology(raw) is True
+
+    def test_count_only_stub_is_incomplete(self):
+        # The exact stub shape pre-fix cascor was broadcasting on cascade_add.
+        stub = {
+            "hidden_units": 1,
+            "input_size": 2,
+            "output_size": 2,
+            "event": "cascade_add",
+        }
+        assert CascorServiceAdapter._is_complete_topology(stub) is False
+
+    def test_graph_format_without_nodes_is_incomplete(self):
+        # input_units present but nodes missing/non-list → cannot trust as graph format.
+        raw = {"input_units": 2, "output_units": 2, "hidden_units": 1}
+        assert CascorServiceAdapter._is_complete_topology(raw) is False
+
+    def test_non_dict_payload_is_incomplete(self):
+        assert CascorServiceAdapter._is_complete_topology(None) is False
+        assert CascorServiceAdapter._is_complete_topology([]) is False
+        assert CascorServiceAdapter._is_complete_topology("topology") is False
+        assert CascorServiceAdapter._is_complete_topology(42) is False
+
+    def test_empty_dict_is_incomplete(self):
+        assert CascorServiceAdapter._is_complete_topology({}) is False
+
+
+class TestTransformTopologyHiddenUnits:
+    """Verify ``_transform_topology`` produces non-zero hidden nodes when the
+    cascor payload carries a list-shaped ``hidden_units``. Regression
+    for the canopy-side symptom of the cascade_add stub bug.
+    """
+
+    def test_transform_produces_hidden_nodes_and_cascade_connections(self):
+        # 2 inputs, 2 outputs, 1 hidden unit. Cascade-correlation weights for
+        # the hidden unit cover [bias_proxy, input_0, input_1] = 3 values.
+        # output_weights is shape (input_size + num_hidden, output_size) =
+        # (3, 2), so 3 rows × 2 cols.
+        raw = {
+            "input_size": 2,
+            "output_size": 2,
+            "hidden_units": [
+                {"id": 0, "weights": [0.1, 0.2, 0.3], "bias": 0.0, "activation": "sigmoid"},
+            ],
+            "output_weights": [
+                [0.5, 0.6],  # row for input_0
+                [0.7, 0.8],  # row for input_1
+                [0.9, 1.0],  # row for hidden_0
+            ],
+            "output_bias": [0.0, 0.0],
+        }
+
+        out = CascorServiceAdapter._transform_topology(raw)
+
+        assert out["input_units"] == 2
+        assert out["output_units"] == 2
+        assert out["hidden_units"] == 1
+        # Node accounting: 2 input + 1 hidden + 2 output = 5
+        node_types = [n["type"] for n in out["nodes"]]
+        assert node_types.count("input") == 2
+        assert node_types.count("hidden") == 1
+        assert node_types.count("output") == 2
+        # Connection accounting:
+        # - 2 input→hidden_0 (from hidden unit's input weights)
+        # - 2 input→output_X (per output) × 2 outputs = 4
+        # - 1 hidden_0→output_X × 2 outputs = 2
+        # Total = 8
+        connections = out["connections"]
+        assert any(c["from"] == "input_0" and c["to"] == "hidden_0" for c in connections)
+        assert any(c["from"] == "input_1" and c["to"] == "hidden_0" for c in connections)
+        assert any(c["from"] == "hidden_0" and c["to"] == "output_0" for c in connections)
+        assert any(c["from"] == "hidden_0" and c["to"] == "output_1" for c in connections)
+        assert len(connections) == 8
+
+    def test_transform_count_only_stub_collapses_to_zero_hidden(self):
+        """Documents the silent corruption the new gate guards against.
+
+        This is the failure mode without ``_is_complete_topology`` upstream:
+        the transform produces a structurally-valid but semantically-wrong
+        topology with 0 hidden nodes and only input→output connections.
+        """
+        stub = {
+            "hidden_units": 1,
+            "input_size": 2,
+            "output_size": 2,
+            "event": "cascade_add",
+        }
+        out = CascorServiceAdapter._transform_topology(stub)
+        # Demonstrate the collapse: hidden_units becomes 0 despite the stub
+        # claiming 1. Callers must use ``_is_complete_topology`` to refuse
+        # this payload before it reaches the transform.
+        assert out["hidden_units"] == 0
+        assert all(n["type"] != "hidden" for n in out["nodes"])
+        assert all("hidden" not in c["from"] and "hidden" not in c["to"] for c in out["connections"])

@@ -1,7 +1,7 @@
 # Testing Quick Start Guide
 
-**Last Updated:** January 29, 2026  
-**Version:** v0.25.0
+**Last Updated:** September 5, 2026  
+**Version:** v0.25.2
 
 Get up and running with tests in **5 minutes**.
 
@@ -9,7 +9,7 @@ Get up and running with tests in **5 minutes**.
 
 ```bash
 # Activate conda environment
-conda activate JuniperPython
+conda activate JuniperCanopy1
 
 # Verify pytest is installed
 pytest --version
@@ -40,11 +40,21 @@ pytest -m integration -v
 # Run specific test file
 pytest src/tests/unit/test_demo_mode.py -v
 
+# X7 slice 1c status cache (landed with #578)
+pytest src/tests/regression/test_x7_status_cache.py -v
+
 # Run specific test function
 pytest src/tests/unit/test_demo_mode.py::test_demo_mode_initialization -v
 
+# X7 client budget (slice 1b, on main)
+pytest src/tests/regression/test_x7_client_budget.py -v
+
 # Run tests matching pattern
 pytest -k "demo_mode" -v
+
+# F-CANOPY-047 CSP pair (plotly PNG + Bootstrap icons)
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
 
 # Run with verbose output
 pytest -vv
@@ -85,11 +95,11 @@ pytest --tb=short -v
 
 ```bash
 # Ensure conda environment is active
-conda activate JuniperPython
+conda activate JuniperCanopy1
 
 # Verify Python path
 which python
-# Should be: /opt/miniforge3/envs/JuniperPython/bin/python
+# Should be: /opt/miniforge3/envs/JuniperCanopy1/bin/python
 ```
 
 ### Test Discovery Failures
@@ -120,6 +130,7 @@ pytest --cov=src --cov-report=html:reports/coverage
 - **Comprehensive Guide**: See [TESTING_MANUAL.md](TESTING_MANUAL.md)
 - **Coverage Details**: See [TESTING_REPORTS_COVERAGE.md](TESTING_REPORTS_COVERAGE.md)
 - **Technical Reference**: See [TESTING_REFERENCE.md](TESTING_REFERENCE.md)
+- **X7 event-loop discipline**: See [AGENTS_REFERENCE.md](../AGENTS_REFERENCE.md#event-loop-io-discipline-x7)
 
 ## Test Structure Overview
 
@@ -150,6 +161,9 @@ src/tests/
 | `pytest -x`             | Stop at first failure   |
 | `pytest -v`             | Verbose output          |
 | `pytest --cov=src`      | Run with coverage       |
+| `pytest src/tests/regression/test_x7_status_cache.py -v` | X7 1c status cache (landed with `#578`) |
+| `pytest src/tests/unit/test_recurrence_service_adapter.py src/tests/unit/frontend/test_completion_reason_status_bar.py src/tests/unit/test_recurrence_oneshot_result.py -q` | Recurrence 4xx detail and in-sample card (landed with `#702`) |
+| `pytest src/tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v` | Wider-dataset Start alert and Start-fresh modal text (`#681`) |
 | `pytest --lf`           | Run last failed tests   |
 | `pytest --ff`           | Run failures first      |
 

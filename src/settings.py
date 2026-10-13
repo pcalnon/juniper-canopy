@@ -10,7 +10,7 @@
 # File Name:     settings.py
 #
 # Created Date:  2026-03-02
-# Last Modified: 2026-03-02
+# Last Modified: 2026-09-24
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-2026 Paul Calnon
@@ -36,12 +36,54 @@
 #
 #####################################################################################################################################################################################################
 import os
+import socket
 import warnings
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from secrets_util import get_outbound_secret, screen_outbound_key
+
+# Canopy's canonical bind port. Hardcoded because ``cascor_ws_origin``'s
+# factory needs a port at module-evaluation time, before
+# ``ServerSettings.port`` (the runtime authority) is constructed.
+# Operators who bind canopy on a different port must additionally set
+# ``JUNIPER_CANOPY_CASCOR_WS_ORIGIN`` to the matching value (and add it
+# to cascor's ``JUNIPER_CASCOR_WS_CONTROL_ALLOWED_ORIGINS``).
+_CASCOR_WS_ORIGIN_DEFAULT_PORT = 8050
+
+
+def _default_cascor_ws_origin() -> str:
+    """Derive a sensible default ``cascor_ws_origin`` from the runtime host.
+
+    Returns ``http://{socket.gethostname()}:8050``. ``gethostname()`` resolves to:
+
+    - The compose service name in docker compose (``juniper-canopy``,
+      ``juniper-canopy-demo``, …) — automatically tracks demo / dev /
+      future-profile renames.
+    - The pod name in kubernetes.
+    - The dev box hostname under host-mode dev — wrong for connecting
+      to a cascor on ``localhost:8200``. Set
+      ``JUNIPER_CANOPY_CASCOR_WS_ORIGIN=http://localhost:8050`` in that
+      case (same override that the previous hardcoded default required
+      for host-mode dev).
+
+    Pre-this-commit default was a hardcoded ``http://juniper-canopy:8050``
+    — correct only for the canonical full-profile compose service name;
+    every other topology (demo profile, k8s, …) needed an explicit
+    operator override. The factory removes that need for the common
+    case while keeping the override hook for the dev / unusual-name
+    case.
+
+    Cascor's matching allowlist (``JUNIPER_CASCOR_WS_CONTROL_ALLOWED_ORIGINS``)
+    must contain the value canopy ends up sending. juniper-deploy ships
+    the canonical full-profile compose with both ends pre-aligned;
+    the demo-profile override (juniper-deploy#110) is now redundant for
+    the canopy half but stays as belt-and-suspenders.
+    """
+    return f"http://{socket.gethostname()}:{_CASCOR_WS_ORIGIN_DEFAULT_PORT}"
 
 
 class TrainingParamConfig(BaseModel):
@@ -84,6 +126,13 @@ class ServerSettings(BaseModel):
 class WebSocketSettings(BaseModel):
     """WebSocket configuration (replaces YAML backend.communication section)."""
 
+    # SEC-F19 / D4: stack-absolute GLOBAL connection cap across *all* WS
+    # endpoints (/ws/training, /ws/control, /ws). Enforced in
+    # ``WebSocketManager.connect`` -- the single choke point every endpoint
+    # admits a socket through -- so it bounds total server resource across the
+    # whole stack and backstops the cookieless per-session case (design §5
+    # Option B / §9 R2). The N+1th connection stack-wide is rejected with close
+    # code 1013. This is availability / DoS-dampening, not authentication.
     max_connections: int = 50
     heartbeat_interval: int = 30
     reconnect_attempts: int = 5
@@ -96,7 +145,24 @@ class WebSocketSettings(BaseModel):
         "https://localhost:8050",
         "https://127.0.0.1:8050",
     ]
+    # SEC-F19 / D4: the per-IP cap is DoS-dampening only and is INERT BEHIND
+    # NAT -- inside Docker every client presents as the bridge-gateway IP
+    # (audit HO-3), so this cap is shared across all users and is NOT a
+    # per-client authenticator. ``max_connections_per_session`` below restores
+    # per-client fairness under a shared NAT IP; genuine per-client identity
+    # needs the deferred fronting-proxy X-Forwarded-For work (Phase 4). Kept
+    # because it still dampens a single-IP flood off-NAT. Design-of-record:
+    # juniper-ml notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md §5.
     max_connections_per_ip: int = 5
+    # SEC-F19 / D4: per-session connection cap keyed on the anonymous
+    # ``canopy_session`` cookie read from the WS handshake. Restores per-client
+    # fairness where the per-IP cap is inert (a shared NAT gateway IP): one
+    # browser session monopolizing sockets can no longer starve another session
+    # behind the same gateway (the live self-DoS, audit HO-3). A cookieless
+    # first connection is allowed and left to ``max_connections`` (global) as
+    # the backstop. Best-effort fairness / DoS-dampening, not authentication (a
+    # determined attacker rotates cookies).
+    max_connections_per_session: int = 5
     idle_timeout_seconds: int = 120
     max_message_size_training: int = 4096
     max_message_size_control: int = 65536
@@ -141,8 +207,69 @@ class Settings(BaseSettings):
     demo_mode: bool = False
     backend_path: str = "../juniper-cascor"
     juniper_data_url: str = "http://localhost:8100"
+    # Outbound API key canopy sends as ``X-API-Key`` on every juniper-data
+    # request. Resolved by ``_check_juniper_data_api_key`` via
+    # ``get_outbound_secret``, which honors ``<NAME>_FILE`` indirection so
+    # Docker-secrets / k8s-secrets mounts work without leaking the value
+    # through ``docker inspect`` / env dumps, and refuses a value no HTTP
+    # client can carry (#683 validation). Resolution order: prefixed canonical
+    # (``JUNIPER_CANOPY_JUNIPER_DATA_API_KEY[_FILE]``) → cross-service shared
+    # (``JUNIPER_DATA_API_KEY[_FILE]``) → ``None`` (auth omitted). When
+    # ``None`` and juniper-data has auth enabled, calls 401 — by design so
+    # the failure is loud rather than silent.
+    juniper_data_api_key: Optional[str] = None
     cascor_service_url: Optional[str] = None
+    # E.2 PR-2-C: explicit Origin header for canopy → cascor /ws/control
+    # connections (juniper-cascor-client>=0.5.0 forwards this to
+    # ``websockets.connect(..., origin=…)``). Required because cascor's
+    # ``/ws/control`` is fail-closed against missing Origin
+    # (juniper-cascor#129); inside docker compose the Python
+    # ``websockets`` client emits no Origin by default and the upgrade
+    # is rejected with 403. Cascor's matching allowlist
+    # ``JUNIPER_CASCOR_WS_CONTROL_ALLOWED_ORIGINS`` must contain the
+    # value sent here.
+    #
+    # Default is derived from ``socket.gethostname()`` so the right
+    # Origin tracks the actual runtime topology:
+    #
+    #   - docker compose full profile  → "http://juniper-canopy:8050"
+    #   - docker compose demo profile  → "http://juniper-canopy-demo:8050"
+    #   - kubernetes                   → "http://<pod-name>:8050"
+    #   - host-mode dev                → "http://<dev-host>:8050"  ← wrong;
+    #                                    set JUNIPER_CANOPY_CASCOR_WS_ORIGIN=
+    #                                    http://localhost:8050 explicitly.
+    #
+    # Pre-this-change default was a hardcoded ``http://juniper-canopy:8050``;
+    # every non-canonical topology (demo, k8s, …) needed an explicit
+    # override. The factory removes that for the common case.
+    #
+    # Set to empty string to opt out (preserves the pre-0.5.0
+    # juniper-cascor-client behaviour of sending no Origin — only
+    # safe when cascor is configured to accept missing-Origin upgrades).
+    cascor_ws_origin: str = Field(default_factory=_default_cascor_ws_origin)
     cascor_discovery: CascorDiscoverySettings = CascorDiscoverySettings()
+
+    # Recurrence (LMU) model service — model-selection A1 enabler (D3). When set,
+    # canopy routes a ``recurrence``-provider model to ``RecurrenceServiceAdapter``,
+    # which speaks the service's synchronous one-shot ``POST /v1/train`` contract.
+    #
+    # ``recurrence_service_url`` resolution (``_check_recurrence_service_url``):
+    # prefixed canonical ``JUNIPER_CANOPY_RECURRENCE_SERVICE_URL`` → shared cross-
+    # service ``RECURRENCE_SERVICE_URL`` (the var juniper-deploy sets, mirroring
+    # ``JUNIPER_DATA_URL``) → ``None``. ``None`` leaves recurrence unconfigured (the
+    # model stays non-routable); inside docker compose the canonical value is
+    # ``http://juniper-recurrence:8210``.
+    recurrence_service_url: Optional[str] = None
+    # Outbound API key canopy sends as ``X-API-Key`` on every recurrence request.
+    # The recurrence service runs ``SecurityMiddleware``, so a missing key 401s — by
+    # design, so the failure is loud rather than silent. Resolved by
+    # ``_check_recurrence_api_key`` via ``get_outbound_secret`` (honors ``<NAME>_FILE``
+    # indirection for Docker/k8s secret mounts, and refuses a value no HTTP client
+    # can carry): prefixed
+    # ``JUNIPER_CANOPY_RECURRENCE_API_KEY[_FILE]`` → shared
+    # ``JUNIPER_RECURRENCE_API_KEY[_FILE]`` (the var the recurrence service itself
+    # reads) → ``None``. Mirrors ``juniper_data_api_key``.
+    recurrence_api_key: Optional[str] = None
 
     # Demo
     demo_update_interval: float = 1.0
@@ -156,6 +283,34 @@ class Settings(BaseSettings):
 
     # Metrics / observability
     metrics_enabled: bool = False
+    # SEC-16 parity with juniper-data + juniper-cascor: loopback-only IP
+    # allowlist for the Prometheus ``/metrics`` mount. Set
+    # ``JUNIPER_CANOPY_METRICS_TRUSTED_IPS='["10.0.0.5","172.18.0.0/16"]'``
+    # (JSON list) or a comma-separated string. Accepts bare IP literals
+    # and CIDR ranges; ``juniper_observability.MetricsAuthMiddleware``
+    # normalises IPv6 zone-ids and IPv4-mapped IPv6 client addresses
+    # before membership check, so a Docker container appearing as
+    # ``::ffff:172.18.0.5`` matches an IPv4 ``172.18.0.0/16`` allowlist
+    # entry. Mirrors
+    # ``juniper-data.api.settings.metrics_trusted_ips`` (SEC-16 promoted
+    # to juniper-observability 0.3.0).
+    metrics_trusted_ips: list[str] = ["127.0.0.1", "::1"]
+
+    @field_validator("metrics_trusted_ips")
+    @classmethod
+    def _validate_metrics_trusted_ips(cls, v: list[str]) -> list[str]:
+        """Fail loud at startup if any allowlist entry is unparseable.
+
+        Without this guard a typo like ``172.18.0.0/164`` would silently
+        compile to a working-but-empty allowlist that 403s every scrape.
+        Delegates to the same ``parse_trusted_networks`` helper that
+        ``MetricsAuthMiddleware`` calls so the failure surfaces at
+        ``Settings()`` construction (before the FastAPI app boots).
+        """
+        from juniper_observability import parse_trusted_networks
+
+        parse_trusted_networks(v)
+        return v
 
     # CORS
     cors_origins: list[str] = []
@@ -169,7 +324,17 @@ class Settings(BaseSettings):
 
     # Phase B-pre-a: Audit logging (M-SEC-07)
     audit_log_enabled: bool = True
-    audit_log_path: str = "/var/log/canopy/audit.log"
+    # CFG-09 (v7 roadmap §13896): default was previously
+    # ``/var/log/canopy/audit.log`` which requires root to create the
+    # parent dir and crashes non-root deployments at startup
+    # (``audit_log.py:51`` mkdir or :53 ``TimedRotatingFileHandler`` open).
+    # Switched to a CWD-relative default that works out-of-the-box on a
+    # fresh non-root install. Production deployments continue to override
+    # via the ``JUNIPER_CANOPY_AUDIT_LOG_PATH`` env var (pydantic
+    # auto-derives via ``env_prefix='JUNIPER_CANOPY_'``); a deferred
+    # follow-up may switch to ``$XDG_STATE_HOME/canopy/audit.log`` for
+    # XDG-spec correctness once an XDG helper exists in canopy.
+    audit_log_path: str = "logs/audit.log"
     audit_log_retention_days: int = 90
 
     # Phase B: Browser WebSocket bridge (D-17, D-18, D-04)
@@ -188,11 +353,29 @@ class Settings(BaseSettings):
     ws_control_stop_timeout: float = 2.0  # §S10.1 per-command stop/pause/resume/reset timeout
     ws_control_set_params_timeout: float = 1.0  # §S10.1 per-command set_params timeout (mirrors ws_set_params_timeout)
 
+    # N2 (training-runtime defects plan §4 I-1 / §5 T2/T5): canopy→cascor stream liveness.
+    # The 2026-07-10 incident: cascor closed canopy's control WS 40 s after connect and the
+    # supervisor (whose liveness notion was `_ws is not None`) never noticed for 12+ hours.
+    # These knobs drive the half-open detection + supervised reconnect in
+    # backend/cascor_service_adapter.py (ControlStreamSupervisor + the metrics relay loop).
+    # Cascor pings every 30 s, so a healthy stream sees at least one frame per ~30 s even when
+    # idle; the 90 s window tolerates two missed pings before declaring the stream dead.
+    ws_stream_liveness_timeout_seconds: float = 90.0  # no-frame window before a stream is declared dead and reconnected (0 disables)
+    ws_stream_probe_interval_seconds: float = 30.0  # control-stream protocol-level keepalive probe period (0 disables)
+    ws_relay_summary_interval_seconds: float = 60.0  # metrics-relay periodic INFO throughput summary period (0 disables)
+
     # Phase B-pre-b: CSRF + control-path security (M-SEC-02)
     csrf_enabled: bool = True  # CSRF protection on /ws/control
     csrf_token_ttl_seconds: int = 3600  # 1h sliding TTL
     session_secret_key: str = ""  # SessionMiddleware secret (auto-generated if empty)
     ws_control_auth_timeout: float = 5.0  # Seconds to wait for CSRF first-frame
+    # PR-1 (Start-Training 401 fix): authenticate the same-origin browser control
+    # surface (/api/train/*, /api/csrf, /ws/control) by Origin + CSRF + session
+    # instead of the X-API-Key the browser cannot hold. Default ON so the fix is
+    # active on rebuild; set JUNIPER_CANOPY_BROWSER_CONTROL_AUTH_ENABLED=false to
+    # restore pre-fix behaviour (key required even for the browser surface). See
+    # notes/JUNIPER_CANOPY_TRAINING-CONTROL-AUTH_DESIGN_2026-06-30.md §8.
+    browser_control_auth_enabled: bool = True
 
     # Phase 1B Track 1 (SEC-06): opt-in Sec-WebSocket-Protocol bearer auth for
     # all WS endpoints. Defaults to False until every downstream client
@@ -200,6 +383,58 @@ class Settings(BaseSettings):
     # When enabled, clients must send `Sec-WebSocket-Protocol: bearer, <key>`
     # and the server validates <key> against `api_keys` before accepting.
     ws_auth_enabled: bool = False
+
+    # SEC-F08: real off-switch for POST /api/dataset/import-url. The handler
+    # previously read this via ``getattr(settings, "dataset_import_url_enabled",
+    # True)`` against a *non-existent* attribute, so the documented gate was
+    # dead: because this ``Settings`` model uses ``extra="ignore"`` (model_config
+    # above), setting ``JUNIPER_CANOPY_DATASET_IMPORT_URL_ENABLED`` was silently
+    # dropped and the endpoint could never be turned off. Declaring it as a real
+    # field makes the env override functional. Defaults **off**: URL-based import
+    # makes the canopy server issue arbitrary outbound requests (a server-side
+    # request-forgery surface), so it must be explicitly opted into. See the
+    # security audit finding SEC-F08 in juniper-ml
+    # notes/JUNIPER_STACK_SECURITY_AUDIT_PLAN_2026-07-02.md (§4.3 / §5.2).
+    dataset_import_url_enabled: bool = False
+
+    # SEC-F22 / D2 (startup bind-guard) -- two-flag bind-posture attestation.
+    # When ``server.host`` is a NON-loopback interface (anything not in
+    # 127.0.0.0/8, not ``::1``, not ``localhost``) canopy REFUSES TO START unless
+    # the operator attests the deployment perimeter via ONE of the two booleans
+    # below -- converting the sole effective SEC-F22 control (the loopback
+    # boundary) from an implicit default into an enforced invariant and closing
+    # the silent ``BIND_HOST=0.0.0.0`` footgun (audit HO-6). Both default
+    # **False**, so a bare non-loopback bind fails closed. Each is an operator
+    # *attestation*, NOT a verification. Enforced at startup in ``main.lifespan``
+    # via ``security.enforce_loopback_bind_guard`` (implemented inline in canopy;
+    # no new dependency). Design-of-record: juniper-ml
+    # notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md §4 / §8 D2
+    # (OQ-1 resolved: the earlier single ``fronting_auth_attested`` flag was
+    # refined into these two so the deploy-layer preflight can VERIFY the
+    # loopback-publish attestation, while the proxy attestation stays
+    # attestation-only). The guard permits the non-loopback bind when EITHER is
+    # set and logs which one; only the two together being unset refuses start.
+    #
+    # ``JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED`` -- the operator attests the
+    # service is reachable ONLY via a loopback-only host publish (e.g. compose
+    # ``127.0.0.1:8050:8050`` in front of the in-container ``0.0.0.0`` bind); the
+    # containerized default, and the one attestation a deploy-layer preflight can
+    # actually verify.
+    loopback_publish_attested: bool = False
+    #
+    # ``JUNIPER_CANOPY_AUTH_PROXY_ATTESTED`` -- the operator attests a fronting
+    # authenticating reverse proxy terminates access in front of the control
+    # surface (the Phase-4 milestone); attestation only -- no in-process
+    # verification is possible.
+    auth_proxy_attested: bool = False
+
+    # SEC-F01: the INTENDED auth posture, fed to enforce_auth_posture in
+    # ``main.lifespan`` (env ``JUNIPER_CANOPY_REQUIRE_AUTH``). False (default)
+    # = an unset/placeholder CANOPY_API_KEY only WARNs at boot (control
+    # surface runs open -- bare/dev profile); True = boot REFUSES (CRITICAL +
+    # AuthPostureError) when no real key is configured. Set true wherever
+    # secrets are provisioned (the composed juniper-deploy stack).
+    require_auth: bool = False
 
     @property
     def ws_bridge_enabled(self) -> bool:
@@ -233,6 +468,41 @@ class Settings(BaseSettings):
             return shared
         return v
 
+    @field_validator("juniper_data_api_key", mode="before")
+    @classmethod
+    def _check_juniper_data_api_key(cls, v):
+        """Resolve the outbound juniper-data API key, ``_FILE`` form first.
+
+        Order:
+
+          1. ``JUNIPER_CANOPY_JUNIPER_DATA_API_KEY_FILE`` → file content,
+             or ``JUNIPER_CANOPY_JUNIPER_DATA_API_KEY`` direct (prefixed,
+             canopy-specific override — wins so deploy can route a
+             canopy-only key separately from cascor's).
+          2. ``JUNIPER_DATA_API_KEY_FILE`` → file content, or
+             ``JUNIPER_DATA_API_KEY`` direct (shared cross-service env
+             var that cascor / juniper-data-client / canopy all read).
+          3. ``v`` (whatever pydantic-settings already populated; usually
+             ``None`` once we've reached this branch).
+
+        Every step is screened (#683 validation, ``secrets_util``'s outbound-key
+        notes): a value no HTTP client can carry -- leading or trailing
+        whitespace, a line break, a character outside 0x21-0x7E -- is treated as
+        empty, exactly as an empty value always was, and its variable's NAME is
+        recorded for the boot WARNING. Sent, it made the client raise an error
+        that quotes it, which canopy logged and returned in API bodies. ``v`` is
+        screened too, as ``JUNIPER_CANOPY_JUNIPER_DATA_API_KEY``: pydantic-settings
+        read it from that variable or from ``.env``, so returning it raw would
+        hand back the very value step 1 refused.
+        """
+        prefixed = get_outbound_secret("JUNIPER_CANOPY_JUNIPER_DATA_API_KEY")
+        if prefixed:
+            return prefixed
+        shared = get_outbound_secret("JUNIPER_DATA_API_KEY")
+        if shared:
+            return shared
+        return screen_outbound_key(v, "JUNIPER_CANOPY_JUNIPER_DATA_API_KEY")
+
     @field_validator("cascor_service_url", mode="before")
     @classmethod
     def _check_cascor_service_url(cls, v):
@@ -247,6 +517,52 @@ class Settings(BaseSettings):
             )
             return legacy
         return v
+
+    @field_validator("recurrence_service_url", mode="before")
+    @classmethod
+    def _check_recurrence_service_url(cls, v):
+        """Honor a shared unprefixed ``RECURRENCE_SERVICE_URL`` fallback.
+
+        Precedence: the prefixed ``JUNIPER_CANOPY_RECURRENCE_SERVICE_URL`` is
+        handled natively by pydantic-settings (so if set it already arrives as
+        ``v``); otherwise fall back to the shared cross-service
+        ``RECURRENCE_SERVICE_URL`` that juniper-deploy sets (mirroring the
+        ``JUNIPER_DATA_URL`` shared-var pattern in ``_check_juniper_data_url``).
+        """
+        if os.getenv("JUNIPER_CANOPY_RECURRENCE_SERVICE_URL") is not None:
+            return v
+        shared = os.getenv("RECURRENCE_SERVICE_URL")
+        if shared is not None:
+            return shared
+        return v
+
+    @field_validator("recurrence_api_key", mode="before")
+    @classmethod
+    def _check_recurrence_api_key(cls, v):
+        """Resolve the outbound recurrence API key, ``_FILE`` form first.
+
+        Order (mirrors ``_check_juniper_data_api_key`` so Docker-secrets /
+        k8s-secrets mounts work without leaking the value through env dumps):
+
+          1. ``JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`` → file content, or
+             ``JUNIPER_CANOPY_RECURRENCE_API_KEY`` direct (prefixed canonical —
+             a canopy-specific override deploy can route separately).
+          2. ``JUNIPER_RECURRENCE_API_KEY_FILE`` → file content, or
+             ``JUNIPER_RECURRENCE_API_KEY`` direct (shared cross-service var the
+             recurrence service itself reads).
+          3. ``v`` (whatever pydantic-settings already populated; usually
+             ``None`` once we've reached this branch).
+
+        Screened exactly as ``_check_juniper_data_api_key`` screens its steps
+        (#683 validation), ``v`` as ``JUNIPER_CANOPY_RECURRENCE_API_KEY``.
+        """
+        prefixed = get_outbound_secret("JUNIPER_CANOPY_RECURRENCE_API_KEY")
+        if prefixed:
+            return prefixed
+        shared = get_outbound_secret("JUNIPER_RECURRENCE_API_KEY")
+        if shared:
+            return shared
+        return screen_outbound_key(v, "JUNIPER_CANOPY_RECURRENCE_API_KEY")
 
     @field_validator("backend_path", mode="before")
     @classmethod

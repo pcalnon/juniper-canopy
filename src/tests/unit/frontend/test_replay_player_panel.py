@@ -81,7 +81,8 @@ class TestLayout:
 class TestSessionHelpers:
     def test_session_window_unified_shape(self, panel, session):
         start, end = panel._session_window(session)
-        assert (start, end) == (0, 100)
+        # cascor's end_epoch is the history length, so the last playable index is 99.
+        assert (start, end) == (0, 99)
 
     def test_session_window_legacy_shape(self, panel):
         legacy = {"length": 50, "window": {"start_epoch": 0, "end_epoch": 49}}
@@ -124,7 +125,7 @@ class TestInvokeReplayControl:
     def test_play_action_posts_correct_body(self, panel):
         captured = {}
 
-        def fake_post(url, json=None, timeout=None):
+        def fake_post(url, json=None, timeout=None, headers=None):
             captured["url"] = url
             captured["json"] = json
             mock_resp = MagicMock()
@@ -142,7 +143,7 @@ class TestInvokeReplayControl:
     def test_seek_passes_time_index(self, panel):
         captured = {}
 
-        def fake_post(url, json=None, timeout=None):
+        def fake_post(url, json=None, timeout=None, headers=None):
             captured["json"] = json
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -157,7 +158,7 @@ class TestInvokeReplayControl:
     def test_speed_passes_value(self, panel):
         captured = {}
 
-        def fake_post(url, json=None, timeout=None):
+        def fake_post(url, json=None, timeout=None, headers=None):
             captured["json"] = json
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -172,7 +173,7 @@ class TestInvokeReplayControl:
     def test_range_passes_start_end(self, panel):
         captured = {}
 
-        def fake_post(url, json=None, timeout=None):
+        def fake_post(url, json=None, timeout=None, headers=None):
             captured["json"] = json
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -187,7 +188,7 @@ class TestInvokeReplayControl:
     def test_drops_none_params(self, panel):
         captured = {}
 
-        def fake_post(url, json=None, timeout=None):
+        def fake_post(url, json=None, timeout=None, headers=None):
             captured["json"] = json
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -268,7 +269,8 @@ class TestMergeSession:
 
     def test_range_updates_window(self, panel, session):
         new = panel._merge_session(session, "range", {"start": 20, "end": 70}, None)
-        assert new["range"] == [20, 70]
+        # Stored in cascor's own shape: the outbound request's end is exclusive.
+        assert new["range"] == {"start": 20, "end": 70}
 
     def test_backend_response_overrides(self, panel, session):
         backend_data = {"fsm_state": "Stopped", "time_index": {"current": 999}}

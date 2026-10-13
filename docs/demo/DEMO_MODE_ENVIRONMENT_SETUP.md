@@ -13,20 +13,20 @@
 
 ### Conda Environment
 
-Demo mode requires the JuniperPython conda environment:
+Demo mode runs in the live `JuniperCanopy*` conda environment (the name is versioned — `JuniperCanopy1` today; `./demo` resolves it automatically):
 
 ```bash
 # Environment location
-/opt/miniforge3/envs/JuniperPython
+/opt/miniforge3/envs/JuniperCanopy1
 
 # Verify environment exists
-conda env list | grep JuniperPython
+conda env list | grep JuniperCanopy
 
 # Manual activation (if needed)
-conda activate JuniperPython
+conda activate JuniperCanopy1
 
 # Python interpreter path
-/opt/miniforge3/envs/JuniperPython/bin/python
+/opt/miniforge3/envs/JuniperCanopy1/bin/python
 ```
 
 ### Dependencies
@@ -34,7 +34,7 @@ conda activate JuniperPython
 Install required packages (normally handled by conda environment):
 
 ```bash
-conda activate JuniperPython
+conda activate JuniperCanopy1
 pip install -r conf/requirements.txt
 ```
 
@@ -48,69 +48,59 @@ pip install -r conf/requirements.txt
 
 ## Configuration Methods
 
-Demo mode supports three configuration layers (priority order):
+Demo mode reads the same typed settings as every other mode (`src/settings.py`, `pydantic-settings`).
+Precedence, highest first:
 
-1. **Environment variables** (highest priority)
-2. **YAML configuration file** (`conf/app_config.yaml`)
-3. **Hard-coded defaults** (lowest priority)
+1. **Environment variables** (`JUNIPER_CANOPY_*`)
+2. **A `.env` file** in the process's working directory — `src/`, since both `./demo` and the manual
+   launch `cd src` first (`.env.example` at the repo root lists every key)
+3. **The defaults in `src/settings.py`**
+
+`conf/app_config.yaml` is legacy: nothing in demo mode reads it any more (only the optional Redis
+client still does, through `config_manager.py`).
 
 ### Method 1: Environment Variables
 
-Set `CASCOR_<SECTION>_<KEY>` variables:
+Set `JUNIPER_CANOPY_`-prefixed variables; nested sections use a double underscore:
 
 ```bash
 # Enable demo mode
-export CASCOR_DEMO_MODE=1
+export JUNIPER_CANOPY_DEMO_MODE=1
 
-# Server configuration
-export CASCOR_SERVER_HOST=0.0.0.0
-export CASCOR_SERVER_PORT=8050
-export CASCOR_SERVER_RELOAD=0
+# Server configuration (a non-loopback host needs a SEC-F22 attestation — see Scenario 6)
+export JUNIPER_CANOPY_SERVER__HOST=0.0.0.0
+export JUNIPER_CANOPY_SERVER__PORT=8050
 
-# Demo mode settings
-export CASCOR_DEMO_UPDATE_INTERVAL=0.1    # Update every 100ms
-export CASCOR_DEMO_EPOCH_DURATION=0.05    # 50ms per epoch
-export CASCOR_DEMO_CASCADE_INTERVAL=30    # Add unit every 30 epochs
-export CASCOR_DEMO_MAX_HIDDEN_UNITS=8     # Maximum 8 cascade units
+# Demo pacing
+export JUNIPER_CANOPY_DEMO_CASCADE_EVERY=30      # add a cascade unit every N epochs (default 30)
+# JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL is declared in settings but not applied: the backend
+# factory creates the demo backend with a fixed 1.0 s epoch interval (a tracked divergence).
+
+# Sidebar default for the hidden-unit cap
+export JUNIPER_CANOPY_TRAINING__HIDDEN_UNITS__DEFAULT=8
 
 # Logging
-export CASCOR_DEBUG=1                     # Enable debug logging
+export JUNIPER_CANOPY_LOG_LEVEL=DEBUG
 
-# Paths (with environment variable expansion)
-export CASCOR_BACKEND_PATH=/path/to/cascor
-export CASCOR_DATA_DIR=${HOME}/data/cascor
-export CASCOR_LOG_DIR=${HOME}/logs/cascor
+# In-process cascor checkout (legacy path; the service is selected with JUNIPER_CANOPY_CASCOR_SERVICE_URL)
+export JUNIPER_CANOPY_BACKEND_PATH=/path/to/juniper-cascor
 ```
 
 ### Method 2: Configuration File
 
-Edit `conf/app_config.yaml`:
+The only configuration file the application reads is a `.env` file:
 
-```yaml
-demo:
-  enabled: true
-  update_interval: 0.1
-  epoch_duration: 0.05
-  cascade_interval: 30
-  max_hidden_units: 8
-
-server:
-  host: "0.0.0.0"
-  port: 8050
-  reload: false
-
-paths:
-  backend: "../cascor"
-  data: "${HOME}/data/cascor"
-  logs: "${HOME}/logs/cascor"
-
-debug: true
+```bash
+# Copy the template next to main.py (the directory canopy runs from) and edit the keys above
+cp .env.example src/.env
 ```
 
-**Environment variable expansion supported:**
+The file is read at startup, below any exported variable.
 
-- `${VAR}` - Full variable name
-- `$VAR` - Short form
+**Legacy names.** `CASCOR_DEMO_MODE`, `CASCOR_DEMO_UPDATE_INTERVAL`, `CASCOR_DEMO_CASCADE_EVERY`,
+`CASCOR_BACKEND_PATH` and `CASCOR_LOG_LEVEL` still work, with a deprecation warning.
+`CASCOR_SERVER_*`, `CASCOR_DEBUG`, `CASCOR_DEMO_EPOCH_DURATION`, `CASCOR_DEMO_CASCADE_INTERVAL`,
+`CASCOR_DEMO_MAX_HIDDEN_UNITS`, `CASCOR_DATA_DIR` and `CASCOR_LOG_DIR` are read by nothing.
 
 ### Method 3: Launch Script
 
@@ -125,7 +115,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Activate conda environment
 eval "$(/opt/miniforge3/bin/conda shell.bash hook)"
-conda activate JuniperPython
+conda activate JuniperCanopy1
 
 # Set demo mode
 export CASCOR_DEMO_MODE=1
@@ -143,32 +133,33 @@ exec "$CONDA_PREFIX/bin/python" -u main.py
 ./demo
 ```
 
-Uses all defaults from `conf/app_config.yaml`.
+Uses all defaults from `src/settings.py`.
 
 ### Scenario 2: Custom Port
 
 ```bash
-export CASCOR_SERVER_PORT=8051
+export JUNIPER_CANOPY_SERVER__PORT=8051
 ./demo
 ```
 
 Overrides port to 8051, keeps other defaults.
 
-### Scenario 3: Faster Training Simulation
+### Scenario 3: Faster Cascade Growth
 
 ```bash
-export CASCOR_DEMO_EPOCH_DURATION=0.01    # 10ms per epoch (5x faster)
-export CASCOR_DEMO_UPDATE_INTERVAL=0.05   # Update every 50ms
+export JUNIPER_CANOPY_DEMO_CASCADE_EVERY=10   # add a cascade unit every 10 epochs
 ./demo
 ```
 
-Speeds up simulation for rapid testing.
+The simulated epoch interval itself is fixed at 1.0 s by the application (the
+`JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL` setting exists but is not applied — a tracked divergence), so
+growth is made visible sooner by shortening the cascade schedule.
 
 ### Scenario 4: Extended Training
 
 ```bash
-export CASCOR_DEMO_MAX_HIDDEN_UNITS=16    # Allow up to 16 cascade units
-export CASCOR_DEMO_CASCADE_INTERVAL=50    # Add unit every 50 epochs
+export JUNIPER_CANOPY_TRAINING__HIDDEN_UNITS__DEFAULT=16   # sidebar default: up to 16 cascade units
+export JUNIPER_CANOPY_DEMO_CASCADE_EVERY=50                # add a unit every 50 epochs
 ./demo
 ```
 
@@ -177,7 +168,7 @@ Longer training with more cascade units.
 ### Scenario 5: Debug Mode
 
 ```bash
-export CASCOR_DEBUG=1
+export JUNIPER_CANOPY_LOG_LEVEL=DEBUG
 ./demo
 ```
 
@@ -186,12 +177,15 @@ Enables verbose logging to `logs/system.log`.
 ### Scenario 6: Remote Access
 
 ```bash
-export CASCOR_SERVER_HOST=0.0.0.0
-export CASCOR_SERVER_PORT=8050
+export JUNIPER_CANOPY_SERVER__HOST=0.0.0.0
+export JUNIPER_CANOPY_SERVER__PORT=8050
+export JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true   # or JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true
 ./demo
 ```
 
-Allows access from other machines on the network.
+Allows access from other machines on the network. A non-loopback bind **refuses to start** unless one
+of the two SEC-F22 perimeter attestations is set — they are operator statements that an
+authenticating proxy (or a loopback-only publish) fronts the port, not a runtime check.
 
 ## Path Configuration
 
@@ -214,28 +208,22 @@ logs_dir = (ROOT / "logs").resolve()
 
 ```bash
 # Launch with debug logging
-export CASCOR_DEBUG=1
+export JUNIPER_CANOPY_LOG_LEVEL=DEBUG
 ./demo
 ```
 
-Check `logs/system.log` for loaded configuration:
-
-```bash
-2025-11-03 10:00:00 [INFO] Configuration loaded: demo.enabled=True
-2025-11-03 10:00:00 [INFO] Configuration loaded: server.port=8050
-2025-11-03 10:00:00 [INFO] Configuration loaded: demo.update_interval=0.1
-```
+Check `logs/system.log` for the startup lines — a legacy `CASCOR_*` name in use is reported there as
+a deprecation warning — and `GET /v1/health` for `demo_mode`.
 
 ### Test Configuration Override
 
 ```python
-# From Python console (for testing)
-from config_manager import ConfigManager
+# From a Python console started in src/ (for testing)
+from settings import get_settings
 
-config = ConfigManager()
-print(config.get("demo.enabled"))           # True
-print(config.get("server.port"))            # 8050
-print(config.get("demo.update_interval"))   # 0.1
+s = get_settings()
+print(s.demo_mode)      # True
+print(s.server.port)    # 8050
 ```
 
 ## Environment Reset
@@ -243,8 +231,8 @@ print(config.get("demo.update_interval"))   # 0.1
 To reset to defaults:
 
 ```bash
-# Unset all CASCOR_* environment variables
-unset $(env | grep '^CASCOR_' | cut -d= -f1)
+# Unset all canopy environment variables (current and legacy names)
+unset $(env | grep -E '^(JUNIPER_CANOPY_|CASCOR_)' | cut -d= -f1)
 
 # Or start fresh shell
 exec $SHELL
@@ -267,13 +255,14 @@ COPY conf/conda_environment.yaml /tmp/environment.yaml
 # Create conda environment
 RUN conda env create -f /tmp/environment.yaml
 
-# Set environment variables
-ENV CASCOR_DEMO_MODE=1
-ENV CASCOR_SERVER_HOST=0.0.0.0
-ENV CASCOR_SERVER_PORT=8050
+# Set environment variables (a non-loopback bind needs a SEC-F22 attestation)
+ENV JUNIPER_CANOPY_DEMO_MODE=1
+ENV JUNIPER_CANOPY_SERVER__HOST=0.0.0.0
+ENV JUNIPER_CANOPY_SERVER__PORT=8050
+ENV JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true
 
 # Launch demo mode
-CMD ["conda", "run", "-n", "JuniperPython", "python", "src/main.py"]
+CMD ["conda", "run", "-n", "JuniperCanopy1", "python", "src/main.py"]
 ```
 
 ```bash
@@ -286,17 +275,21 @@ docker run -p 8050:8050 cascor-demo
 
 ### Issue: Environment variable not recognized
 
-**Symptom:** `CASCOR_DEMO_MODE=1` has no effect
+**Symptom:** `DEMO_MODE=1` (or another unprefixed name) has no effect
 
-**Solution:** Verify variable format `CASCOR_<SECTION>_<KEY>`:
+**Solution:** the prefix is `JUNIPER_CANOPY_`, with `__` between a section and its key:
 
 ```bash
 # Correct
+export JUNIPER_CANOPY_DEMO_MODE=1
+export JUNIPER_CANOPY_SERVER__PORT=8051
+
+# Legacy alias — still works, logs a deprecation warning
 export CASCOR_DEMO_MODE=1
 
-# Wrong (underscore instead of section separator)
-export CASCOR_DEMO_MODE=1  # Actually this is correct
-export DEMO_MODE=1          # Wrong (missing CASCOR_ prefix)
+# Wrong — no prefix, or a single underscore between section and key (silently ignored)
+export DEMO_MODE=1
+export JUNIPER_CANOPY_SERVER_PORT=8051
 ```
 
 ### Issue: Path expansion fails

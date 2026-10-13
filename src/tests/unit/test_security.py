@@ -1,5 +1,6 @@
 """Tests for API security: APIKeyAuth, RateLimiter, and module-level functions."""
 
+import logging
 import time
 from unittest.mock import MagicMock
 
@@ -7,12 +8,62 @@ import pytest
 from fastapi import HTTPException
 
 from security import (
+    INTERNAL_REQUEST_HEADER,
+    INTERNAL_REQUEST_TOKEN,
     APIKeyAuth,
     RateLimiter,
     get_api_key_auth,
     get_rate_limiter,
+    report_api_key_configuration,
+    report_blank_api_key,
     reset_security_state,
 )
+
+# The set-but-blank WARNING, one text per source (APD-ECO-008 follow-up). Written out
+# here rather than imported from security.py: an expectation imported from the module
+# under test moves with any mutant that rewrites the advice there, and passes.
+# src/tests/regression/test_blank_api_key_warning_boot.py pins the same two texts on
+# the real startup path.
+BLANK_ENV_WARNING = "CANOPY_API_KEY is set but blank (empty or whitespace-only), so API-key authentication is DISABLED: every route, including the state-changing /api/* routes and the /api/train/* control surface, serves without a key, exactly as with no key configured. Set a real key, or unset CANOPY_API_KEY for an intentional open profile."
+BLANK_FILE_WARNING = "The file named by CANOPY_API_KEY_FILE is blank (empty or whitespace-only), so API-key authentication is DISABLED: every route, including the state-changing /api/* routes and the /api/train/* control surface, serves without a key, exactly as with no key configured. While CANOPY_API_KEY_FILE names an existing file it takes precedence and CANOPY_API_KEY is not read. Write a real key into that file, or unset CANOPY_API_KEY_FILE to use CANOPY_API_KEY instead."
+# #678 follow-up: the blank key's two texts for a boot the posture check refuses
+# (JUNIPER_CANOPY_REQUIRE_AUTH=true), and the key read's two other findings.
+BLANK_ENV_REFUSED_WARNING = "CANOPY_API_KEY is set but blank (empty or whitespace-only), so it counts as no key: it is the key the auth-posture check reports as not configured, and because JUNIPER_CANOPY_REQUIRE_AUTH is true, canopy refuses to start. Set a real key."
+BLANK_FILE_REFUSED_WARNING = "The file named by CANOPY_API_KEY_FILE is blank (empty or whitespace-only), so it counts as no key: it is the key the auth-posture check reports as not configured, and because JUNIPER_CANOPY_REQUIRE_AUTH is true, canopy refuses to start. While CANOPY_API_KEY_FILE names an existing file it takes precedence and CANOPY_API_KEY is not read. Write a real key into that file, or unset CANOPY_API_KEY_FILE to use CANOPY_API_KEY instead."
+PADDED_KEY_WARNING = (
+    "CANOPY_API_KEY has leading or trailing whitespace, or a line break, and API-key authentication is enabled with the key exactly as set. HTTP does not carry such a key reliably: uvicorn's parsers drop a header value's leading spaces and tabs, h11 drops its trailing ones as well, and a header cannot hold a line break."
+    + " So callers presenting the key can fail to authenticate, and the dashboard's own requests to this API send no key at all when it starts with whitespace or holds a line break, because their HTTP client refuses to send it. Remove the whitespace and any line break from the key."
+)
+# #683 validation, item 4: a key FILE is stripped at its ends, so only a line break inside the key pads it -- and the
+# WARNING must name CANOPY_API_KEY_FILE, not the env var the file shadows.
+PADDED_KEY_FILE_WARNING = (
+    "The key in the file named by CANOPY_API_KEY_FILE holds a line break, and API-key authentication is enabled with the key exactly as read: the file's leading and trailing whitespace is stripped, but a line break inside the key is not. HTTP does not carry such a key: a header cannot hold a line break."
+    + " So callers presenting the key cannot authenticate with an X-API-Key header, and the dashboard's own requests to this API send no key at all, because their HTTP client refuses to send it. While CANOPY_API_KEY_FILE names an existing file it takes precedence and CANOPY_API_KEY is not read. Write the key into that file on a single line."
+)
+MISSING_KEY_FILE_WARNING = "CANOPY_API_KEY_FILE is set but does not name an existing file, so it is ignored: the key is read from CANOPY_API_KEY instead, exactly as if CANOPY_API_KEY_FILE were unset. Point CANOPY_API_KEY_FILE at the key file, or unset it."
+
+
+class _ListHandler(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+@pytest.fixture
+def report_log():
+    """A private, non-propagating stdlib logger for ``report_blank_api_key``, and what it received."""
+    log = logging.getLogger("tests.unit.test_security.blank_api_key")
+    log.setLevel(logging.DEBUG)
+    log.propagate = False
+    handler = _ListHandler()
+    log.addHandler(handler)
+    try:
+        yield log, handler.records
+    finally:
+        log.removeHandler(handler)
 
 
 class TestAPIKeyAuth:
@@ -51,6 +102,100 @@ class TestAPIKeyAuth:
     def test_validate_none_when_enabled(self):
         auth = APIKeyAuth(["key1"])
         assert auth.validate(None) is False
+
+    # APD-ECO-008: parity with the three sibling copies (juniper-service-core,
+    # juniper-data, juniper-cascor) -- the blank-key filter and the
+    # non-short-circuiting compare.
+
+    def test_blank_and_whitespace_keys_are_filtered(self):
+        auth = APIKeyAuth(["", "   ", "\t\n", "key1"])
+        assert auth.enabled is True
+        assert auth._api_keys == {"key1"}
+        assert auth.validate("key1") is True
+        # Unfiltered, a configured "" accepted an empty presented key.
+        assert auth.validate("") is False
+        assert auth.validate("   ") is False
+
+    def test_only_blank_keys_leave_auth_disabled(self):
+        auth = APIKeyAuth(["", "   ", "\t"])
+        assert auth.enabled is False
+        assert auth._api_keys == set()
+
+    def test_non_str_entries_are_dropped_without_raising(self):
+        # The unhashable entries made the old ``set(api_keys)`` raise TypeError;
+        # the isinstance guard runs before anything is hashed.
+        auth = APIKeyAuth([None, 123, b"key1", {"a": 1}, ["x"], "key1"])  # type: ignore[list-item]
+        assert auth._api_keys == {"key1"}
+        assert auth.enabled is True
+        assert auth.validate("key1") is True
+
+    @pytest.mark.parametrize("keys", [None, [], [""], ["   "], ["\t", ""], ["k"], [" k "], ["", "k"]])
+    def test_enabled_agrees_with_the_boot_posture_check(self, keys):
+        """``enforce_auth_posture`` classifies keys with ``real_keys``; APIKeyAuth must agree.
+
+        Before APD-ECO-008 the two disagreed on every blank-only input: the boot
+        check logged "running OPEN" while APIKeyAuth enabled itself on the blank.
+        """
+        from juniper_service_core.auth_posture import auth_is_configured
+
+        assert APIKeyAuth(keys).enabled is auth_is_configured(keys)
+
+    def test_validate_compares_every_key_even_when_the_first_matches(self, monkeypatch):
+        """``any()`` stopped at the first match, so the comparison count leaked its position."""
+        from types import SimpleNamespace
+
+        auth = APIKeyAuth(["key1", "key2", "key3"])
+        compared = []
+        real_compare = auth.validate.__globals__["hmac"].compare_digest
+
+        def counting_compare(a, b):
+            compared.append((a, b))
+            return real_compare(a, b)
+
+        # Patch the globals validate() actually resolves ``hmac`` from, so a module
+        # re-import elsewhere in the session cannot leave this test patching a copy.
+        monkeypatch.setitem(auth.validate.__globals__, "hmac", SimpleNamespace(compare_digest=counting_compare))
+        first = next(iter(auth._api_keys))  # the key validate() compares first: the match comes FIRST
+        assert auth.validate(first) is True
+        # One compare per configured key -- a ``break`` after the match would stop at one -- and both sides as UTF-8
+        # bytes, never ``str``, which raises for non-ASCII text (#683 validation, item 2).
+        assert len(compared) == len(auth._api_keys) == 3
+        assert all(type(a) is bytes and type(b) is bytes for a, b in compared), compared
+        assert {a for a, _ in compared} == {first.encode()}
+        assert sorted(b for _, b in compared) == [b"key1", b"key2", b"key3"]
+
+    # #683 validation, item 2: ``hmac.compare_digest`` on two ``str`` raises ``TypeError`` for non-ASCII text. A keyless
+    # caller can send such a header -- Starlette decodes header bytes as latin-1 -- so ``X-API-Key: \xa0`` was a 500,
+    # and Sentry's event recorded the comparing frame's locals: ``candidate``, the real key. Every presented ``str``
+    # must now be an ordinary answer. The values cover latin-1 (what a header can carry), the WebSocket query
+    # parameter's UTF-8, and a lone surrogate, which only ``surrogatepass`` can encode.
+    NON_ASCII = [("nbsp", "\xa0"), ("nel", "\x85"), ("trailing-nbsp", "key1\xa0"), ("latin1", "cl\xe9"), ("euro", "€"), ("emoji", "\U0001f511"), ("lone-surrogate", "\ud800"), ("escaped-byte", "\udc80")]
+
+    @pytest.mark.parametrize("presented", [value for _, value in NON_ASCII], ids=[case_id for case_id, _ in NON_ASCII])
+    def test_a_non_ascii_key_is_a_mismatch_never_an_exception(self, presented):
+        assert APIKeyAuth(["key1"]).validate(presented) is False
+
+    def test_a_non_ascii_configured_key_is_compared_exactly(self):
+        """Bytes compare exactly as the text does: the configured key matches itself and nothing else."""
+        auth = APIKeyAuth(["cl\xe9-key€"])
+        assert auth.validate("cl\xe9-key€") is True
+        assert auth.validate("cle-key€") is False
+        assert auth.validate("cl\xe9-key") is False
+
+    @pytest.mark.parametrize("presented", [b"key1", 123, ["key1"]], ids=["bytes", "int", "list"])
+    def test_a_presented_key_that_is_not_a_str_is_no_match(self, presented):
+        assert APIKeyAuth(["key1"]).validate(presented) is False  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    @pytest.mark.parametrize("presented", ["\xa0", "key1\xa0", "cl\xe9"], ids=["nbsp", "trailing-nbsp", "latin1"])
+    async def test_call_answers_401_for_a_non_ascii_header(self, presented):
+        auth = APIKeyAuth(["key1"])
+        request = MagicMock()
+        request.headers = {"X-API-Key": presented}
+        with pytest.raises(HTTPException) as exc_info:
+            await auth(request)
+        assert exc_info.value.status_code == 401
 
     @pytest.mark.asyncio
     @pytest.mark.unit
@@ -169,6 +314,149 @@ class TestRateLimiter:
         request = MagicMock()
         await limiter(request)  # Should not raise
 
+    def test_get_key_prefers_api_key_over_client_ip(self):
+        limiter = RateLimiter(enabled=True)
+        request = MagicMock()
+        request.client.host = "10.1.2.3"
+        # An authenticated key is the rate-limit identity; the client IP is
+        # only the anonymous fallback.
+        assert limiter._get_key(request, "secret-key") == "key:secret-key"
+        assert limiter._get_key(request, None) == "ip:10.1.2.3"
+
+
+class TestInternalRequestRateLimitExemption:
+    """#2a: canopy's own server-side self-calls carry a per-process token that
+    exempts them from rate limiting; external clients cannot forge it."""
+
+    @staticmethod
+    def _request(headers):
+        request = MagicMock()
+        request.headers = headers
+        request.client = MagicMock()
+        request.client.host = "127.0.0.1"
+        request.state = MagicMock()
+        return request
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_valid_internal_token_exempts_from_rate_limit(self):
+        limiter = RateLimiter(requests_per_minute=1, enabled=True)
+        request = self._request({INTERNAL_REQUEST_HEADER: INTERNAL_REQUEST_TOKEN})
+        # Far exceed the limit; the valid internal token keeps every call exempt.
+        for _ in range(5):
+            await limiter(request)  # must not raise
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_forged_internal_token_is_not_exempt(self):
+        limiter = RateLimiter(requests_per_minute=1, enabled=True)
+        request = self._request({INTERNAL_REQUEST_HEADER: "not-the-real-token"})
+        await limiter(request)
+        with pytest.raises(HTTPException) as exc:
+            await limiter(request)
+        assert exc.value.status_code == 429
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_missing_internal_token_is_not_exempt(self):
+        limiter = RateLimiter(requests_per_minute=1, enabled=True)
+        request = self._request({})
+        await limiter(request)
+        with pytest.raises(HTTPException) as exc:
+            await limiter(request)
+        assert exc.value.status_code == 429
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    @pytest.mark.parametrize("header", ["\xa0", INTERNAL_REQUEST_TOKEN + "\xa0", "€"], ids=["nbsp", "token-plus-nbsp", "euro"])
+    async def test_a_non_ascii_internal_token_is_not_exempt_and_raises_nothing(self, header):
+        """#683 validation: ``compare_digest`` on this header raised ``TypeError`` for non-ASCII text, a 500 whose
+        Sentry event recorded a keyed caller's real key (through the ASGI scope a frame held). It is now a plain
+        non-match."""
+        limiter = RateLimiter(requests_per_minute=1, enabled=True)
+        request = self._request({INTERNAL_REQUEST_HEADER: header})
+        await limiter(request, "the-callers-real-key")
+        with pytest.raises(HTTPException) as exc:
+            await limiter(request, "the-callers-real-key")
+        assert exc.value.status_code == 429
+
+    @pytest.mark.unit
+    def test_internal_api_headers_carries_exemption_token(self):
+        """Round-trip: the headers the dashboard attaches to its self-calls
+        carry exactly the token the limiter exempts."""
+        from frontend.internal_api import internal_api_headers
+
+        headers = internal_api_headers()
+        assert headers.get(INTERNAL_REQUEST_HEADER) == INTERNAL_REQUEST_TOKEN
+
+
+@pytest.mark.unit
+class TestNoSecretCompareCanRaiseOverHttp:
+    """#683 validation: canopy's three secret compares, each reached over HTTP with a non-ASCII value, refuse as for
+    any wrong value -- 401, 403 or no exemption -- and never raise. Each ran ``hmac.compare_digest`` on two ``str``,
+    which raises ``TypeError`` for non-ASCII text: a 500, and a Sentry event recording the comparing frame's locals.
+
+    The values go out as raw bytes (``0xA0``), as both uvicorn parsers pass them and Starlette decodes them as
+    latin-1. The app is canopy's own ``SecurityMiddleware`` with the rate limiter ON, which is what puts the
+    ``X-Canopy-Internal`` compare on the key-exempt ``/api/csrf`` and ``/api/train/*`` paths, where an ANONYMOUS
+    caller reaches it.
+    """
+
+    REAL_KEY = "canopy-real-key-683v"
+
+    @pytest.fixture
+    def client(self, monkeypatch):
+        from fastapi import Depends, FastAPI
+        from fastapi.testclient import TestClient
+
+        import csrf
+        import middleware
+        import security
+
+        auth = APIKeyAuth([self.REAL_KEY])
+        # require_browser_control_auth reads the singletons; this test's own, restored at teardown.
+        monkeypatch.setattr(security, "_api_key_auth", auth)
+        store = csrf.CsrfTokenStore()
+        monkeypatch.setattr(csrf, "_csrf_store", store)
+        # A live token for another session: CsrfTokenStore.validate compares against every stored token, so with none
+        # stored there is nothing to compare and nothing to raise.
+        store.mint()
+
+        app = FastAPI()
+
+        @app.get("/api/status")
+        def status_route():
+            return {"ok": True}
+
+        @app.get("/api/csrf")
+        def csrf_route():
+            return {"ok": True}
+
+        @app.post("/api/train/start", dependencies=[Depends(security.require_browser_control_auth)])
+        def start_route():
+            return {"ok": True}
+
+        app.add_middleware(middleware.SecurityMiddleware, api_key_auth=auth, rate_limiter=RateLimiter(requests_per_minute=1000, enabled=True))
+        # A raise must come back as the 500 it was, not as an exception in this test.
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_a_non_ascii_api_key_is_a_401(self, client):
+        assert client.get("/api/status", headers={"X-API-Key": b"\xa0"}).status_code == 401
+
+    def test_a_non_ascii_internal_header_on_a_key_exempt_path_is_no_exemption_and_no_500(self, client):
+        """Anonymous: /api/csrf skips the API-key gate but not the rate limiter, whose exemption compare this reaches."""
+        assert client.get("/api/csrf", headers={INTERNAL_REQUEST_HEADER: b"\xa0"}).status_code == 200
+
+    def test_a_keyed_caller_with_a_non_ascii_internal_header_is_served(self, client):
+        response = client.get("/api/status", headers={"X-API-Key": self.REAL_KEY, INTERNAL_REQUEST_HEADER: b"\xa0"})
+        assert response.status_code == 200
+
+    def test_a_non_ascii_csrf_token_is_a_403(self, client):
+        """Keyless, from an allowlisted Origin: the CSRF store compares it against the live token minted above."""
+        response = client.post("/api/train/start", headers={"Origin": "http://localhost:8050", "X-CSRF-Token": b"\xa0"})
+        assert response.status_code == 403
+        assert response.json() == {"detail": "Invalid or missing CSRF token."}
+
 
 class TestSecurityModuleFunctions:
     """Tests for module-level singleton functions."""
@@ -200,6 +488,316 @@ class TestSecurityModuleFunctions:
         auth = get_api_key_auth()
         assert auth.enabled is True
         assert auth.validate("test-key") is True
+
+    def test_whitespace_only_env_key_leaves_auth_disabled(self, monkeypatch):
+        """APD-ECO-008: the one blank shape that reached APIKeyAuth in production.
+
+        ``get_secret`` strips a secret FILE but returns the env var raw, and
+        ``get_api_key_auth`` maps only a falsy key to None -- so a whitespace-only
+        ``CANOPY_API_KEY`` arrived unfiltered and enabled auth on it.
+        """
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.setenv("CANOPY_API_KEY", "   ")
+        auth = get_api_key_auth()
+        assert auth.enabled is False
+
+    # APD-ECO-008 follow-up: the set-but-blank WARNING. ``get_api_key_auth`` records the
+    # blank key's SOURCE and logs nothing -- it first runs at import, before logging is
+    # configured -- and ``report_blank_api_key`` logs it once, worded for that source.
+
+    @pytest.mark.parametrize("source", ["env", "file"])
+    def test_set_but_blank_key_logs_a_distinct_warning(self, monkeypatch, report_log, tmp_path, source):
+        """APD-ECO-008: SET-but-blank gets its own WARNING, worded for its source, never carrying the value.
+
+        The boot posture check words a blank key exactly like an unset one, so
+        without this an operator whose key went blank gets no new signal.
+        """
+        log, records = report_log
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.delenv("CANOPY_API_KEY", raising=False)
+        if source == "env":
+            monkeypatch.setenv("CANOPY_API_KEY", " \t ")
+        else:
+            secret_file = tmp_path / "canopy_api_key"
+            secret_file.write_text(" \t \n", encoding="utf-8")
+            monkeypatch.setenv("CANOPY_API_KEY_FILE", str(secret_file))
+        assert get_api_key_auth().enabled is False
+        assert report_blank_api_key(log) is True
+        # Exact text: a mutant that also logged the value (``%r``), or gave one source
+        # the other's advice, renders a different message, and this fails.
+        expected = BLANK_ENV_WARNING if source == "env" else BLANK_FILE_WARNING
+        assert [(r.levelno, r.getMessage()) for r in records] == [(logging.WARNING, expected)]
+
+    @pytest.mark.parametrize("value", ["", "   ", "\t\t", "\xa0\x85"])
+    def test_every_blank_env_value_gets_the_env_advice(self, monkeypatch, report_log, value):
+        """Empty counts as set-but-blank too, and so does any ``str.strip()`` whitespace."""
+        log, records = report_log
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.setenv("CANOPY_API_KEY", value)
+        assert get_api_key_auth().enabled is False
+        assert report_blank_api_key(log) is True
+        assert [r.getMessage() for r in records] == [BLANK_ENV_WARNING]
+
+    def test_a_blank_file_beats_a_real_env_key_and_the_advice_names_the_file(self, monkeypatch, report_log, tmp_path):
+        """The case #660's one message got wrong: it told this operator to unset their REAL key.
+
+        ``get_secret`` lets ``CANOPY_API_KEY_FILE`` win whenever it names an existing
+        file, so a blank file disables auth although ``CANOPY_API_KEY`` holds a key.
+        """
+        log, records = report_log
+        secret_file = tmp_path / "canopy_api_key"
+        secret_file.write_text("\n", encoding="utf-8")
+        monkeypatch.setenv("CANOPY_API_KEY_FILE", str(secret_file))
+        monkeypatch.setenv("CANOPY_API_KEY", "real-key")
+        assert get_api_key_auth().enabled is False
+        assert report_blank_api_key(log) is True
+        assert [r.getMessage() for r in records] == [BLANK_FILE_WARNING]
+
+    def test_a_file_var_naming_no_file_leaves_the_env_var_the_source(self, monkeypatch, report_log, tmp_path):
+        log, records = report_log
+        monkeypatch.setenv("CANOPY_API_KEY_FILE", str(tmp_path / "absent"))
+        monkeypatch.setenv("CANOPY_API_KEY", "   ")
+        assert get_api_key_auth().enabled is False
+        assert report_blank_api_key(log) is True
+        assert [r.getMessage() for r in records] == [BLANK_ENV_WARNING]
+
+    def test_the_blank_key_warning_is_logged_exactly_once(self, monkeypatch, report_log):
+        """Repeated reads interleaved with repeated reports -- what repeated startups do -- log ONE record."""
+        log, records = report_log
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.setenv("CANOPY_API_KEY", "   ")
+        outcomes = []
+        for _ in range(3):
+            get_api_key_auth()
+            outcomes.append(report_blank_api_key(log))
+        assert outcomes == [True, False, False]
+        assert len(records) == 1
+
+    def test_reading_the_key_logs_nothing(self, monkeypatch, caplog):
+        """The read runs at import, before ``configure_logging``: anything logged there
+        reaches only Python's last-resort handler, so it must log nothing at all."""
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.setenv("CANOPY_API_KEY", "   ")
+        with caplog.at_level(logging.DEBUG):
+            for _ in range(3):
+                get_api_key_auth()
+        assert [r.getMessage() for r in caplog.records if "CANOPY_API_KEY" in r.getMessage()] == []
+
+    @pytest.mark.parametrize("source", ["unset", "env", "file"])
+    def test_no_blank_key_warning_when_unset_or_real(self, monkeypatch, report_log, tmp_path, source):
+        """Over-correction guard: UNSET and a real key -- from either source -- are not the blank case."""
+        log, records = report_log
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.delenv("CANOPY_API_KEY", raising=False)
+        if source == "env":
+            monkeypatch.setenv("CANOPY_API_KEY", "real-key")
+        elif source == "file":
+            secret_file = tmp_path / "canopy_api_key"
+            secret_file.write_text("real-key\n", encoding="utf-8")
+            monkeypatch.setenv("CANOPY_API_KEY_FILE", str(secret_file))
+        assert get_api_key_auth().enabled is (source != "unset")
+        assert report_blank_api_key(log) is False
+        assert records == []
+
+    def test_reset_security_state_clears_the_recorded_blank_key(self, monkeypatch, report_log):
+        log, records = report_log
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.setenv("CANOPY_API_KEY", "   ")
+        get_api_key_auth()
+        reset_security_state()
+        assert report_blank_api_key(log) is False  # nothing recorded until the key is read again
+        get_api_key_auth()
+        assert report_blank_api_key(log) is True
+        assert len(records) == 1
+
+    def test_blank_key_report_needs_no_second_read_of_the_secret(self, monkeypatch, report_log):
+        """``report_blank_api_key`` works from what ``get_api_key_auth`` recorded.
+
+        The secret is gone from the environment by the time the report runs, and the
+        report is unchanged: its output does not depend on reading the secret again.
+        """
+        log, records = report_log
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.setenv("CANOPY_API_KEY", "   ")
+        get_api_key_auth()
+        monkeypatch.delenv("CANOPY_API_KEY")
+        assert report_blank_api_key(log) is True
+        assert [r.getMessage() for r in records] == [BLANK_ENV_WARNING]
+
+    # #678 follow-up: ``report_api_key_configuration`` is what ``main.lifespan`` calls. It
+    # reports everything the key's one read found wrong -- a CANOPY_API_KEY_FILE naming no
+    # file, the blank key (through ``report_blank_api_key``), a padded key -- by NAME, once.
+
+    @pytest.mark.parametrize("source", ["env", "file"])
+    def test_a_refused_boot_gets_the_refused_wording(self, monkeypatch, report_log, tmp_path, source):
+        """Under JUNIPER_CANOPY_REQUIRE_AUTH=true nothing serves, so "serves without a key" would be false."""
+        log, records = report_log
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.delenv("CANOPY_API_KEY", raising=False)
+        if source == "env":
+            monkeypatch.setenv("CANOPY_API_KEY", " \t ")
+        else:
+            secret_file = tmp_path / "canopy_api_key"
+            secret_file.write_text("\n", encoding="utf-8")
+            monkeypatch.setenv("CANOPY_API_KEY_FILE", str(secret_file))
+        get_api_key_auth()
+        assert report_api_key_configuration(log, boot_refused=True) == 1
+        expected = BLANK_ENV_REFUSED_WARNING if source == "env" else BLANK_FILE_REFUSED_WARNING
+        assert [(r.levelno, r.getMessage()) for r in records] == [(logging.WARNING, expected)]
+
+    @pytest.mark.parametrize("key", [" real-key", "\treal-key", "real-key ", "real-key\t", "real-key\n", "real-key\r\n", "real\r\nkey", "real\nkey", "real-key\x0b"], ids=["leading-space", "leading-tab", "trailing-space", "trailing-tab", "trailing-lf", "trailing-crlf", "inner-crlf", "inner-lf", "trailing-vt"])
+    def test_a_padded_env_key_warns_and_keeps_auth_enabled_as_set(self, monkeypatch, report_log, key):
+        """Leading or trailing whitespace, or a line break anywhere: auth is ON with the key exactly as set.
+
+        Not stripped (that would change which key authenticates, an owner ruling), so boot WARNs.
+        """
+        log, records = report_log
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.setenv("CANOPY_API_KEY", key)
+        auth = get_api_key_auth()
+        assert auth.enabled is True
+        assert auth.validate(key) is True
+        # The stripped form, where it differs, is a different key: nothing strips this one.
+        assert [stripped for stripped in {key.strip()} - {key} if auth.validate(stripped)] == []
+        assert report_api_key_configuration(log) == 1
+        assert [(r.levelno, r.getMessage()) for r in records] == [(logging.WARNING, PADDED_KEY_WARNING)]
+
+    def test_a_key_padded_with_a_non_ascii_space_warns_too(self, monkeypatch, report_log):
+        """``str.strip()`` removes U+00A0, so the key is padded. ``validate`` compares bytes since #683's validation
+        (``hmac.compare_digest`` on ``str`` raised ``TypeError`` on non-ASCII text), so the key as set matches."""
+        log, records = report_log
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.setenv("CANOPY_API_KEY", "\xa0real-key")
+        auth = get_api_key_auth()
+        assert auth.enabled is True
+        assert auth.validate("\xa0real-key") is True
+        assert auth.validate("real-key") is False
+        assert report_api_key_configuration(log) == 1
+        assert [r.getMessage() for r in records] == [PADDED_KEY_WARNING]
+
+    @pytest.mark.parametrize("key", ["real-key", "real key", "real\tkey"], ids=["clean", "inner-space", "inner-tab"])
+    def test_a_clean_key_gets_no_padded_key_warning(self, monkeypatch, report_log, key):
+        """Over-correction guard: whitespace INSIDE a key is carried intact, so it is not padding."""
+        log, records = report_log
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.setenv("CANOPY_API_KEY", key)
+        assert get_api_key_auth().enabled is True
+        assert report_api_key_configuration(log) == 0
+        assert records == []
+
+    def test_a_padded_key_file_is_stripped_and_gets_no_padded_key_warning(self, monkeypatch, report_log, tmp_path):
+        log, records = report_log
+        secret_file = tmp_path / "canopy_api_key"
+        secret_file.write_text("  real-key\t\n", encoding="utf-8")
+        monkeypatch.setenv("CANOPY_API_KEY_FILE", str(secret_file))
+        monkeypatch.delenv("CANOPY_API_KEY", raising=False)
+        assert get_api_key_auth().validate("real-key") is True
+        assert report_api_key_configuration(log) == 0
+        assert records == []
+
+    # The key as read: ``read_text`` translates CRLF to LF, and the strip takes only the ends.
+    @pytest.mark.parametrize("content, key", [(b"first\nsecond", "first\nsecond"), (b"  first\r\nsecond\t\n", "first\nsecond")], ids=["lf", "crlf-padded-ends"])
+    def test_a_key_file_with_a_line_break_inside_warns_naming_the_file(self, monkeypatch, report_log, tmp_path, content, key):
+        """#683 validation, item 4: the strip removes a key file's ends, not a line break INSIDE the key. The WARNING
+        named CANOPY_API_KEY -- which the file shadows -- and told the operator to fix it."""
+        log, records = report_log
+        secret_file = tmp_path / "canopy_api_key"
+        secret_file.write_bytes(content)
+        monkeypatch.setenv("CANOPY_API_KEY_FILE", str(secret_file))
+        monkeypatch.setenv("CANOPY_API_KEY", "real-env-key-the-file-shadows")
+        auth = get_api_key_auth()
+        assert auth.enabled is True
+        assert auth.validate(key) is True
+        assert report_api_key_configuration(log) == 1
+        assert [(r.levelno, r.getMessage()) for r in records] == [(logging.WARNING, PADDED_KEY_FILE_WARNING)]
+
+    @pytest.mark.parametrize(
+        "env_key, expected",
+        [
+            ("real-key", [MISSING_KEY_FILE_WARNING]),
+            (None, [MISSING_KEY_FILE_WARNING]),
+            ("   ", [MISSING_KEY_FILE_WARNING, BLANK_ENV_WARNING]),
+            (" real-key", [MISSING_KEY_FILE_WARNING, PADDED_KEY_WARNING]),
+        ],
+        ids=["env-real", "env-unset", "env-blank", "env-padded"],
+    )
+    def test_a_key_file_var_naming_no_file_warns_before_the_key_findings(self, monkeypatch, report_log, tmp_path, env_key, expected):
+        """It is otherwise ignored silently, exactly as if unset -- an operator's key file path typo, invisible."""
+        log, records = report_log
+        monkeypatch.setenv("CANOPY_API_KEY_FILE", str(tmp_path / "absent"))
+        if env_key is None:
+            monkeypatch.delenv("CANOPY_API_KEY", raising=False)
+        else:
+            monkeypatch.setenv("CANOPY_API_KEY", env_key)
+        get_api_key_auth()
+        assert report_api_key_configuration(log) == len(expected)
+        assert [(r.levelno, r.getMessage()) for r in records] == [(logging.WARNING, message) for message in expected]
+
+    def test_a_key_file_var_naming_a_directory_names_no_file(self, monkeypatch, report_log, tmp_path):
+        log, records = report_log
+        monkeypatch.setenv("CANOPY_API_KEY_FILE", str(tmp_path))
+        monkeypatch.setenv("CANOPY_API_KEY", "real-key")
+        assert get_api_key_auth().validate("real-key") is True
+        assert report_api_key_configuration(log) == 1
+        assert [r.getMessage() for r in records] == [MISSING_KEY_FILE_WARNING]
+
+    @pytest.mark.parametrize("file_var", ["", None], ids=["empty", "unset"])
+    def test_an_empty_or_unset_key_file_var_gets_no_missing_file_warning(self, monkeypatch, report_log, file_var):
+        log, records = report_log
+        if file_var is None:
+            monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        else:
+            monkeypatch.setenv("CANOPY_API_KEY_FILE", file_var)
+        monkeypatch.setenv("CANOPY_API_KEY", "real-key")
+        get_api_key_auth()
+        assert report_api_key_configuration(log) == 0
+        assert records == []
+
+    @pytest.mark.parametrize("env_key, finding", [("   ", BLANK_ENV_WARNING), (" real-key", PADDED_KEY_WARNING)], ids=["blank", "padded"])
+    def test_every_finding_is_reported_once(self, monkeypatch, report_log, tmp_path, env_key, finding):
+        """Repeated reads interleaved with repeated reports -- what repeated startups do -- log each finding ONCE."""
+        log, records = report_log
+        monkeypatch.setenv("CANOPY_API_KEY_FILE", str(tmp_path / "absent"))
+        monkeypatch.setenv("CANOPY_API_KEY", env_key)
+        outcomes = []
+        for _ in range(3):
+            get_api_key_auth()
+            outcomes.append(report_api_key_configuration(log))
+            outcomes.append(report_api_key_configuration(log, boot_refused=True))
+        assert outcomes == [2, 0, 0, 0, 0, 0]
+        assert [r.getMessage() for r in records] == [MISSING_KEY_FILE_WARNING, finding]
+
+    def test_no_finding_logs_the_key_or_the_path(self, monkeypatch, report_log, tmp_path):
+        """Variable NAMES only: an operator who confuses the two variables puts the key itself in CANOPY_API_KEY_FILE."""
+        log, records = report_log
+        monkeypatch.setenv("CANOPY_API_KEY_FILE", str(tmp_path / "leaked-path-QRS"))
+        monkeypatch.setenv("CANOPY_API_KEY", " leaked-key-TUV\n")
+        get_api_key_auth()
+        assert report_api_key_configuration(log) == 2
+        rendered = [r.getMessage() + repr(r.__dict__) for r in records]
+        assert len(rendered) == 2
+        assert not [text for text in rendered if "leaked-path-QRS" in text or "leaked-key-TUV" in text]
+
+    def test_the_report_needs_no_second_read_of_the_secret(self, monkeypatch, report_log, tmp_path):
+        log, records = report_log
+        monkeypatch.setenv("CANOPY_API_KEY_FILE", str(tmp_path / "absent"))
+        monkeypatch.setenv("CANOPY_API_KEY", " real-key")
+        get_api_key_auth()
+        monkeypatch.delenv("CANOPY_API_KEY_FILE")
+        monkeypatch.delenv("CANOPY_API_KEY")
+        assert report_api_key_configuration(log) == 2
+        assert [r.getMessage() for r in records] == [MISSING_KEY_FILE_WARNING, PADDED_KEY_WARNING]
+
+    def test_reset_security_state_clears_every_recorded_finding(self, monkeypatch, report_log, tmp_path):
+        log, records = report_log
+        monkeypatch.setenv("CANOPY_API_KEY_FILE", str(tmp_path / "absent"))
+        monkeypatch.setenv("CANOPY_API_KEY", " real-key")
+        get_api_key_auth()
+        reset_security_state()
+        assert report_api_key_configuration(log) == 0  # nothing recorded until the key is read again
+        get_api_key_auth()
+        assert report_api_key_configuration(log) == 2
+        assert len(records) == 2
 
     def test_get_rate_limiter_reads_settings(self):
         from unittest.mock import MagicMock, patch

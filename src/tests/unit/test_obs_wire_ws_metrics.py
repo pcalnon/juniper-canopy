@@ -381,10 +381,10 @@ class TestMiddlewareOrder:
     # LAST" ↔ "RequestIdMiddleware appears BEFORE PrometheusMiddleware
     # in user_middleware" (lower index = outer = added later).
 
-    def test_request_id_middleware_added_after_prometheus_middleware_in_main(self):
+    def test_request_id_middleware_added_after_prometheus_middleware_in_main(self, monkeypatch):
         """Structural test: walk ``app.user_middleware`` on the production
-        ``main.app`` and (when ``PrometheusMiddleware`` is present) assert
-        ``RequestIdMiddleware`` was added AFTER ``PrometheusMiddleware``.
+        ``main.app`` and assert ``RequestIdMiddleware`` was added AFTER
+        ``PrometheusMiddleware``.
 
         ``add_middleware`` prepends, so the more-recently-added entry has
         the LOWER index. Therefore ``RequestIdMiddleware`` index
@@ -392,22 +392,61 @@ class TestMiddlewareOrder:
         ↔ RequestId is OUTERMOST at request time. Matches the canonical
         add-order in juniper-data (``juniper_data/api/app.py``) and
         juniper-cascor (``src/api/app.py``).
+
+        Historically this test ran with a runtime ``pytest.skip`` when
+        ``PrometheusMiddleware`` was absent (the canonical test-env
+        setting is ``metrics_enabled=False``). To make the test
+        deterministic — and to actually exercise the production
+        conditional ``add_middleware`` branch at ``main.py:314`` — we
+        force ``JUNIPER_CANOPY_METRICS_ENABLED=1`` and reload ``main``
+        inside the test, then restore the original module state in
+        the ``finally`` block so other tests see the canonical layout.
         """
-        # Importing main builds the FastAPI ``app`` and runs all
-        # ``app.add_middleware(...)`` calls.
-        import main as canopy_main  # noqa: WPS433 — module-level side effect is the point
+        import importlib
+        import sys
 
-        names = [type(m.cls).__name__ if hasattr(m, "cls") else m.cls.__name__ for m in canopy_main.app.user_middleware]
-        request_id_idx = next((i for i, n in enumerate(names) if "RequestId" in n), None)
-        prometheus_idx = next((i for i, n in enumerate(names) if "Prometheus" in n), None)
+        # Force metrics on so the conditional ``add_middleware`` branch
+        # for ``PrometheusMiddleware`` fires.
+        monkeypatch.setenv("JUNIPER_CANOPY_METRICS_ENABLED", "1")
 
-        # PrometheusMiddleware may be absent if metrics_enabled=False in
-        # the test settings — covered by the synthetic test below.
-        if prometheus_idx is None:
-            pytest.skip("PrometheusMiddleware not registered (metrics_enabled=False); covered by synthetic test")
+        # ``get_settings`` is ``@lru_cache``-d; clear it so the reloaded
+        # ``main`` reads the new env value.
+        from settings import get_settings
 
-        assert request_id_idx is not None, "RequestIdMiddleware missing from app.user_middleware"
-        assert request_id_idx < prometheus_idx, f"RequestIdMiddleware (index {request_id_idx}) MUST appear BEFORE " f"PrometheusMiddleware (index {prometheus_idx}) in app.user_middleware " f"(add_middleware prepends — LOWER index = added LATER = OUTERMOST). " f"Order seen: {names}"
+        get_settings.cache_clear()
+
+        try:
+            # Reload main with metrics on. If main was already imported
+            # by an earlier test, ``importlib.reload`` re-runs its top-
+            # level code in place; otherwise import fresh.
+            if "main" in sys.modules:
+                canopy_main = importlib.reload(sys.modules["main"])
+            else:
+                import main as canopy_main  # noqa: WPS433 — module-level side effect is the point
+
+            # ``m.cls`` is the middleware *class* itself (modern starlette
+            # ``Middleware`` namedtuple). ``m.cls.__name__`` gives the
+            # class name. (The historical ``type(m.cls).__name__`` branch
+            # in the pre-fix version yielded ``'type'`` for every entry
+            # because ``m.cls`` is a class object — only the synthetic
+            # test below got the extraction right.)
+            names = [m.cls.__name__ for m in canopy_main.app.user_middleware]
+            request_id_idx = next((i for i, n in enumerate(names) if "RequestId" in n), None)
+            prometheus_idx = next((i for i, n in enumerate(names) if "Prometheus" in n), None)
+
+            assert prometheus_idx is not None, f"PrometheusMiddleware missing despite metrics_enabled=1; order seen: {names}"
+            assert request_id_idx is not None, "RequestIdMiddleware missing from app.user_middleware"
+            assert request_id_idx < prometheus_idx, f"RequestIdMiddleware (index {request_id_idx}) MUST appear BEFORE " f"PrometheusMiddleware (index {prometheus_idx}) in app.user_middleware " f"(add_middleware prepends — LOWER index = added LATER = OUTERMOST). " f"Order seen: {names}"
+        finally:
+            # Restore: monkeypatch undoes the env var, then we clear the
+            # settings cache and reload main so subsequent tests see the
+            # canonical metrics-disabled test-env layout.
+            get_settings.cache_clear()
+            if "main" in sys.modules:
+                try:
+                    importlib.reload(sys.modules["main"])
+                except Exception:  # nosec B110 - cleanup; cannot risk masking the actual assertion failure
+                    pass
 
     def test_request_id_added_after_prometheus_synthetic(self):
         """Synthetic FastAPI app that replays canopy main.py's exact

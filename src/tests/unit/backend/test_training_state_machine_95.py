@@ -4,7 +4,7 @@ Coverage completion tests for TrainingStateMachine.
 
 Targets specific uncovered lines to reach 95% coverage:
 - Lines 147-148: handle_command with unknown command
-- Line 161: _handle_start returning False from COMPLETED/FAILED state
+- _handle_start auto-resetting from a terminal (COMPLETED/FAILED) state before START
 - Line 203: _handle_pause returning False from COMPLETED/FAILED state
 - Line 219: _handle_resume returning False from COMPLETED/FAILED state
 - Lines 227-228: _check_for_paused_state with no paused_phase
@@ -49,10 +49,20 @@ class TestUnknownCommandHandling:
 
 
 class TestHandleStartFromTerminalStates:
-    """Test _handle_start returning False from COMPLETED/FAILED states (line 161)."""
+    """START from a terminal (COMPLETED/FAILED) state auto-resets, then starts.
 
-    def test_start_from_completed_state_returns_false(self):
-        """Test START command from COMPLETED state returns False."""
+    N3 (canopy training-runtime defects plan, folded finding 1): the demo FSM now
+    mirrors the cascor engine FSM (juniper-cascor src/api/lifecycle/state_machine.py:171-173),
+    which auto-resets from a terminal state before START — so a START, or an N3
+    "Stop & Restart with new dataset", from a converged/failed demo run is no
+    longer silently refused (the pre-N3 behavior that turned canopy's CI UI leg
+    red, §13 N2 addendum). These assertions replace the earlier refuse-from-
+    terminal pins and are strictly stronger: they require a real transition to
+    STARTED rather than a no-op ``False``.
+    """
+
+    def test_start_from_completed_state_auto_resets_and_starts(self):
+        """START from COMPLETED auto-resets to STOPPED, then starts (cascor parity)."""
         fsm = TrainingStateMachine()
 
         # Get to COMPLETED state
@@ -61,14 +71,15 @@ class TestHandleStartFromTerminalStates:
 
         assert fsm.is_completed()
 
-        # START from COMPLETED should return False (line 161)
+        # START from COMPLETED now auto-resets and starts (was refused pre-N3).
         result = fsm.handle_command(Command.START)
 
-        assert result is False
-        assert fsm.is_completed()  # State unchanged
+        assert result is True
+        assert fsm.is_started()
+        assert fsm.get_phase() == TrainingPhase.OUTPUT
 
-    def test_start_from_failed_state_returns_false(self):
-        """Test START command from FAILED state returns False."""
+    def test_start_from_failed_state_auto_resets_and_starts(self):
+        """START from FAILED auto-resets to STOPPED, then starts (cascor parity)."""
         fsm = TrainingStateMachine()
 
         # Get to FAILED state
@@ -77,11 +88,12 @@ class TestHandleStartFromTerminalStates:
 
         assert fsm.is_failed()
 
-        # START from FAILED should return False (line 161)
+        # START from FAILED now auto-resets and starts (was refused pre-N3).
         result = fsm.handle_command(Command.START)
 
-        assert result is False
-        assert fsm.is_failed()  # State unchanged
+        assert result is True
+        assert fsm.is_started()
+        assert fsm.get_phase() == TrainingPhase.OUTPUT
 
 
 class TestHandlePauseFromTerminalStates:
