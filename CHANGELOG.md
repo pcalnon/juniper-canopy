@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-10
+
 ### Added
 
 - **The recurrence model's version is shown (W1.7, display half; F-C8).** canopy#722 made the version the service
@@ -180,6 +182,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The `[juniper-data]` extra admits juniper-data-client 0.6.0**: `juniper-data-client>=0.5.0,<0.7.0`
+  (ceiling `<0.6.0` → `<0.7.0`). This is W1.13 of the juniper-ml recurrence × equities plan.
+  - data-client 0.6.0 tightens `validate_npz_contract` (W1.4): finite `dt`, `target_dt` /
+    `seq_lengths` shape and range checks, and `float32` `X` / `y` / `y_reg`. canopy runs it as an
+    ADVISORY second check on generator loads.
+  - The W1.4 downstream census (juniper-data-client 0.6.0's CHANGELOG) found canopy's fake-vs-real
+    agreement test still passing.
+  - The release train's consumer propagation did not raise this ceiling, because the pin lives in
+    an extra.
 - **The registry's availability and task-type comments match what juniper-data ships, and the recurrence
   seed carries a gate note (W1.11, the canopy comment half).** The plan is juniper-ml's
   `notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md`.
@@ -941,6 +952,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `FailedAuthThrottle`; canopy's own copies live in `src/security.py`, so that pin is
   consistency with the sibling services. The lock was regenerated with `--upgrade-package` for the
   two packages only (60 pins; the freshness gate's constraint-mode resolution reproduces them).
+  `pyproject.toml` now floors both as well, at `juniper-observability>=0.4.1` and
+  `juniper-service-core>=0.7.1` (owner-approved), so an install of canopy 0.9.0 cannot resolve the
+  unpatched releases. The boot-time `enforce_dependency_floors` reads the **installed** metadata,
+  so an existing editable install keeps booting until it is reinstalled; the reinstall upgrades it.
 - **`APIKeyAuth` now carries the blank-key filter and the non-short-circuiting compare that its
   sibling copies carry (APD-ECO-008).** `src/security.py` is the fourth copy of the ecosystem's
   `APIKeyAuth`. `validate` used `any(hmac.compare_digest(...))`, which stops at the first match,
