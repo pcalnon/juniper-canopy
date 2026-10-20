@@ -198,10 +198,16 @@ class TestF018ApplyToastSurvives:
 
 @pytest.mark.unit
 class TestF028PinnedParamsPreserved:
-    """The pattern-matched writer rebuilt the whole list from the DOM, so it asserted
-    "not pinned" for every key whose checkbox it could not see — and the next toggle
-    persisted that under-report.
+    """The pattern-matched writer used to persist the RENDERED pin set: first the whole
+    list rebuilt from the DOM (an off-screen pin read as "not pinned"), then, after
+    canopy#533, the rendered set merged into the stored one — which still persisted a
+    rebuilt table's stale set over a click made just before it (Phase 14, item 30: one
+    drive in eight). It now persists a user's toggle alone: exactly one pin input
+    triggered, that key added or removed, the rest untouched; a rebuild (every input
+    triggered at once) writes nothing.
     """
+
+    ALL_KEYS = ("learning_rate", "max_iterations", "patience", "output_epochs")
 
     @staticmethod
     def _ids(*keys):
@@ -209,33 +215,57 @@ class TestF028PinnedParamsPreserved:
 
     def test_unrendered_pins_are_preserved(self, dm):
         """THE regression: pinning a NEW key must not drop a key that is off-screen."""
-        result = dm._merge_pinned_params([True], self._ids("max_iterations"), ["learning_rate"])
-        assert "learning_rate" in result, "a pin whose checkbox was not rendered was silently discarded"
-        assert "max_iterations" in result
+        result = dm._apply_pin_toggle(self._ids("max_iterations"), [True], self._ids("max_iterations"), ["learning_rate"])
+        assert result == ["learning_rate", "max_iterations"], "a pin whose checkbox was not rendered was silently discarded"
+
+    def test_a_rebuilt_table_from_a_stale_set_writes_nothing(self, dm):
+        """Phase 14's loss (early#2): the click stored both keys, then a rebuild computed
+        from the pre-click set arrived with every checkbox triggered and the new pin
+        unchecked. The store keeps the toggle."""
+        ids = self._ids(*self.ALL_KEYS)
+        values = [True, False, False, False]  # learning_rate checked; max_iterations stale, unchecked
+        assert dm._apply_pin_toggle(ids, values, ids, ["learning_rate", "max_iterations"]) is dash.no_update
+
+    def test_the_mount_render_writes_nothing_even_with_an_empty_store(self, dm):
+        """The original shape: a mount before the local store hydrates rendered every
+        checkbox unchecked, and the writer persisted ``[]``."""
+        ids = self._ids(*self.ALL_KEYS)
+        assert dm._apply_pin_toggle(ids, [False] * 4, ids, ["learning_rate", "patience"]) is dash.no_update
+        assert dm._apply_pin_toggle(ids, [False] * 4, ids, []) is dash.no_update
 
     def test_no_checkboxes_rendered_is_never_a_wipe(self, dm):
         """An empty component set is not evidence that nothing is pinned."""
-        assert dm._merge_pinned_params([], [], ["learning_rate", "patience"]) is dash.no_update
-        assert dm._merge_pinned_params(None, None, ["learning_rate"]) is dash.no_update
+        assert dm._apply_pin_toggle([], [], [], ["learning_rate", "patience"]) is dash.no_update
+        assert dm._apply_pin_toggle(None, None, None, ["learning_rate"]) is dash.no_update
 
     def test_unpinning_a_rendered_key_still_works(self, dm):
-        """Forward guard: preserving the unseen must not make pins un-removable."""
-        result = dm._merge_pinned_params([False, True], self._ids("learning_rate", "patience"), ["learning_rate", "patience"])
+        """Forward guard: acting on the toggle alone must not make pins un-removable."""
+        ids = self._ids("learning_rate", "patience")
+        result = dm._apply_pin_toggle(self._ids("learning_rate"), [False, True], ids, ["learning_rate", "patience"])
         assert result == ["patience"]
 
     def test_rendered_state_wins_over_the_stored_value(self, dm):
-        """A rendered checkbox is authoritative for its own key, checked or not."""
-        assert dm._merge_pinned_params([False], self._ids("a"), ["a"]) == []
-        assert dm._merge_pinned_params([True], self._ids("a"), []) == ["a"]
+        """The toggled checkbox is authoritative for its own key, checked or not; a
+        toggle the store already reflects writes nothing."""
+        assert dm._apply_pin_toggle(self._ids("a"), [False], self._ids("a"), ["a"]) == []
+        assert dm._apply_pin_toggle(self._ids("a"), [True], self._ids("a"), []) == ["a"]
+        assert dm._apply_pin_toggle(self._ids("a"), [True], self._ids("a"), ["a"]) is dash.no_update
+        assert dm._apply_pin_toggle(self._ids("a"), [False], self._ids("a"), []) is dash.no_update
 
     def test_order_is_stable(self, dm):
-        """Unseen keys first, then render order — the sidebar must not reshuffle."""
-        result = dm._merge_pinned_params([True, True], self._ids("b", "c"), ["a", "b"])
+        """The stored order is kept and a new pin is appended — the sidebar must not reshuffle."""
+        result = dm._apply_pin_toggle(self._ids("c"), [True, True], self._ids("b", "c"), ["a", "b"])
         assert result == ["a", "b", "c"]
 
+    def test_only_the_toggled_key_changes(self, dm):
+        """The other rendered checkboxes, however stale, are not consulted."""
+        ids = self._ids("a", "b", "c")
+        assert dm._apply_pin_toggle(self._ids("c"), [False, False, True], ids, ["a", "b"]) == ["a", "b", "c"]
+
     def test_empty_and_malformed_ids_do_not_crash(self, dm):
-        assert dm._merge_pinned_params([True], [None], ["x"]) is dash.no_update
-        assert dm._merge_pinned_params([True], [{"type": "param-pin"}], ["x"]) is dash.no_update
+        assert dm._apply_pin_toggle([None], [True], [None], ["x"]) is dash.no_update
+        assert dm._apply_pin_toggle([{"type": "param-pin"}], [True], [{"type": "param-pin"}], ["x"]) is dash.no_update
+        assert dm._apply_pin_toggle(self._ids("a"), [], [], ["x"]) is dash.no_update
 
 
 # ----------------------------------------------------------------------------------
