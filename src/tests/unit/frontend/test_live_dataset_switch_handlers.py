@@ -1,6 +1,6 @@
 """P2-6 (Issue #3) — Unit tests for Live Dataset Switch handler methods.
 
-Direct-invocation tests for the seven ``_handler`` methods refactored
+Direct-invocation tests for the six ``_handler`` methods refactored
 out of ``_setup_live_dataset_switch_callbacks`` in P2-6. The handlers
 encode the Dash callback logic (gate, modal flow, POST + outcome,
 cancel, status mirror) as pure Python so each branch is exercisable
@@ -308,20 +308,13 @@ class TestAcceptLiveSwitchHandler:
 
 
 # ---------------------------------------------------------------------------
-# 6. _open_progress_alert_on_accept_handler
+# 6. (gone) _open_progress_alert_on_accept_handler
 # ---------------------------------------------------------------------------
-
-
-class TestOpenProgressAlertOnAcceptHandler:
-    """Open the progress alert + flip in_flight=True the moment Accept
-    is clicked. Split from the Accept POST handler so the spinner shows
-    before the POST returns (5–30s)."""
-
-    def test_click_returns_open_and_in_flight(self, dm):
-        assert dm._open_progress_alert_on_accept_handler(n_clicks=1) == (True, {"in_flight": True})
-
-    def test_no_click_returns_no_update(self, dm):
-        assert dm._open_progress_alert_on_accept_handler(n_clicks=None) == (dash.no_update, dash.no_update)
+# F-CANOPY-069: the progress alert and the in-flight store are opened by
+# ``accept_live_switch``'s ``running=`` spec, not by a second callback on the
+# same Input -- its hashed output ids collided with the accept callback's and
+# dash 3's renderer refused the whole graph. The spec is pinned in
+# ``test_f069_duplicate_callback_outputs.py``.
 
 
 # ---------------------------------------------------------------------------

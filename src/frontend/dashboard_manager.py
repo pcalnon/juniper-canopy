@@ -2420,8 +2420,10 @@ class DashboardManager:
                     centered=True,
                 ),
                 # N3: restart progress alert — opens on Confirm (spinner while the
-                # bounded stop → await → start POST is in flight). Split from the
-                # outcome callback so the spinner shows before the POST returns.
+                # bounded stop → await → start POST is in flight). Opened by
+                # ``execute_restart``'s ``running=`` spec the moment Confirm is
+                # clicked and closed when its response lands (F-CANOPY-069: the
+                # separate opener callback collided with it under dash 3).
                 dbc.Alert(
                     [
                         dbc.Spinner(size="sm", color="light"),
@@ -6216,7 +6218,7 @@ class DashboardManager:
     def _setup_live_dataset_switch_callbacks(self):
         """Phase 2 P2-5 (Issue #3): Live Dataset Switch flow.
 
-        Seven callbacks, each a thin wrapper around a class-level
+        Six callbacks, each a thin wrapper around a class-level
         ``_*_handler`` method (P2-6 refactor — handlers are unit-tested
         in ``tests/unit/frontend/test_live_dataset_switch_handlers.py``):
 
@@ -6226,9 +6228,12 @@ class DashboardManager:
            AND training is running.
         3. Open warning modal + populate dataset summary.
         3b. Stop & Restart fallback closes modal (minimal interpretation).
-        4. Accept → POST /api/live_dataset_swap → outcome alert.
-        4b. Open progress alert immediately on Accept (split so spinner
-            shows before the 5–30 s POST returns).
+        4. Accept → POST /api/live_dataset_swap → outcome alert. The
+           progress alert and the in-flight store open the moment Accept
+           is clicked through this callback's ``running=`` spec, not a
+           second callback (F-CANOPY-069: an opener on the same Input
+           collided with this callback's hashed output ids, and dash 3's
+           renderer refused the whole callback graph).
         5. Cancel during swap → DELETE /api/live_dataset_swap.
 
         Full design rationale lives in the §4.2 / §4.3 spec sections
@@ -6307,6 +6312,18 @@ class DashboardManager:
             prevent_initial_call=True,
         )
 
+        # F-CANOPY-069: the progress alert and the in-flight store used to be opened by a
+        # SECOND callback on this same Input (``open_progress_alert_on_accept``) so that the
+        # spinner showed before the 5–30 s POST returned. Two callbacks with one Input and the
+        # same ``allow_duplicate`` Output get the same hashed output id (``create_callback_id``
+        # hashes the inputs only): dash 3's renderer refuses the whole callback graph on that
+        # collision ("Duplicate callback outputs") and the dashboard is inert, and dash 4 skips
+        # the validation and runs both, racing their responses for the alert. ``running=`` is
+        # the renderer's own idiom for exactly this: it sets the props client-side the moment
+        # the request leaves and resets them when the response lands, with no second callback
+        # and no round trip. (Not the F-CANOPY-058 shape: that guard wrote an Interval's
+        # ``disabled`` and its release on an evicted request un-gated a lane; here an eviction
+        # can only close a spinner the user re-clicked.)
         @self.app.callback(
             [
                 Output("live-switch-modal", "is_open", allow_duplicate=True),
@@ -6325,21 +6342,14 @@ class DashboardManager:
             State({"type": "nn-gen-param", "name": dash.ALL}, "value"),
             State({"type": "nn-gen-param", "name": dash.ALL}, "id"),
             State("model-selection-store", "data"),
+            running=[
+                (Output("live-switch-progress-alert", "is_open"), True, False),
+                (Output("live-swap-in-flight-store", "data"), {"in_flight": True}, {"in_flight": False}),
+            ],
             prevent_initial_call=True,
         )
         def accept_live_switch(n_clicks, dataset_type, n_samples, noise, n_spirals, rotations, gen_values, gen_ids, model_key):
             return self._accept_live_switch_handler(n_clicks=n_clicks, dataset_type=dataset_type, n_samples=n_samples, noise=noise, n_spirals=n_spirals, rotations=rotations, gen_values=gen_values, gen_ids=gen_ids, nn_model=model_key)
-
-        @self.app.callback(
-            [
-                Output("live-switch-progress-alert", "is_open", allow_duplicate=True),
-                Output("live-swap-in-flight-store", "data", allow_duplicate=True),
-            ],
-            Input("live-switch-accept-button", "n_clicks"),
-            prevent_initial_call=True,
-        )
-        def open_progress_alert_on_accept(n_clicks):
-            return self._open_progress_alert_on_accept_handler(n_clicks=n_clicks)
 
         @self.app.callback(
             Output("live-switch-outcome-alert", "children", allow_duplicate=True),
@@ -6354,7 +6364,7 @@ class DashboardManager:
         confirm modal (Q3/Q4) + the stop → await stopped → start(staged)
         orchestration that replaces the pre-N3 feedback-free callback.
 
-        Five thin callbacks, each delegating to a class-level ``_*_handler`` so the
+        Four thin callbacks, each delegating to a class-level ``_*_handler`` so the
         branch logic is unit-testable by direct invocation:
 
         1. Open the confirm modal on the banner's "Stop & Restart" button; populate
@@ -6362,12 +6372,14 @@ class DashboardManager:
            start-fresh toggle to its default OFF (Q4) and the verify section closed.
         2. Toggle the expandable granular verify section (Q3).
         3. Cancel — close the modal.
-        4. Open the progress spinner the instant Confirm is clicked (split so the
-           spinner shows before the bounded stop→await→start POST returns).
-        5. Execute — POST /api/train/restart {start_fresh, reset}; render every
+        4. Execute — POST /api/train/restart {start_fresh, reset}; render every
            step's outcome (success incl. instant-convergence, or per-step failure
            with the upstream detail); close the modal + progress; keep the pending
-           banner open on failure, close it on success.
+           banner open on failure, close it on success. The progress spinner opens
+           the instant Confirm is clicked through this callback's ``running=`` spec
+           (F-CANOPY-069: the separate opener callback on the same Input collided
+           with this callback's hashed output id, and dash 3's renderer refused the
+           whole callback graph).
         """
 
         @self.app.callback(
@@ -6466,16 +6478,6 @@ class DashboardManager:
             return False
 
         @self.app.callback(
-            Output("restart-progress-alert", "is_open", allow_duplicate=True),
-            Input("restart-confirm-button", "n_clicks"),
-            prevent_initial_call=True,
-        )
-        def open_restart_progress(n_clicks):
-            if not n_clicks:
-                return dash.no_update
-            return True
-
-        @self.app.callback(
             [
                 Output("restart-confirm-modal", "is_open", allow_duplicate=True),
                 Output("restart-progress-alert", "is_open", allow_duplicate=True),
@@ -6502,6 +6504,9 @@ class DashboardManager:
                 # sidebar's do, so a stale tab is refused (409) before the restart runs.
                 dash.dependencies.State("model-selection-store", "data"),
             ],
+            # F-CANOPY-069: the spinner is this callback's ``running=`` spec, not a second
+            # callback on the same Input (see ``accept_live_switch``).
+            running=[(Output("restart-progress-alert", "is_open"), True, False)],
             prevent_initial_call=True,
         )
         def execute_restart(n_clicks, start_fresh, ds_type, ds_samples, ds_noise, ds_rot, ds_spirals, p_lr, p_hu, p_pat, p_pool, p_sel, p_corr, baseline, model_key):
@@ -7225,7 +7230,9 @@ class DashboardManager:
             (spec §4.3: "failure shows the server error verbatim")
           * RequestException → danger alert with the exception detail
 
-        On every branch the modal + progress alert close and in_flight=False.
+        On every branch the modal + progress alert close and in_flight=False. The alert
+        and the store are OPENED by the callback's ``running=`` spec the moment the request
+        leaves (F-CANOPY-069), so no handler opens them.
         """
         if not n_clicks:
             return dash.no_update, dash.no_update, dash.no_update, dash.no_update
@@ -7271,19 +7278,6 @@ class DashboardManager:
             self.logger.warning("Live dataset swap exception: %s", exc)
             outcome = dbc.Alert(f"Backend unreachable: {exc}", color="danger", duration=5000, dismissable=True)
             return False, False, outcome, {"in_flight": False}
-
-    def _open_progress_alert_on_accept_handler(self, n_clicks=None):
-        """Open the progress alert + flip in_flight=True the moment Accept
-        is clicked.
-
-        Returns ``(progress_open, in_flight)``. Split from the Accept POST
-        handler so the user sees the spinner immediately rather than
-        waiting for the (5–30 s) POST to return. Dash runs both callbacks
-        on the worker pool; this one returns near-instantly.
-        """
-        if not n_clicks:
-            return dash.no_update, dash.no_update
-        return True, {"in_flight": True}
 
     def _cancel_live_switch_handler(self, n_clicks=None):
         """DELETE ``/api/live_dataset_swap`` to cancel an in-flight swap.

@@ -337,10 +337,20 @@ class TestLiveDatasetSwitchInner:
         assert outcome is not None
         assert mock_post.call_args.kwargs["json"]["nn_model"] == "cascor"
 
-    def test_open_progress_alert_on_accept(self, dm):
-        cb = raw_cb(dm, "open_progress_alert_on_accept")
-        progress, in_flight = cb(1)
-        assert progress is True and in_flight == {"in_flight": True}
+    def test_accept_live_switch_opens_the_progress_alert_through_running(self, dm):
+        # F-CANOPY-069: no second callback opens the alert; the accept callback's
+        # ``running=`` spec does, client-side, the moment the request leaves. Exact
+        # id parsing: the cancel callback writes the same prop under an ``@hash``.
+        def exact_outputs(raw):
+            raw = str(raw)
+            return raw[2:-2].split("...") if raw.startswith("..") else [raw]
+
+        entries = [e for e in dm.app._callback_list if "live-switch-outcome-alert.children" in exact_outputs(e["output"])]
+        assert len(entries) == 1
+        assert entries[0].get("running") == {
+            "running": {"live-switch-progress-alert.is_open": True, "live-swap-in-flight-store.data": {"in_flight": True}},
+            "runningOff": {"live-switch-progress-alert.is_open": False, "live-swap-in-flight-store.data": {"in_flight": False}},
+        }
 
     @patch("requests.delete")
     def test_cancel_live_switch_success(self, mock_delete, dm):
