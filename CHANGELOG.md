@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **F-CANOPY-069: under every dash 3.x release the dashboard was inert in the browser.** Two callback pairs each
+  claimed one `allow_duplicate` Output from one Input: `accept_live_switch` and `open_progress_alert_on_accept` on
+  `live-switch-accept-button.n_clicks`, and `execute_restart` and `open_restart_progress` on
+  `restart-confirm-button.n_clicks`. Dash hashes the inputs into an `allow_duplicate` output id
+  (`create_callback_id`), so each pair's ids collided. dash 3's renderer validates the served dependency list
+  unconditionally and, on that `Duplicate callback outputs` error, drops the whole callback graph: the page
+  rendered and nothing on it worked (measured on 3.0.4, 3.2.0, 3.3.0 and 3.4.0; `conf/conda_environment.yaml`
+  pinned 3.3.0). dash 4 validates only with dev tools on, ran both members of each pair, and let the order of
+  their responses decide whether the spinner flashed or stuck. The openers existed to show the progress spinner
+  before the slow POST returned, which is what a callback's `running=` spec is for: `accept_live_switch` and
+  `execute_restart` now carry their progress alerts (and the live-swap in-flight store) as `running=`, so the
+  renderer opens them the moment the request leaves and closes them when the response lands, with no second
+  callback and no round trip. `open_progress_alert_on_accept`, `open_restart_progress` and
+  `_open_progress_alert_on_accept_handler` are gone. Pinned by
+  `src/tests/unit/frontend/test_f069_duplicate_callback_outputs.py`: no output id is claimed by two callbacks
+  (ids computed as `create_callback_id` does, over the served dependency list; the scan is shown to catch the
+  shape that bit canopy), each progress alert has one writer, each of the two Inputs runs one callback, and the
+  two `running` specs are what the renderer expects. Verified alive in the browser on legs of this tree under
+  dash 3.3.0 and 4.4.1 (juniper-ml `util/ad-hoc/2026-10-20_canopy_dash_duplicate_outputs_probe.py`, Phase 14's
+  per-dash probe; one POST per click, the spinner opening on the request and closing on the response,
+  `util/ad-hoc/2026-10-20_f069_pair_members_probe.py`). Ledger: juniper-ml
+  `notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phase 14 (filed) and Phase 15 (closed).
+
+### Changed
+
+- **The dash floor is `dash>=4.0.0`** (`pyproject.toml`; `conf/requirements_ci.txt`, which `requirements.txt` and
+  `requirements_ci.txt` link to), and `conf/conda_environment.yaml` pins `dash=4.4.1` with dash 4's two new run
+  dependencies, `comm` and `janus`, at the lock's versions. Everything canopy tests runs dash 4.x (the lock's 4.4.1,
+  CI's 4.4.1 pip lane and 4.1.0 conda lane, every live drive in the E2E ledger), and a floor that nothing tests is
+  how F-CANOPY-069 stayed invisible: the conda file was the one environment on 3.x, and it was the one nobody
+  drove. The fix itself does not depend on the dash version; a 3.3.0 leg of this tree is alive too.
+
 ## [0.9.0] - 2026-10-10
 
 ### Added
