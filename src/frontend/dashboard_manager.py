@@ -5224,16 +5224,19 @@ class DashboardManager:
         # every checkbox's value + id without enumerating per-key
         # dependencies. The store is the source of truth for both the
         # Parameters tab table re-render and the sidebar mirror below.
-        # F-CANOPY-018 / F-CANOPY-028: this writer collects the state of EVERY pin
-        # checkbox and replaces the store wholesale, so it asserts "not pinned" for
-        # every key whose checkbox it cannot see. The rendered set is not always the
-        # full set: the Parameters tables are rebuilt on every params-store change,
-        # and any render that happens while the store is empty or stale (mount before
-        # ``storage_type="local"`` hydration, a tab whose tables are not in the DOM)
-        # produces a values/ids pair that under-reports the real pin set — and the
-        # next toggle then persists that under-report, silently discarding pins made
-        # before a reload. It now writes only what it can actually observe and
-        # preserves the rest.
+        # F-CANOPY-018 / F-CANOPY-028: this writer fires on EVERY change to any pin
+        # checkbox's ``value`` — a user's toggle, and every rebuild of the Parameters
+        # tables (the tables are rebuilt on every params-store or pin-store change, and
+        # a rebuild re-creates all 22 checkboxes, so every one of them arrives as
+        # "changed"). canopy#533 made it merge the rendered set into the stored one,
+        # which closed the mount-with-an-empty-store shape; the Phase 14 re-drive
+        # (2026-10-20) caught the other one: a rebuild whose request was in flight when
+        # a click's write landed renders the pin set it was computed from, fires this
+        # writer with that stale set, and the merge persisted it over the click. The
+        # writer now acts on a USER TOGGLE only — exactly one pin input triggered — and
+        # adds or removes that key alone; a rebuild (every input triggered at once) and
+        # a toggle the store already reflects write nothing. Renders follow the store;
+        # the store follows the user.
         @self.app.callback(
             Output("pinned-params-store", "data"),
             Input({"type": "param-pin", "key": dash.ALL}, "value"),
@@ -5242,8 +5245,9 @@ class DashboardManager:
             prevent_initial_call=True,
         )
         def update_pinned_params_store(values, ids, current):
-            """Merge the rendered checkboxes' state into the persisted pin list."""
-            return self._merge_pinned_params(values, ids, current)
+            """Persist a user's toggle of one pin checkbox; ignore a rebuilt table."""
+            triggered = list(get_callback_context().get_triggered_prop_ids().values())
+            return self._apply_pin_toggle(triggered, values, ids, current)
 
         # CAN-005: render the sidebar's "Pinned Parameters" mirror.
         # When the pinned list is empty, hide the entire card so the
@@ -7311,35 +7315,44 @@ class DashboardManager:
 
     # Define event handlers for callbacks
     @staticmethod
-    def _merge_pinned_params(values, ids, current):
-        """Merge the RENDERED pin checkboxes into the persisted pin list (F-CANOPY-028).
+    def _apply_pin_toggle(triggered, values, ids, current):
+        """Persist a USER'S toggle of one pin checkbox, and nothing else (F-CANOPY-028).
 
-        The pattern-matched writer used to rebuild the whole list from the DOM, which
-        makes "this checkbox is absent" indistinguishable from "this key is not
-        pinned". Any render that under-reports the pin set — a mount before the
-        ``storage_type="local"`` store hydrates, or tables that are not in the DOM —
-        therefore got persisted on the next toggle, discarding earlier pins with no
-        warning.
+        ``triggered`` is the list of component ids (the pattern-matching dicts) whose
+        ``value`` fired this call: ``CallbackContextAdapter.get_triggered_prop_ids()``'s
+        values. A user's click changes exactly one checkbox. A rebuilt table arrives
+        with EVERY checkbox triggered at once, carrying the pin set the render was
+        computed from — stale whenever its request was in flight while a click's write
+        landed — and the mount render arrives the same way with whatever the store held
+        when the page loaded. Neither is evidence about what the user wants pinned, so
+        neither writes. (The pre-#533 writer rebuilt the list from the DOM and wiped
+        off-screen pins; #533's merge of the rendered set into the stored one kept
+        those but still persisted a stale rebuild over a click made just before it.)
 
         Rules:
 
-        - No checkboxes rendered at all → ``no_update``. An empty component set is
-          never evidence that nothing is pinned, and writing ``[]`` there is exactly
-          how a full pin set gets wiped.
-        - Otherwise, keys whose checkbox IS rendered take their state from it (so
-          unpinning still works), and keys that are pinned but NOT rendered are
-          carried through untouched.
-
-        Order is stable: preserved-but-unseen keys first, then the rendered keys in
-        render order, so the sidebar mirror does not reshuffle on every toggle.
+        - not exactly one ``param-pin`` id triggered → ``no_update`` (a rebuild, or
+          nothing);
+        - the toggled key's rendered value decides it alone: checked → appended to the
+          stored list if absent; unchecked → removed if present; every other key is
+          carried through untouched, in its stored order, whatever its checkbox shows;
+        - a toggle the store already reflects → ``no_update`` (no write, no re-render).
         """
-        rendered = [i.get("key") for i in (ids or []) if isinstance(i, dict) and i.get("key")]
-        if not rendered:
+        keys = [t.get("key") for t in (triggered or []) if isinstance(t, dict) and t.get("type") == "param-pin" and t.get("key")]
+        if len(keys) != 1:
             return dash.no_update
-        checked = {i.get("key") for v, i in zip(values or [], ids or [], strict=False) if v and isinstance(i, dict)}
-        rendered_set = set(rendered)
-        preserved = [k for k in (current or []) if k and k not in rendered_set]
-        return preserved + [k for k in rendered if k in checked]
+        key = keys[0]
+        checked = None
+        for value, cid in zip(values or [], ids or [], strict=False):
+            if isinstance(cid, dict) and cid.get("key") == key:
+                checked = bool(value)
+                break
+        if checked is None:
+            return dash.no_update
+        stored = [k for k in (current or []) if k]
+        if checked:
+            return dash.no_update if key in stored else stored + [key]
+        return [k for k in stored if k != key] if key in stored else dash.no_update
 
     def _toggle_dark_mode_handler(self, current_dark_mode=None):
         """Flip the persisted dark-mode flag on button click.

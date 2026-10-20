@@ -33,6 +33,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-dash probe; one POST per click, the spinner opening on the request and closing on the response,
   `util/ad-hoc/2026-10-20_f069_pair_members_probe.py`). Ledger: juniper-ml
   `notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phase 14 (filed) and Phase 15 (closed).
+- **F-CANOPY-028: a pin made just before a table rebuild was discarded.** `update_pinned_params_store` fires on every
+  change to any pin checkbox's `value`, and the Parameters tables are rebuilt on every params-store or pin-store
+  change, each rebuild re-creating all 22 checkboxes, so a rebuild whose request was in flight when a click's write
+  landed rendered the pin set it was computed from, fired the writer with every checkbox "changed" and the new pin
+  unchecked, and the writer (canopy#533's merge of the rendered set into the stored one) persisted that set over
+  the click (juniper-ml ledger Phase 14, item 30: one drive in eight; the mount render used to do the same with an
+  empty store, the shape #533 closed). The writer now persists a user's toggle only: exactly one pin input
+  triggered (`CallbackContextAdapter.get_triggered_prop_ids`), that key added to or removed from the stored list,
+  the rest untouched; a rebuild (every input triggered at once) and a toggle the store already reflects write
+  nothing. `_merge_pinned_params` is replaced by `_apply_pin_toggle`. Tests: `test_p2_wave_batch_b.py`
+  (`TestF028PinnedParamsPreserved`: a rebuilt table from a stale set after a toggle leaves the store as the toggle
+  left it, the mount render writes nothing, the toggle cases) and `test_dashboard_manager_gate_coverage_inner1.py`.
+  Live: the pin-after-reload drive (`2026-10-20_item30_fixwave_redrive.py --step f028`) at fixed delays after the
+  reload, on a leg of this tree, is recorded in the ledger's Phase 15.
+- **`docs/USER_MANUAL.md`, Patch Weights:** the values sentence said comma-, semicolon- or newline-separated
+  floats; for `output_weights` semicolons and newlines separate rows, so F-CANOPY-012's cases B and C (a flat list
+  broken up by either) are refused on any network with more than one output. The sentence now states the row idiom
+  and the flat-list reshape.
 
 ### Changed
 
