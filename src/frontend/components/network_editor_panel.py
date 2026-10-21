@@ -418,27 +418,27 @@ class NetworkEditorPanel(BaseComponent):
     def _parse_float_list(text: Optional[str]) -> List[float]:
         """Parse a comma/whitespace-separated string into a list of floats.
 
+        Commas, semicolons and any whitespace (spaces, tabs, newlines) all
+        separate values, and the result is flat: this is the 1-D targets'
+        parse. It used to fold newlines and semicolons into commas and split on
+        commas alone, so ``0.1 0.2`` reached ``float()`` as one token and was
+        refused, although this docstring and the user manual's Patch Weights
+        bullet ("floats separated by commas or spaces") both promised spaces.
+
         Tolerates trailing commas and whitespace. Raises ``ValueError``
         on any unparseable token so the callback can surface a clear
         error to the user.
         """
         if not text or not text.strip():
             return []
-        cleaned = text.replace("\n", ",").replace(";", ",")
-        out: List[float] = []
-        for tok in cleaned.split(","):
-            tok = tok.strip()
-            if not tok:
-                continue
-            out.append(float(tok))
-        return out
+        return [float(tok) for tok in text.replace(";", " ").replace(",", " ").split()]
 
     @staticmethod
     def _parse_float_rows(text: Optional[str]) -> List[List[float]]:
         """Parse text into ROWS of floats (F-CANOPY-012).
 
         Newlines and semicolons separate rows; commas and whitespace separate the
-        values within a row. ``_parse_float_list`` flattens all three separators
+        values within a row. ``_parse_float_list`` flattens every separator
         together, which is right for the 1-D targets and is left untouched for them —
         this is the 2-D-aware sibling, used only where the wire wants a matrix.
 
