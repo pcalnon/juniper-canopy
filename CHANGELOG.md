@@ -51,6 +51,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   floats; for `output_weights` semicolons and newlines separate rows, so F-CANOPY-012's cases B and C (a flat list
   broken up by either) are refused on any network with more than one output. The sentence now states the row idiom
   and the flat-list reshape.
+- **Patch Weights refused space-separated values for the three 1-D targets.** The manual says values are "floats
+  separated by commas or spaces", and `_parse_float_list`'s docstring said "comma/whitespace-separated", but the
+  parser folded newlines and semicolons into commas and split on commas alone, so `0.1 0.2` for `output_bias`,
+  `hidden_unit_weights` or `hidden_unit_bias` (and for Append Hidden Unit's weights, the parser's other caller)
+  reached `float()` as one token and was refused; `output_weights` rows already split on whitespace. Whitespace of
+  any kind now separates values too. Every input accepted before parses to the same list, since `float()` refuses a
+  token with whitespace inside it. Tests: `test_network_editor_panel.py` (`TestParseFloatList`) and
+  `test_patch_values_manual_separators.py`, which reads the manual's sentence and drives every target with commas
+  and with spaces. Ledger: juniper-ml `notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phase 15
+  item 34.
 
 ### Changed
 
