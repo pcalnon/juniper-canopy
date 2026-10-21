@@ -61,6 +61,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `test_patch_values_manual_separators.py`, which reads the manual's sentence and drives every target with commas
   and with spaces. Ledger: juniper-ml `notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phase 15
   item 34.
+- **F-CANOPY-065: an Apply's toast never reported a key the WS leg declined.** `apply_params` sends hot keys over
+  `/ws/control` and cold keys over REST. juniper-cascor-client resolves `set_params` with the whole
+  `command_response` frame, and cascor nests `update_params`' return (the C2a `applied` / `skipped` partition) at
+  `data.result`, but `_extract_cascor_partition` scans a result's top level and `data` only, and `apply_params` read
+  it from one dict merged from both legs, whose `data` the REST envelope's replaced. So the WS keys never reached
+  `applied`, and a key cascor declined there (`epochs_max`, `not-updatable`) never reached the toast: the selection
+  arc's A-N2 Apply answered `{"applied": ["cn_training_iterations"]}` for five keys, and the toast read "Parameters
+  applied", where 0.6.0 promised `epochs_max (not-updatable)`. `_apply_params_hot` now unwraps the ack
+  (`_unwrap_control_ack`), and `apply_params` reads each leg's partition from that leg's own result and unions them.
+  Corrected with it: the extractor's "the WS ack carries it flat" docstring, the N5 test's flat ack fake, and
+  `use_websocket_set_params`' "default off" comment (it is on). Tests: `test_n5_apply_params_ux.py`
+  (`TestF065BothLegsPartitionsReachTheToast`: A-N2's mixed Apply through the real `apply_params`, a WS-only Apply,
+  the toast, the unwrap). Live on turing against a throwaway cascor 0.12.0 leg, the same five keys: `main` answers
+  `["cn_training_iterations"]`; this tree answers the four applied keys and `nn_max_total_epochs (not-updatable)`.
+  Ledger: juniper-ml `notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phase 10 (filed) and item
+  20.
 
 ### Changed
 
