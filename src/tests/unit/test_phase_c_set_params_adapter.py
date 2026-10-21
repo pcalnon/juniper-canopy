@@ -58,7 +58,7 @@ class TestPhaseC:
     # ------------------------------------------------------------------
 
     def test_apply_params_feature_flag_default_off(self, adapter, mock_client):
-        """With use_websocket_set_params=False (default), all params go to REST."""
+        """With use_websocket_set_params=False, all params go to REST (the default is True since the Phase C-P10 flip)."""
         with _patch_settings(use_websocket_set_params=False):
             result = adapter.apply_params(nn_learning_rate=0.05)
 
