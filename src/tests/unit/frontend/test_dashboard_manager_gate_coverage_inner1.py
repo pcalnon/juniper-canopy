@@ -549,9 +549,15 @@ class TestDatastoreInner:
         cb = raw_cb(dm, "update_pinned_params_store")
         values = [True, None, False]
         ids = [{"type": "param-pin", "key": "a"}, {"type": "param-pin", "key": "b"}, {"type": "param-pin", "key": "c"}]
-        # F-CANOPY-028: the writer now takes the persisted list as a third arg so it
-        # can preserve pins whose checkbox is not currently rendered.
-        assert cb(values, ids, []) == ["a"]
+        # F-CANOPY-028: the writer persists a USER toggle only — exactly one pin input
+        # triggered, read through the adapter — and a rebuilt table (every input
+        # triggered at once) writes nothing, whatever the rendered state says.
+        one = {'{"key":"a","type":"param-pin"}.value': ids[0]}
+        with patch.object(CallbackContextAdapter, "get_triggered_prop_ids", return_value=one):
+            assert cb(values, ids, []) == ["a"]
+        every = {f'{{"key":"{i["key"]}","type":"param-pin"}}.value': i for i in ids}
+        with patch.object(CallbackContextAdapter, "get_triggered_prop_ids", return_value=every):
+            assert cb(values, ids, ["b"]) is dash.no_update
 
     def test_render_sidebar_pinned_mirror_empty(self, dm):
         cb = raw_cb(dm, "render_sidebar_pinned_mirror")

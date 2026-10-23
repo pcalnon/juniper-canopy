@@ -306,12 +306,127 @@ class TestLivenessGatedWsLeg:
             supervisor.loop = MagicMock()
             adapter._control_supervisor = supervisor
             fake_future = MagicMock()
-            fake_future.result.return_value = {"applied": ["learning_rate"]}
+            # F-CANOPY-065: the real ack nests the partition at ``data.result``;
+            # this fake used to be flat, the shape no cascor sends.
+            fake_future.result.return_value = _ws_ack({"learning_rate": 0.05, "applied": ["learning_rate"], "skipped": []})
             monkeypatch.setattr(
                 "backend.cascor_service_adapter.asyncio.run_coroutine_threadsafe",
                 lambda coro, loop: fake_future,
             )
             result = adapter._apply_params_hot({"learning_rate": 0.05})
-            assert result == {"applied": ["learning_rate"]}
+            assert result == {"learning_rate": 0.05, "applied": ["learning_rate"], "skipped": []}
         finally:
             client.close()
+
+
+def _ws_ack(result):
+    """A ``/ws/control`` ``set_params`` ack as juniper-cascor-client resolves it.
+
+    The whole ``command_response`` frame: cascor's ``create_control_ack_message``
+    nests ``update_params``' return at ``data.result``.
+    """
+    return {
+        "type": "command_response",
+        "timestamp": 1760000000.0,
+        "data": {"command": "set_params", "status": "success", "command_id": "f065", "result": result},
+    }
+
+
+@pytest.mark.integration
+class TestF065BothLegsPartitionsReachTheToast:
+    """F-CANOPY-065: a key the WS leg declined never reached the apply toast.
+
+    The partition sits at the ack's ``data.result``; ``_extract_cascor_partition``
+    scanned the leg result's top level and ``data`` only, and ``apply_params``
+    read it from one dict merged from both legs, whose ``data`` the REST
+    envelope's replaced. The case is the selection arc's A-N2 apply
+    (2026-09-23): four hot keys over WS, ``epochs_max`` declined there as
+    ``not-updatable``, one cold key over REST. It answered
+    ``{"applied": ["cn_training_iterations"]}`` and the toast read "Parameters
+    applied".
+    """
+
+    PARAMS = {"nn_max_iterations": 3, "nn_max_total_epochs": 5000, "nn_max_hidden_units": 12, "nn_output_epochs": 200, "cn_training_iterations": 50}
+    WS_RESULT = {
+        "max_iterations": 3,
+        "max_hidden_units": 12,
+        "output_epochs": 200,
+        "applied": ["max_iterations", "max_hidden_units", "output_epochs"],
+        "skipped": [{"key": "epochs_max", "reason": "not-updatable"}],
+    }
+    REST_ENVELOPE = {"status": "success", "data": {"candidate_epochs": 50, "applied": ["candidate_epochs"], "skipped": []}}
+
+    def _adapter(self, monkeypatch, ack):
+        pytest.importorskip("juniper_cascor_client.testing", reason="cascor-client[testing] not installed")
+        from types import SimpleNamespace
+
+        from juniper_cascor_client.testing import FakeCascorClient
+
+        from backend.cascor_service_adapter import CascorServiceAdapter
+
+        client = FakeCascorClient(scenario="two_spiral_training")
+        adapter = CascorServiceAdapter(client=client)
+        supervisor = MagicMock()
+        supervisor.is_connected = True
+        supervisor.loop = MagicMock()
+        adapter._control_supervisor = supervisor
+        fake_future = MagicMock()
+        fake_future.result.return_value = ack
+        monkeypatch.setattr("backend.cascor_service_adapter.asyncio.run_coroutine_threadsafe", lambda coro, loop: fake_future)
+        monkeypatch.setattr("settings.get_settings", lambda: SimpleNamespace(use_websocket_set_params=True, ws_set_params_timeout=1.0))
+        return adapter, client
+
+    def test_a_mixed_apply_reports_both_legs(self, monkeypatch):
+        adapter, client = self._adapter(monkeypatch, _ws_ack(self.WS_RESULT))
+        try:
+            # The Fake's GET echoes its own stored config, not the injected legs.
+            with patch.object(adapter._client, "update_params", return_value=self.REST_ENVELOPE) as rest, patch.object(adapter, "_verify_apply_roundtrip", return_value=None):
+                result = adapter.apply_params(**self.PARAMS)
+            assert rest.call_args[0][0] == {"candidate_epochs": 50}
+            assert result["ok"] is True
+            assert result["applied"] == ["nn_max_iterations", "nn_max_hidden_units", "nn_output_epochs", "cn_training_iterations"]
+            assert result["skipped_detail"] == [{"key": "nn_max_total_epochs", "reason": "not-updatable"}]
+        finally:
+            client.close()
+
+    def test_a_ws_only_apply_reports_the_ws_partition(self, monkeypatch):
+        adapter, client = self._adapter(monkeypatch, _ws_ack(self.WS_RESULT))
+        try:
+            hot = {k: v for k, v in self.PARAMS.items() if k != "cn_training_iterations"}
+            with patch.object(adapter._client, "update_params") as rest, patch.object(adapter, "_verify_apply_roundtrip", return_value=None):
+                result = adapter.apply_params(**hot)
+            rest.assert_not_called()
+            assert result["applied"] == ["nn_max_iterations", "nn_max_hidden_units", "nn_output_epochs"]
+            assert result["skipped_detail"] == [{"key": "nn_max_total_epochs", "reason": "not-updatable"}]
+        finally:
+            client.close()
+
+    def test_the_toast_names_the_ws_legs_skip(self, monkeypatch):
+        adapter, client = self._adapter(monkeypatch, _ws_ack(self.WS_RESULT))
+        try:
+            with patch.object(adapter._client, "update_params", return_value=self.REST_ENVELOPE), patch.object(adapter, "_verify_apply_roundtrip", return_value=None):
+                result = adapter.apply_params(**self.PARAMS)
+        finally:
+            client.close()
+        response = MagicMock()
+        response.json.return_value = {"status": "success", "applied": result["applied"], "skipped_detail": result["skipped_detail"]}
+        msg = DashboardManager._compose_apply_toast(response, self.PARAMS, [])
+        assert msg == "Applied 4 parameter(s); 1 skipped: nn_max_total_epochs (not-updatable)"
+
+    def test_the_unwrap_reads_data_result(self):
+        from backend.cascor_service_adapter import CascorServiceAdapter
+
+        assert CascorServiceAdapter._unwrap_control_ack(_ws_ack(self.WS_RESULT)) == self.WS_RESULT
+
+    def test_an_ack_without_a_result_unwraps_to_empty(self):
+        from backend.cascor_service_adapter import CascorServiceAdapter
+
+        ack = _ws_ack(None)
+        del ack["data"]["result"]
+        assert CascorServiceAdapter._unwrap_control_ack(ack) == {}
+
+    def test_a_non_envelope_dict_passes_through(self):
+        from backend.cascor_service_adapter import CascorServiceAdapter
+
+        assert CascorServiceAdapter._unwrap_control_ack({"applied": ["learning_rate"]}) == {"applied": ["learning_rate"]}
+        assert CascorServiceAdapter._unwrap_control_ack(None) == {}

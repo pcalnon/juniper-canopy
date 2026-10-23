@@ -33,6 +33,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-dash probe; one POST per click, the spinner opening on the request and closing on the response,
   `util/ad-hoc/2026-10-20_f069_pair_members_probe.py`). Ledger: juniper-ml
   `notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phase 14 (filed) and Phase 15 (closed).
+- **F-CANOPY-028: a pin made just before a table rebuild was discarded.** `update_pinned_params_store` fires on every
+  change to any pin checkbox's `value`, and the Parameters tables are rebuilt on every params-store or pin-store
+  change, each rebuild re-creating all 22 checkboxes, so a rebuild whose request was in flight when a click's write
+  landed rendered the pin set it was computed from, fired the writer with every checkbox "changed" and the new pin
+  unchecked, and the writer (canopy#533's merge of the rendered set into the stored one) persisted that set over
+  the click (juniper-ml ledger Phase 14, item 30: one drive in eight; the mount render used to do the same with an
+  empty store, the shape #533 closed). The writer now persists a user's toggle only: exactly one pin input
+  triggered (`CallbackContextAdapter.get_triggered_prop_ids`), that key added to or removed from the stored list,
+  the rest untouched; a rebuild (every input triggered at once) and a toggle the store already reflects write
+  nothing. `_merge_pinned_params` is replaced by `_apply_pin_toggle`. Tests: `test_p2_wave_batch_b.py`
+  (`TestF028PinnedParamsPreserved`: a rebuilt table from a stale set after a toggle leaves the store as the toggle
+  left it, the mount render writes nothing, the toggle cases) and `test_dashboard_manager_gate_coverage_inner1.py`.
+  Live: the pin-after-reload drive (`2026-10-20_item30_fixwave_redrive.py --step f028`) at fixed delays after the
+  reload, on a leg of this tree, is recorded in the ledger's Phase 15.
+- **`docs/USER_MANUAL.md`, Patch Weights:** the values sentence said comma-, semicolon- or newline-separated
+  floats; for `output_weights` semicolons and newlines separate rows, so F-CANOPY-012's cases B and C (a flat list
+  broken up by either) are refused on any network with more than one output. The sentence now states the row idiom
+  and the flat-list reshape.
+- **Patch Weights refused space-separated values for the three 1-D targets.** The manual says values are "floats
+  separated by commas or spaces", and `_parse_float_list`'s docstring said "comma/whitespace-separated", but the
+  parser folded newlines and semicolons into commas and split on commas alone, so `0.1 0.2` for `output_bias`,
+  `hidden_unit_weights` or `hidden_unit_bias` (and for Append Hidden Unit's weights, the parser's other caller)
+  reached `float()` as one token and was refused; `output_weights` rows already split on whitespace. Whitespace of
+  any kind now separates values too. Every input accepted before parses to the same list, since `float()` refuses a
+  token with whitespace inside it. Tests: `test_network_editor_panel.py` (`TestParseFloatList`) and
+  `test_patch_values_manual_separators.py`, which reads the manual's sentence and drives every target with commas
+  and with spaces. Ledger: juniper-ml `notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phase 15
+  item 34.
+- **F-CANOPY-065: an Apply's toast never reported a key the WS leg declined.** `apply_params` sends hot keys over
+  `/ws/control` and cold keys over REST. juniper-cascor-client resolves `set_params` with the whole
+  `command_response` frame, and cascor nests `update_params`' return (the C2a `applied` / `skipped` partition) at
+  `data.result`, but `_extract_cascor_partition` scans a result's top level and `data` only, and `apply_params` read
+  it from one dict merged from both legs, whose `data` the REST envelope's replaced. So the WS keys never reached
+  `applied`, and a key cascor declined there (`epochs_max`, `not-updatable`) never reached the toast: the selection
+  arc's A-N2 Apply answered `{"applied": ["cn_training_iterations"]}` for five keys, and the toast read "Parameters
+  applied", where 0.6.0 promised `epochs_max (not-updatable)`. `_apply_params_hot` now unwraps the ack
+  (`_unwrap_control_ack`), and `apply_params` reads each leg's partition from that leg's own result and unions them.
+  Corrected with it: the extractor's "the WS ack carries it flat" docstring, the N5 test's flat ack fake, and
+  `use_websocket_set_params`' "default off" comment (it is on). Tests: `test_n5_apply_params_ux.py`
+  (`TestF065BothLegsPartitionsReachTheToast`: A-N2's mixed Apply through the real `apply_params`, a WS-only Apply,
+  the toast, the unwrap). Live on turing against a throwaway cascor 0.12.0 leg, the same five keys: `main` answers
+  `["cn_training_iterations"]`; this tree answers the four applied keys and `nn_max_total_epochs (not-updatable)`.
+  Ledger: juniper-ml `notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phase 10 (filed) and item
+  20.
 
 ### Changed
 
