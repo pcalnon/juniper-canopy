@@ -108,6 +108,16 @@ class TestParseFloatList:
     def test_semicolon_treated_as_separator(self, panel):
         assert panel._parse_float_list("1.0; 2.0; 3.0") == [1.0, 2.0, 3.0]
 
+    def test_space_treated_as_separator(self, panel):
+        assert panel._parse_float_list("1.0 2.0 3.0") == [1.0, 2.0, 3.0]
+
+    def test_mixed_separators_flatten(self, panel):
+        assert panel._parse_float_list("1.0\t2.0, 3.0;4.0\n5.0  6.0") == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+
+    def test_invalid_space_separated_token_raises(self, panel):
+        with pytest.raises(ValueError):
+            panel._parse_float_list("1.0 abc 3.0")
+
     def test_empty_returns_empty(self, panel):
         assert panel._parse_float_list("") == []
         assert panel._parse_float_list(None) == []

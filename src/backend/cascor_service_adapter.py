@@ -1361,12 +1361,18 @@ class CascorServiceAdapter:
             cold.update(unclassified)
 
         result_data: Dict[str, Any] = {}
+        # F-CANOPY-065: each leg's partition is read from that leg's own result.
+        # ``result_data`` merges the legs for the response's ``data``; reading the
+        # partition from the merge let one leg's keys replace the other's (the REST
+        # envelope's ``data`` replaced the WS frame's).
+        leg_results: list = []
 
         # Hot path: WS with REST fallback
         if hot and use_ws:
             ws_result = self._apply_params_hot(hot)
             if ws_result is not None:
                 result_data.update(ws_result)
+                leg_results.append(ws_result)
             else:
                 # WS failed — fallback to REST
                 logger.warning("WS set_params failed, falling back to REST for hot params")
@@ -1380,7 +1386,9 @@ class CascorServiceAdapter:
         if cold:
             try:
                 rest_result = self._client.update_params(cold)
-                result_data.update(rest_result if isinstance(rest_result, dict) else {})
+                rest_data = rest_result if isinstance(rest_result, dict) else {}
+                result_data.update(rest_data)
+                leg_results.append(rest_data)
                 logger.info(f"Cascor params updated via REST: {list(cold.keys())}")
             except JuniperCascorClientError as e:
                 logger.error(f"Failed to update cascor params via REST: {e}")
@@ -1395,7 +1403,12 @@ class CascorServiceAdapter:
         # which consumes it. Extracting it afterwards meant the verify compared
         # keys cascor had explicitly declined and failed the whole apply on a
         # divergence cascor had already explained.
-        applied_keys, skipped_detail = self._extract_cascor_partition(result_data)
+        applied_keys: list = []
+        skipped_detail: list = []
+        for leg_result in leg_results:
+            leg_applied, leg_skipped = self._extract_cascor_partition(leg_result)
+            applied_keys += [k for k in leg_applied if k not in applied_keys]
+            skipped_detail += [d for d in leg_skipped if d not in skipped_detail]
 
         # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C3 — roundtrip verify. Confirm
         # the running cascor config moved to the requested values; surface any
@@ -1426,8 +1439,11 @@ class CascorServiceAdapter:
         and which it could not (``skipped: [{"key", "reason"}, ...]`` — reasons
         ``not-updatable`` / ``no-such-attribute`` / ``null-value``; ``epochs_max``
         is the standing ``not-updatable`` case post-C2b). The REST success
-        envelope nests the partition under ``data``; the WS ack carries it flat,
-        so this scans both. cascor keys are mapped back to the canopy
+        envelope nests the partition under ``data``. The WS ack nests it at
+        ``data.result``, and ``_apply_params_hot`` unwraps that, so the WS leg
+        arrives with the partition at its top level; this scans both levels of
+        ONE leg's result, and ``apply_params`` calls it once per leg
+        (F-CANOPY-065). cascor keys are mapped back to the canopy
         ``nn_*``/``cn_*`` namespace so the toast speaks the user's form-field
         names. Returns ``([], [])`` when the partition is absent (pre-C2a
         backend, or a no-op apply); never raises.
@@ -1832,10 +1848,31 @@ class CascorServiceAdapter:
             )
             result = future.result(timeout=timeout + 1.0)  # Extra 1s for scheduling overhead
             logger.info(f"Cascor params updated via WS: {list(params.keys())}")
-            return result if isinstance(result, dict) else {}
+            return self._unwrap_control_ack(result)
         except Exception as e:
             logger.warning(f"WS set_params failed ({type(e).__name__}: {e}), will use REST fallback")
             return None
+
+    @staticmethod
+    def _unwrap_control_ack(frame: Any) -> Dict[str, Any]:
+        """Return the ``result`` of a ``/ws/control`` ``set_params`` ack (F-CANOPY-065).
+
+        juniper-cascor-client's ``set_params`` resolves with the whole
+        ``command_response`` frame, and cascor's ``create_control_ack_message``
+        nests ``update_params``' return (the params echo plus the C2a ``applied``
+        / ``skipped`` partition) at ``data.result``. Passing the frame on as the
+        leg's result left the partition two levels down, where
+        ``_extract_cascor_partition`` never looks, so the apply toast never
+        reported a key the WS leg declined. ``data`` carrying ``command`` marks
+        the envelope; any other dict is passed through as is.
+        """
+        if not isinstance(frame, dict):
+            return {}
+        data = frame.get("data")
+        if isinstance(data, dict) and "command" in data:
+            result = data.get("result")
+            return result if isinstance(result, dict) else {}
+        return frame
 
     def get_canopy_params(self) -> Dict[str, Any]:
         """Fetch training params from cascor and map to canopy nn_*/cn_* namespace."""
