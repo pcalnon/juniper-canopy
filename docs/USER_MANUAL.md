@@ -497,7 +497,11 @@ The Network Editor is for service-mode investigation workflows, not normal train
      - `hidden_unit_weights`
      - `hidden_unit_bias`
    - `hidden_unit_*` targets require a hidden unit index.
-   - Values can be entered as comma-, semicolon-, or newline-separated floats.
+   - Values are floats separated by commas or spaces. `output_weights` is a matrix, one row per input or hidden
+     unit and one value per output unit: enter it as rows separated by newlines or semicolons, or as one flat
+     comma-separated list of the full count, which Canopy reshapes from the topology readout. A flat list broken
+     up by semicolons or newlines is read as one value per row and refused on any network with more than one
+     output.
    - Canopy sends `dtype: "float32"` and lets CasCor validate the exact target shape.
 
 **Workflow:**
