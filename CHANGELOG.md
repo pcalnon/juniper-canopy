@@ -9,6 +9,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **F-CANOPY-069: under every dash 3.x release the dashboard was inert in the browser.** Two callback pairs each
+  claimed one `allow_duplicate` Output from one Input: `accept_live_switch` and `open_progress_alert_on_accept` on
+  `live-switch-accept-button.n_clicks`, and `execute_restart` and `open_restart_progress` on
+  `restart-confirm-button.n_clicks`. Dash hashes the inputs into an `allow_duplicate` output id
+  (`create_callback_id`), so each pair's ids collided. dash 3's renderer validates the served dependency list
+  unconditionally and, on that `Duplicate callback outputs` error, drops the whole callback graph: the page
+  rendered and nothing on it worked (measured on 3.0.4, 3.2.0, 3.3.0 and 3.4.0; `conf/conda_environment.yaml`
+  pinned 3.3.0). dash 4 validates only with dev tools on, ran both members of each pair, and let the order of
+  their responses decide whether the spinner flashed or stuck. The openers existed to show the progress spinner
+  before the slow POST returned, which is what a callback's `running=` spec is for: `accept_live_switch` and
+  `execute_restart` now carry their progress alerts (and the live-swap in-flight store) as `running=`, so the
+  renderer opens them the moment the request leaves and closes them when the response lands, with no second
+  callback and no round trip. `open_progress_alert_on_accept`, `open_restart_progress` and
+  `_open_progress_alert_on_accept_handler` are gone. Pinned by
+  `src/tests/unit/frontend/test_f069_duplicate_callback_outputs.py`: no output id is claimed by two callbacks
+  (ids computed as `create_callback_id` does, over the served dependency list; the scan is shown to catch the
+  shape that bit canopy), each progress alert has one writer, each of the two Inputs runs one callback, and the
+  two `running` specs are what the renderer expects. Verified alive in the browser on legs of this tree under
+  dash 3.3.0 and 4.4.1 (juniper-ml `util/ad-hoc/2026-10-20_canopy_dash_duplicate_outputs_probe.py`, Phase 14's
+  per-dash probe; one POST per click, the spinner opening on the request and closing on the response,
+  `util/ad-hoc/2026-10-20_f069_pair_members_probe.py`). Ledger: juniper-ml
+  `notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phase 14 (filed) and Phase 15 (closed).
+- **F-CANOPY-028: a pin made just before a table rebuild was discarded.** `update_pinned_params_store` fires on every
+  change to any pin checkbox's `value`, and the Parameters tables are rebuilt on every params-store or pin-store
+  change, each rebuild re-creating all 22 checkboxes, so a rebuild whose request was in flight when a click's write
+  landed rendered the pin set it was computed from, fired the writer with every checkbox "changed" and the new pin
+  unchecked, and the writer (canopy#533's merge of the rendered set into the stored one) persisted that set over
+  the click (juniper-ml ledger Phase 14, item 30: one drive in eight; the mount render used to do the same with an
+  empty store, the shape #533 closed). The writer now persists a user's toggle only: exactly one pin input
+  triggered (`CallbackContextAdapter.get_triggered_prop_ids`), that key added to or removed from the stored list,
+  the rest untouched; a rebuild (every input triggered at once) and a toggle the store already reflects write
+  nothing. `_merge_pinned_params` is replaced by `_apply_pin_toggle`. Tests: `test_p2_wave_batch_b.py`
+  (`TestF028PinnedParamsPreserved`: a rebuilt table from a stale set after a toggle leaves the store as the toggle
+  left it, the mount render writes nothing, the toggle cases) and `test_dashboard_manager_gate_coverage_inner1.py`.
+  Live: the pin-after-reload drive (`2026-10-20_item30_fixwave_redrive.py --step f028`) at fixed delays after the
+  reload, on a leg of this tree, is recorded in the ledger's Phase 15.
+- **`docs/USER_MANUAL.md`, Patch Weights:** the values sentence said comma-, semicolon- or newline-separated
+  floats; for `output_weights` semicolons and newlines separate rows, so F-CANOPY-012's cases B and C (a flat list
+  broken up by either) are refused on any network with more than one output. The sentence now states the row idiom
+  and the flat-list reshape.
+- **Patch Weights refused space-separated values for the three 1-D targets.** The manual says values are "floats
+  separated by commas or spaces", and `_parse_float_list`'s docstring said "comma/whitespace-separated", but the
+  parser folded newlines and semicolons into commas and split on commas alone, so `0.1 0.2` for `output_bias`,
+  `hidden_unit_weights` or `hidden_unit_bias` (and for Append Hidden Unit's weights, the parser's other caller)
+  reached `float()` as one token and was refused; `output_weights` rows already split on whitespace. Whitespace of
+  any kind now separates values too. Every input accepted before parses to the same list, since `float()` refuses a
+  token with whitespace inside it. Tests: `test_network_editor_panel.py` (`TestParseFloatList`) and
+  `test_patch_values_manual_separators.py`, which reads the manual's sentence and drives every target with commas
+  and with spaces. Ledger: juniper-ml `notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phase 15
+  item 34.
+- **F-CANOPY-065: an Apply's toast never reported a key the WS leg declined.** `apply_params` sends hot keys over
+  `/ws/control` and cold keys over REST. juniper-cascor-client resolves `set_params` with the whole
+  `command_response` frame, and cascor nests `update_params`' return (the C2a `applied` / `skipped` partition) at
+  `data.result`, but `_extract_cascor_partition` scans a result's top level and `data` only, and `apply_params` read
+  it from one dict merged from both legs, whose `data` the REST envelope's replaced. So the WS keys never reached
+  `applied`, and a key cascor declined there (`epochs_max`, `not-updatable`) never reached the toast: the selection
+  arc's A-N2 Apply answered `{"applied": ["cn_training_iterations"]}` for five keys, and the toast read "Parameters
+  applied", where 0.6.0 promised `epochs_max (not-updatable)`. `_apply_params_hot` now unwraps the ack
+  (`_unwrap_control_ack`), and `apply_params` reads each leg's partition from that leg's own result and unions them.
+  Corrected with it: the extractor's "the WS ack carries it flat" docstring, the N5 test's flat ack fake, and
+  `use_websocket_set_params`' "default off" comment (it is on). Tests: `test_n5_apply_params_ux.py`
+  (`TestF065BothLegsPartitionsReachTheToast`: A-N2's mixed Apply through the real `apply_params`, a WS-only Apply,
+  the toast, the unwrap). Live on turing against a throwaway cascor 0.12.0 leg, the same five keys: `main` answers
+  `["cn_training_iterations"]`; this tree answers the four applied keys and `nn_max_total_epochs (not-updatable)`.
+  Ledger: juniper-ml `notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phase 10 (filed) and item
+  20.
+
+### Changed
+
+- **The dash floor is `dash>=4.0.0`** (`pyproject.toml`; `conf/requirements_ci.txt`, which `requirements.txt` and
+  `requirements_ci.txt` link to), and `conf/conda_environment.yaml` pins `dash=4.4.1` with dash 4's two new run
+  dependencies, `comm` and `janus`, at the lock's versions. Everything canopy tests runs dash 4.x (the lock's 4.4.1,
+  CI's 4.4.1 pip lane and 4.1.0 conda lane, every live drive in the E2E ledger), and a floor that nothing tests is
+  how F-CANOPY-069 stayed invisible: the conda file was the one environment on 3.x, and it was the one nobody
+  drove. The fix itself does not depend on the dash version; a 3.3.0 leg of this tree is alive too.
+
 ## [0.9.0] - 2026-10-10
 
 ### Added

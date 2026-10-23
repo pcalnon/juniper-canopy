@@ -279,8 +279,10 @@ class TestRunningGuardsNeverContendWithTheTabGate:
         assert not offenders, f"running= guards write a tab-gated lane's disabled prop: {offenders}"
 
     def test_the_scan_sees_a_guard_where_one_exists(self):
-        """Non-vacuity. canopy has no ``running=`` guard left (F-CANOPY-058), so the
-        scan is checked on a scratch app that registers one."""
+        """Non-vacuity. canopy has no ``running=`` guard on an Interval left (F-CANOPY-058;
+        the two ``running=`` specs it does carry, F-CANOPY-069's progress alerts, write an
+        alert's ``is_open`` and a store), so the scan is checked on a scratch app that
+        registers one."""
         from dash import Dash, Input, Output, dcc, html
 
         app = Dash(__name__)
@@ -297,10 +299,20 @@ class TestRunningGuardsNeverContendWithTheTabGate:
         probe.app = app
         assert "lane.disabled" in {f[2] for f in self._guarded_props(probe)}, self._guarded_props(probe)
 
-    def test_no_running_guard_is_left_in_canopy(self, dashboard):
+    def test_no_running_guard_is_left_on_a_poll_lane(self, dashboard):
         """F-CANOPY-058: any guard is released by an evicted request's late completion,
-        so none may come back on a poll lane. Pace a slow poll by request/ack instead."""
-        assert not self._guarded_props(dashboard), self._guarded_props(dashboard)
+        so none may come back on a poll lane. Pace a slow poll by request/ack instead.
+        Registry-wide over every ``dcc.Interval`` in the layout, on any prop. The
+        ``running=`` specs canopy does carry since F-CANOPY-069 open a click's progress
+        alert (and the live-swap in-flight store) for the request's own life: an
+        eviction there closes a spinner the user re-clicked, and gates nothing. They are
+        enumerated here so the next spec is added to this list on purpose."""
+        intervals = {cid for cid, comp in _components_by_id(dashboard).items() if type(comp).__name__ == "Interval"}
+        assert intervals, "the layout walk found no Interval; the lane check would pass vacuously"
+        on_a_lane = [f for f in self._guarded_props(dashboard) if f[2].split(".", 1)[0] in intervals]
+        assert not on_a_lane, f"a running= guard writes a poll lane: {on_a_lane}"
+        f069 = {"live-switch-progress-alert.is_open", "live-swap-in-flight-store.data", "restart-progress-alert.is_open"}
+        assert {f[2] for f in self._guarded_props(dashboard)} == f069, self._guarded_props(dashboard)
 
     def test_no_running_guard_touches_the_candidate_lane(self, dashboard):
         """On any prop. Holding ``max_intervals`` instead of ``disabled`` avoids the race
