@@ -1,0 +1,67 @@
+# .gitleaksignore -- historical findings gitleaks must not re-report.
+#
+# Every entry is COMMIT-scoped (`<40-hex commit>:<file>:<rule>:<line>`), so it
+# silences that one historical commit and nothing a later commit adds. A
+# file-scoped entry (`<file>:<rule>:<line>`) would also hide any FUTURE secret
+# written at that line, so none is allowed here, and every entry sits under a
+# comment naming its class (src/tests/regression/test_gitleaks_config.py
+# enforces both).
+#
+# Only push / pull_request scans are commit-ranged; a workflow_dispatch run of
+# ci.yml scans every commit reachable from every remote branch and tag. These
+# entries are what that scan finds once .gitleaks.toml loads the default
+# ruleset, measured 2026-10-25 with gitleaks 8.24.3 (juniper-ml's
+# util/ad-hoc/2026-10-10_gitleaks_probe.py `scan --scope ci-dispatch`, driven by
+# util/ad-hoc/2026-10-25_gitleaks_probe_for_repo.py: 84 remote head/tag SHAs,
+# 1575 commits, 18 findings) and classified with
+# util/ad-hoc/2026-10-10_gitleaks_finding_inspect.py (shape and masked context
+# only; no value was printed). Values are never written here.
+#
+# The config's [allowlist].paths (conf/*.lock, notes/mcp/) predates this file
+# and is not repeated here. Conda build strings in the conda environment files
+# are also covered by the AND-scoped generic-api-key allowlist in .gitleaks.toml
+# (it replaced the broad conda-YAML path exemption); the Hash entries below are
+# kept as the record of the historical findings.
+#
+# ============================================================================
+# gitleaks' default ruleset -- every entry below classified as a false positive
+# ============================================================================
+#
+# Hash: conda `<package>=<version>=<build>` lines in conf/requirements-conda.txt
+# (a path the config's allowlist does not cover). generic-api-key reads the `api`
+# inside the package NAME (fastapi, fastapi-core) as a key name and the
+# version-and-build-hash pair as its value. Pre-split history shared with juniper-data.
+002e0e98e4610684fd5c45e18ae5290d40b4673d:conf/requirements-conda.txt:generic-api-key:39
+002e0e98e4610684fd5c45e18ae5290d40b4673d:conf/requirements-conda.txt:generic-api-key:41
+987aabf49ed68c17e70b86fc379ab47bbf096342:conf/requirements-conda.txt:generic-api-key:39
+987aabf49ed68c17e70b86fc379ab47bbf096342:conf/requirements-conda.txt:generic-api-key:41
+#
+# Prose: a plan document's "**Dependencies:** Backend monitoring APIs, ..." line;
+# generic-api-key reads "APIs," as a key name and the next acronym/word pair
+# (4 capitals, `/`, 11 lowercase letters) as its value. Pre-split history shared
+# with juniper-data.
+1c4df56655fb5dcfe48a4fdbe3139044d87bd656:docs/IMPLEMENTATION_PLAN.md:generic-api-key:470
+1c4df56655fb5dcfe48a4fdbe3139044d87bd656:docs/IMPLEMENTATION_PLAN.md:generic-api-key:480
+36274897b3b179bd695dd77c6aa6800b5d68014d:docs/IMPLEMENTATION_PLAN.md:generic-api-key:470
+36274897b3b179bd695dd77c6aa6800b5d68014d:docs/IMPLEMENTATION_PLAN.md:generic-api-key:480
+#
+# Synthetic: the padded-key probe's descriptive test key (two lowercase words and
+# a capitals-and-digits run, joined by -), defined as PROBE_KEY_TEXT in
+# util/ad-hoc/2026-09-24_padded_api_key_probes.py and quoted, as the logged
+# example, in the #678 follow-up test docstring and its CHANGELOG entry.
+7ab994e597fe2f5c7cceee13b0111dc51283fed9:util/ad-hoc/2026-09-24_padded_api_key_probes.py:generic-api-key:69
+7ab994e597fe2f5c7cceee13b0111dc51283fed9:src/tests/regression/test_blank_api_key_warning_boot.py:generic-api-key:471
+7ab994e597fe2f5c7cceee13b0111dc51283fed9:CHANGELOG.md:generic-api-key:611
+# Synthetic: the #683 validation probes' padded cascor keys (descriptive words and
+# a digit, joined by -, with a leading space or trailing LF) sent to a fake
+# upstream by util/ad-hoc/2026-09-24_683_validation_leak_probes.py.
+4caf938901e9c50e80eaf157f81876fee9c8fab1:util/ad-hoc/2026-09-24_683_validation_leak_probes.py:generic-api-key:260
+4caf938901e9c50e80eaf157f81876fee9c8fab1:util/ad-hoc/2026-09-24_683_validation_leak_probes.py:generic-api-key:261
+4caf938901e9c50e80eaf157f81876fee9c8fab1:util/ad-hoc/2026-09-24_683_validation_leak_probes.py:generic-api-key:325
+dc5ea02e8aac81a009cb30e35633ce8b43d972c8:util/ad-hoc/2026-09-24_683_validation_leak_probes.py:generic-api-key:263
+dc5ea02e8aac81a009cb30e35633ce8b43d972c8:util/ad-hoc/2026-09-24_683_validation_leak_probes.py:generic-api-key:264
+dc5ea02e8aac81a009cb30e35633ce8b43d972c8:util/ad-hoc/2026-09-24_683_validation_leak_probes.py:generic-api-key:328
+#
+# Name: a model-registry key in a test fixture (the dashed spelling of the
+# "lmu growth.v3" model next to it), matched as `key="..."`.
+7cd8a9d4bd71580f1c45820af11fcca0966b9f13:src/tests/regression/test_y7_model_table_describedby.py:generic-api-key:40
