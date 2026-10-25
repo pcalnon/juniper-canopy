@@ -93,8 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.gitleaks.toml` held an `[allowlist]` and no `[extend]` table, and a gitleaks v8 config without
   `[extend] useDefault = true` loads only its own `[[rules]]`, of which it had none. Every push, pull-request and
   dispatched scan therefore passed vacuously: a fabricated GitHub token went through the config while gitleaks'
-  built-in config flags it (the defect juniper-ml#2203 fixed there). The table is added; the existing `paths`
-  allowlist (conda environment YAML, `conf/*.lock`, `notes/mcp/`) is kept.
+  built-in config flags it (the defect juniper-ml#2203 fixed there). The table is added. The `paths` allowlist keeps
+  `conf/.*\.lock` and `notes/mcp/.*`; its conda environment YAML entry is replaced (below).
   - **History measured.** A `workflow_dispatch` run scans every commit reachable from every remote branch and tag.
     Measured with gitleaks 8.24.3 over exactly that scope (84 head/tag SHAs, 1575 commits): 18 findings, all false
     positives -- 4 conda `<package>=<version>=<build>` hashes in `conf/requirements-conda.txt` (a path the allowlist
@@ -103,14 +103,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     test fixture. Each is a commit-scoped entry in the new `.gitleaksignore`, under a comment naming its class; the
     rescan finds none. With the `paths` allowlist removed the same scan adds 30 findings, all in its own paths: 29
     conda build hashes and one `YOUR_API_KEY`-shaped placeholder in `notes/mcp/EXA_API_REFERENCE.md`.
+  - **Conda build strings get a narrow allowlist, because they recur, and it REPLACES the broad conda path
+    exemption.**
+    - **Why.** Every conda-env refresh rewrites the `<package>=<version>=<build>` lines under a new commit. No
+      commit-scoped entry can name that commit in advance, so the next refresh of `conf/requirements-conda.txt`
+      would have failed the PR scan and then the push scan of `main`. Meanwhile the old global
+      `conf/conda_environment.*\.ya?ml` path entry skipped EVERY rule in those files.
+    - **What.** `.gitleaks.toml` adds an AND-scoped allowlist to `generic-api-key` alone. A finding is dropped only
+      when its file is `conf/conda_environment*.y(a)ml` or `conf/requirements-conda.txt` AND its whole secret is
+      `<version>=<build>` with a conda build string (`h<7 hex>_<n>`, `pyh<7 hex>_<n>` or `py<NNN>h<7 hex>_<n>`).
+      The conda YAML entry leaves the global `paths`.
+    - **Why a rule allowlist.** gitleaks 8.24.3 has no top-level `[[allowlists]]` or `targetRules`, which its config
+      loader would drop silently, and its global `[allowlist]` is OR-only. So the allowlist is merged into the
+      default `generic-api-key` rule, which keeps its regex, entropy and own allowlists.
+    - **Measured over the same scope** (85 SHAs, 1576 commits with this PR's branch): the narrowing exposes no
+      finding. Without the ignore file the scan reports 14 findings, exactly the non-conda ones; the 29 conda-YAML
+      and 4 `requirements-conda.txt` findings are all covered by the allowlist. Their commit-scoped entries stay.
   - **The engine is pinned**: `GITLEAKS_VERSION: "8.24.3"` on the gitleaks-action step, the version its v3.0.0
     installs by default, so a bump of the action SHA cannot change it silently.
-  - Pins: `src/tests/regression/test_gitleaks_config.py` (new, 7 tests): the config extends the defaults; the real
-    engine fires the built-in `github-pat` rule on a runtime-built fabricated token through the auto-discovered and
-    the explicit config (with a no-config control); the ignore file is commit-scoped and classed; CI pins the engine
-    and runs this file. Its real-engine cases skip in the unit lane (no binary) and run in the Security Scans job,
-    after pip-audit, with `GITLEAKS_PARITY_REQUIRED=1`, which turns a missing binary into a failure. That run uses
-    `--noconftest` and installs only pytest and PyYAML: the module imports nothing from `src/`.
+  - Pins: `src/tests/regression/test_gitleaks_config.py` (new, 12 tests):
+    - the config extends the defaults;
+    - the conda allowlist is AND-scoped, on `generic-api-key` only, over exactly those two path patterns;
+    - no global path exemption covers a conda file, and only `conf/.*\.lock` and `notes/mcp/.*` remain;
+    - the real engine fires the built-in `github-pat` rule on a runtime-built fabricated token through the
+      auto-discovered and the explicit config (with a no-config control);
+    - in a conda file the real engine allowlists a build string, but still fires on the same line in any other file
+      and on a real-looking value in a conda file, under `generic-api-key` and `github-pat` alike;
+    - the ignore file is commit-scoped and classed;
+    - CI pins the engine and runs this file.
+
+    Its real-engine cases skip in the unit lane (no binary) and run in the Security Scans job, after pip-audit, with
+    `GITLEAKS_PARITY_REQUIRED=1`, which turns a missing binary into a failure. That run uses `--noconftest` and
+    installs only pytest and PyYAML: the module imports nothing from `src/`.
 
 ## [0.9.0] - 2026-10-10
 

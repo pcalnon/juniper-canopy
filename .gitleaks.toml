@@ -8,17 +8,21 @@
 # GitHub token went through it while gitleaks' built-in config flags the same
 # token. juniper-ml#2203 found and fixed the same defect there.
 # `[extend] useDefault = true` below loads gitleaks' built-in ruleset; the
-# allowlist EXTENDS it. src/tests/regression/test_gitleaks_config.py pins that
+# allowlists EXTEND it. src/tests/regression/test_gitleaks_config.py pins that
 # the table is present and that the real engine fires.
 #
 # The built-in ruleset reports historical false positives. Those are in
 # .gitleaksignore, each COMMIT-scoped and under a comment naming its class.
+# The one RECURRING class -- conda build strings, rewritten under a new commit
+# by every conda-env refresh -- has an AND-scoped rule allowlist instead (the
+# [[rules]] block at the end), because a commit-scoped entry cannot pre-silence
+# a commit that does not exist yet.
 #
 # Usage (CI and a local run both auto-discover this file and .gitleaksignore):
 #   gitleaks git --redact          # committed history
 #   gitleaks dir --redact .        # the working tree, INCLUDING gitignored files
 
-# Load gitleaks' built-in rules; the allowlist below EXTENDS them.
+# Load gitleaks' built-in rules; the allowlists below EXTEND them.
 # Removing this table silently empties the ruleset again (see the header).
 [extend]
 useDefault = true
@@ -26,15 +30,55 @@ useDefault = true
 [allowlist]
   description = "Allowlist for known historical false positives"
 
-  # Conda environment files contain `<package>=<version>=<build_hash>` triples.
-  # The build_hash component is high-entropy (3.5–3.7) and trips the
-  # generic-api-key rule, but it is a conda package build hash, not a secret.
-  # Example: ``fastapi-core=0.122.0=pyh1bdc77b_0`` ⇒ build hash ``pyh1bdc77b_0``.
-  # Documentation files under ``notes/mcp/`` contain example API request snippets
-  # using placeholder strings (e.g. ``x-api-key: <YOUR_KEY>``) that gitleaks
-  # mis-classifies; these are illustrative only and do not contain real secrets.
+  # BROAD path exemptions: a global [allowlist].paths entry skips EVERY rule for
+  # the files it matches (gitleaks 8.24.3's global allowlist is OR-only), so a
+  # real secret written there would not be reported either.
+  #   * conf/.*\.lock -- lock files.
+  #   * notes/mcp/.* -- example API request snippets using placeholder strings
+  #     (e.g. ``x-api-key: <YOUR_KEY>``) that gitleaks mis-classifies; these are
+  #     illustrative only and do not contain real secrets.
+  # The conda environment YAML files were exempted here the same way until
+  # 2026-10-25; they are now covered by the narrow AND-scoped allowlist below.
   paths = [
-    '''conf/conda_environment.*\.ya?ml''',
     '''conf/.*\.lock''',
     '''notes/mcp/.*''',
+  ]
+
+# -----------------------------------------------------------------------------
+# Conda build strings in the conda environment files.
+#
+# A conda spec line is `<package>=<version>=<build>`. generic-api-key reads the
+# `api` / `key` in a package NAME (fastapi, cuda-profiler-api, keyutils) as a
+# key name, and the secret it captures is the rest of the line: the version and
+# the build string, `=`-joined. The build string is conda's variant hash:
+#   h4bc722e_0        compiled package           h<7 hex>_<build number>
+#   pyhd8ed1ab_1      noarch python package      pyh<7 hex>_<n>
+#   py312h66e93f0_0   CPython-specific package   py<NNN>h<7 hex>_<n>
+#
+# AND-scoped, and on generic-api-key ONLY: a finding is dropped only when its
+# file is a conda environment file AND its whole secret has exactly that shape.
+# A value of any other shape in those files, the same line in any other file,
+# and every other rule in those files all still fire; the real-engine cases in
+# src/tests/regression/test_gitleaks_config.py pin all three.
+#
+# Why a RULE allowlist: gitleaks 8.24.3 has no top-level [[allowlists]] and no
+# `targetRules` (its config loader would silently drop both), and its global
+# [allowlist] is OR-only (`condition` is not read there), so paths placed there
+# would exempt EVERY rule in those files. A [[rules]] entry that carries the
+# default rule's id and no regex of its own is MERGED into that rule
+# (config/config.go extend()): its regex, entropy, keywords and own allowlists
+# stay, and this allowlist is added to them.
+# -----------------------------------------------------------------------------
+[[rules]]
+id = "generic-api-key"
+
+  [[rules.allowlists]]
+  description = "Conda build strings (<version>=<build>) in the conda environment files"
+  condition = "AND"
+  paths = [
+    '''(?:^|/)conf/conda_environment[^/]*\.ya?ml$''',
+    '''(?:^|/)conf/requirements-conda\.txt$''',
+  ]
+  regexes = [
+    '''^[0-9][0-9a-z._]*=(?:py[0-9]*)?h[0-9a-f]{7}_[0-9]+$''',
   ]

@@ -17,8 +17,11 @@
 # util/ad-hoc/2026-10-10_gitleaks_finding_inspect.py (shape and masked context
 # only; no value was printed). Values are never written here.
 #
-# The config's [allowlist].paths (conda environment YAML, conf/*.lock,
-# notes/mcp/) predates this file and is not repeated here.
+# The config's [allowlist].paths (conf/*.lock, notes/mcp/) predates this file
+# and is not repeated here. Conda build strings in the conda environment files
+# are also covered by the AND-scoped generic-api-key allowlist in .gitleaks.toml
+# (it replaced the broad conda-YAML path exemption); the Hash entries below are
+# kept as the record of the historical findings.
 #
 # ============================================================================
 # gitleaks' default ruleset -- every entry below classified as a false positive
