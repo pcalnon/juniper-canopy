@@ -515,9 +515,22 @@ jobs:
           # the cutover. Drop this once gitleaks-action publishes a
           # release pinned to node24 (upstream PR #215).
           FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+          # The engine version, stated rather than inherited: gitleaks-action
+          # v3.0.0 defaults to this same 8.24.3 (src/index.js at the pinned
+          # SHA), but a bump of the action SHA would change it silently.
+          # src/tests/regression/test_gitleaks_config.py pins it.
+          GITLEAKS_VERSION: "8.24.3"
         # gitleaks-action v2.3.9 has no `fail` input — passing it triggers
         # "Unexpected input(s) 'fail'" warnings in CI. The action exits
         # non-zero on leaks by default, which is the behavior we want.
+        #
+        # What it scans (src/index.js / src/gitleaks.js at the pinned SHA):
+        # `push` and `pull_request` scan the event's own commits;
+        # `workflow_dispatch` passes no --log-opts, so it scans EVERY commit
+        # reachable from every branch and tag of this fetch-depth-0 checkout.
+        # .gitleaks.toml and .gitleaksignore are auto-discovered at the repo
+        # root. Until 2026-10-25 .gitleaks.toml had no `[extend]` table, so
+        # this step ran with ZERO rules and could not fail.
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
@@ -575,6 +588,26 @@ jobs:
             echo "::notice::pip-audit passed - no known vulnerabilities found."
             echo "vulnerabilities_found=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Gitleaks config self-test (real engine)
+        # The unit-test lane runs this file too, but with no gitleaks binary
+        # its real-engine cases skip. Here the binary the Gitleaks step put on
+        # PATH is present, and GITLEAKS_PARITY_REQUIRED turns a missing binary
+        # into a failure instead of a skip, because a check that could not run
+        # is not a pass: the built-in ruleset must fire on a fabricated token
+        # through the auto-discovered .gitleaks.toml (the config is not
+        # vacuous). The module needs only pytest and PyYAML and no conftest
+        # fixture, so --noconftest keeps this job free of the test extra (and
+        # its torch install); -o addopts= drops --strict-config, and -W
+        # silences the config warnings for the ini keys (timeout,
+        # timeout_method, asyncio_mode) whose plugins are not installed here.
+        # Installed after pip-audit so they do not join its audit set.
+        if: github.event_name != 'repository_dispatch'
+        env:
+          GITLEAKS_PARITY_REQUIRED: "1"
+        run: |
+          pip install pytest pyyaml
+          python -m pytest --noconftest -p no:cacheprovider -o addopts="" -W "ignore::pytest.PytestConfigWarning" src/tests/regression/test_gitleaks_config.py -v
 
       - name: Upload Security Reports
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2

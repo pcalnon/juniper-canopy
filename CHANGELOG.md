@@ -87,6 +87,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   how F-CANOPY-069 stayed invisible: the conda file was the one environment on 3.x, and it was the one nobody
   drove. The fix itself does not depend on the dash version; a 3.3.0 leg of this tree is alive too.
 
+### Security
+
+- **CI's Gitleaks step loaded zero rules and could not fail; it now loads gitleaks' built-in ruleset.**
+  `.gitleaks.toml` held an `[allowlist]` and no `[extend]` table, and a gitleaks v8 config without
+  `[extend] useDefault = true` loads only its own `[[rules]]`, of which it had none. Every push, pull-request and
+  dispatched scan therefore passed vacuously: a fabricated GitHub token went through the config while gitleaks'
+  built-in config flags it (the defect juniper-ml#2203 fixed there). The table is added; the existing `paths`
+  allowlist (conda environment YAML, `conf/*.lock`, `notes/mcp/`) is kept.
+  - **History measured.** A `workflow_dispatch` run scans every commit reachable from every remote branch and tag.
+    Measured with gitleaks 8.24.3 over exactly that scope (84 head/tag SHAs, 1575 commits): 18 findings, all false
+    positives -- 4 conda `<package>=<version>=<build>` hashes in `conf/requirements-conda.txt` (a path the allowlist
+    does not cover), 4 prose matches in `docs/IMPLEMENTATION_PLAN.md`, 9 synthetic probe keys (the padded-key and
+    #683 leak probes, and the padded key quoted in a test docstring and in this file) and 1 model-registry key in a
+    test fixture. Each is a commit-scoped entry in the new `.gitleaksignore`, under a comment naming its class; the
+    rescan finds none. With the `paths` allowlist removed the same scan adds 30 findings, all in its own paths: 29
+    conda build hashes and one `YOUR_API_KEY`-shaped placeholder in `notes/mcp/EXA_API_REFERENCE.md`.
+  - **The engine is pinned**: `GITLEAKS_VERSION: "8.24.3"` on the gitleaks-action step, the version its v3.0.0
+    installs by default, so a bump of the action SHA cannot change it silently.
+  - Pins: `src/tests/regression/test_gitleaks_config.py` (new, 7 tests): the config extends the defaults; the real
+    engine fires the built-in `github-pat` rule on a runtime-built fabricated token through the auto-discovered and
+    the explicit config (with a no-config control); the ignore file is commit-scoped and classed; CI pins the engine
+    and runs this file. Its real-engine cases skip in the unit lane (no binary) and run in the Security Scans job,
+    after pip-audit, with `GITLEAKS_PARITY_REQUIRED=1`, which turns a missing binary into a failure. That run uses
+    `--noconftest` and installs only pytest and PyYAML: the module imports nothing from `src/`.
+
 ## [0.9.0] - 2026-10-10
 
 ### Added
