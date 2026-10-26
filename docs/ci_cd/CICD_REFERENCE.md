@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-10-08
-**Version:** 0.28.1
+**Last Updated:** 2026-10-26
+**Version:** 0.29.0
 **Status:** Current
 
 ## Table of Contents
@@ -187,6 +187,7 @@ lint:
 | `.github/workflows/main-verify.yml`         | push to `main`                                                       | Post-merge sequence-safety net                       |
 | `.github/workflows/pr-base-branch-guard.yml` | `pull_request` + `merge_group`                                       | Fail if PR base is not the default branch            |
 | `.github/workflows/scheduled-tests.yml`     | daily cron + manual                                                  | Slow / integration tests                             |
+| `.github/workflows/juniper-data-schema-drift.yml` | daily cron, manual, `repository_dispatch` `juniper-data-published`, path-filtered PR | Generator-schema snapshots vs the released juniper-data. See [`juniper-data-schema-drift.yml`](#juniper-data-schema-driftyml) |
 | `.github/workflows/agents-md-touch-up.yml`  | PR paths `AGENTS.md`                                                 | Verify `Last Updated` date (does not rewrite)        |
 | `.github/workflows/claude.yml`              | comment, submitted review, or new/assigned issue with `@claude`      | Optional assistant; not a merge gate. See [Claude Code workflow](#claude-code-workflow) |
 
@@ -453,6 +454,20 @@ This catches broken internal file and heading links without requiring sibling re
   - `bandit -r src -c .bandit.yml --confidence-level medium --severity-level medium`
   - `pip-audit --strict --desc on`
 - Uploads `reports/security/` artifacts
+
+### `juniper-data-schema-drift.yml`
+
+Compares canopy's committed snapshots of juniper-data's generator parameter schemas with the **released** juniper-data (juniper-canopy#737). W1.2's declared-param filter reads `DECLARED_PARAM_DEFAULTS`, which the unit tests pin to those snapshots, so a snapshot that has drifted from juniper-data makes the filter wrong without failing any test. The comparison lives in `util/check_juniper_data_generator_schemas.py`, which runs the same way locally.
+
+- Triggers:
+  - daily `07:17 UTC`
+  - `workflow_dispatch`, with an optional `version` input (empty: the latest on PyPI)
+  - `repository_dispatch` type `juniper-data-published`, which juniper-data's `notify-consumers.yml` sends with `client_payload` `{source, version, sha}` once a release is on PyPI. It reaches canopy only once that workflow's matrix lists `juniper-canopy`
+  - `pull_request` whose paths include the workflow, the script or `src/tests/fixtures/juniper_data_*generator_schemas.json`
+- No `run-name:`. juniper-data's sender confirms delivery by finding a run whose title is the event type, which is a dispatch run's default title
+- Steps: Python 3.14; choose the version (the dispatched one, the input, or PyPI's latest; it must be `X.Y.Z`); wait up to 10 minutes for it to be installable; `pip install "juniper-data[api]==<version>"` (a bare install cannot import the registry); `python -I util/check_juniper_data_generator_schemas.py --expected-version <version>`
+- Compared: every entry of every matching snapshot against `GENERATOR_REGISTRY[name]`: `params_class.model_json_schema()` and `version`. Exit 1 on drift, naming the generator, the field and key, both values and the re-capture command. Exit 2 when the check cannot run
+- Permissions: `contents: read`. Not a required check: it reports only on pull requests that touch its paths
 
 ### `lockfile-update.yml`
 
@@ -811,7 +826,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-10-08
-**Version:** 0.28.1
+**Last Updated:** 2026-10-26
+**Version:** 0.29.0
 **Maintained By:** Development Team
 **Status:** ✅ Current
