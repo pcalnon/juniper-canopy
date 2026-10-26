@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The header now says so, and the three CI docs that repeated the claim (`docs/ci_cd/CICD_REFERENCE.md`,
   `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md` and `docs/ci_cd/CICD_MANUAL.md`) are corrected with it. Comments and docs
   only: no trigger, step, pin or job name changed. Same record, §4.
+- **`docs/DOCUMENTATION_OVERVIEW.md`'s two template examples carried the document's own live stamp.** The example
+  document header (`:510-511`) and the metadata example (`:965-966`) both read `1.0.1` / October 8, 2026, the
+  header's own values, so a stamp bump rewrote the examples along with the header. juniper-cascor#709 made exactly
+  that edit to cascor's copy (a row in the same record); the juniper-cascor flood-3 backlog PR found this one. The
+  examples now show placeholders, and the header moves to 1.0.2, October 26, 2026.
 - **F-CANOPY-069: under every dash 3.x release the dashboard was inert in the browser.** Two callback pairs each
   claimed one `allow_duplicate` Output from one Input: `accept_live_switch` and `open_progress_alert_on_accept` on
   `live-switch-accept-button.n_clicks`, and `execute_restart` and `open_restart_progress` on
