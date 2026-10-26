@@ -6946,6 +6946,9 @@ class DashboardManager:
         typed fields the type RENDERS and that hold a value (juniper-canopy#735), the registry seed, and the
         FR9 ``nn_model`` mirror when a model is selected. N3b uses the ROUTE (not a new staging path) so the
         cascor-side ``StageDatasetRequest`` stays the single authoritative validator.
+
+        The payload used to be built inline here. juniper-canopy#735 moved that code, comments included, into
+        ``_restart_restage_payload``, so that the Restart plan and Confirm read one builder and cannot disagree.
         """
         payload = self._restart_restage_payload(dataset_vals, nn_model=nn_model)
         # X4: §4.2 of the design names THIS as "the correct idiom" for the null guard, but
