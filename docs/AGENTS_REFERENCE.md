@@ -25,6 +25,7 @@ pointer only helps an agent that already knows to look.
 - [Sidebar model summary (X11)](#sidebar-model-summary-x11)
 - [Constants Reference](#constants-reference)
 - [Configuration Reference](#configuration-reference)
+- [Test Environment Variables Reference](#test-environment-variables-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
 - [Replay index contract](#replay-index-contract)
@@ -919,6 +920,34 @@ python -c "import yaml; yaml.safe_load(open('conf/app_config.yaml'))"
 ```
 
 ---
+
+## Test Environment Variables Reference
+
+Relocated verbatim from `AGENTS.md` § Quick Start Commands → Coverage → Test Environment Variables (2026-10-26, to keep the always-loaded file under its memory budget when the owner's `tmp/` rulings landed) so it is read on demand rather than loaded into every session.
+
+The test suite auto-skips certain tests unless you opt in via environment variables:
+
+| Variable                   | Effect                                                          | Default |
+| -------------------------- | --------------------------------------------------------------- | ------- |
+| `CASCOR_BACKEND_AVAILABLE` | Enable tests marked `requires_cascor`                           | unset   |
+| `RUN_SERVER_TESTS`         | Enable tests marked `requires_server`                           | unset   |
+| `RUN_DISPLAY_TESTS`        | Enable tests marked `requires_display` in headless environments | unset   |
+| `ENABLE_SLOW_TESTS`        | Run tests marked `slow`                                         | unset   |
+| `CASSANDRA_INTEGRATION_TEST` | Enable Cassandra integration tests                            | unset   |
+| `REDIS_INTEGRATION_TEST`  | Enable Redis integration tests                                  | unset   |
+| `JUNIPER_DATA_E2E_TEST`   | Enable JuniperData end-to-end tests                             | unset   |
+
+> **Note:** `conftest.py` **forces** `JUNIPER_CANOPY_DEMO_MODE=1` for the test process by default so tests do **not** require a real backend unless you explicitly enable it via `CASCOR_BACKEND_AVAILABLE=1`.
+
+Example:
+
+```bash
+# Enable CasCor backend and slow tests
+export CASCOR_BACKEND_AVAILABLE=1
+export ENABLE_SLOW_TESTS=1
+cd src
+pytest -m "not requires_display" -v
+```
 
 ## API and WebSocket Contract Reference
 

@@ -238,29 +238,7 @@ pytest -m performance -v
 
 #### Test Environment Variables
 
-The test suite auto-skips certain tests unless you opt in via environment variables:
-
-| Variable                   | Effect                                                          | Default |
-| -------------------------- | --------------------------------------------------------------- | ------- |
-| `CASCOR_BACKEND_AVAILABLE` | Enable tests marked `requires_cascor`                           | unset   |
-| `RUN_SERVER_TESTS`         | Enable tests marked `requires_server`                           | unset   |
-| `RUN_DISPLAY_TESTS`        | Enable tests marked `requires_display` in headless environments | unset   |
-| `ENABLE_SLOW_TESTS`        | Run tests marked `slow`                                         | unset   |
-| `CASSANDRA_INTEGRATION_TEST` | Enable Cassandra integration tests                            | unset   |
-| `REDIS_INTEGRATION_TEST`  | Enable Redis integration tests                                  | unset   |
-| `JUNIPER_DATA_E2E_TEST`   | Enable JuniperData end-to-end tests                             | unset   |
-
-> **Note:** `conftest.py` **forces** `JUNIPER_CANOPY_DEMO_MODE=1` for the test process by default so tests do **not** require a real backend unless you explicitly enable it via `CASCOR_BACKEND_AVAILABLE=1`.
-
-Example:
-
-```bash
-# Enable CasCor backend and slow tests
-export CASCOR_BACKEND_AVAILABLE=1
-export ENABLE_SLOW_TESTS=1
-cd src
-pytest -m "not requires_display" -v
-```
+The opt-in variables that un-skip the gated tests (`requires_cascor`, `requires_server`, `requires_display`, `slow`, and the Cassandra, Redis and JuniperData integration suites), and why the suite runs in demo mode by default. Moved to [`docs/AGENTS_REFERENCE.md` § Test Environment Variables Reference](docs/AGENTS_REFERENCE.md#test-environment-variables-reference) — read it when working on this area.
 
 #### Key Test Fixtures
 
@@ -832,6 +810,13 @@ ages `/tmp` too.
   derived from `TMPDIR`.
 - Out of scope: GitHub-hosted CI runners and a container's own `/tmp`.
 - Ecosystem rule and rationale: `juniper-ml/notes/JUNIPER_2026-10-26_JUNIPER-ECOSYSTEM_REPO-TMP-DIRECTORY-CONVENTION.md`.
+- **Owner rulings, 2026-10-26** (canonical: the note above): `juniper-check-doc-links` passes `--exclude tmp` and a
+  local Docker build's `.dockerignore` lists `tmp/`; pytest does not ignore it (no `norecursedirs`, `--ignore` or
+  `collect_ignore` names it), and a `grep`/`find` match count includes it. Full-tree repo copies and log-file copies
+  may live there.
+  - **Retention.** A file a work arc writes to `tmp/` is kept until it is no longer needed, no work arc (its own
+    included) uses it, and it is no longer needed for documentation or reference, and, where needed, until it has
+    been archived in an appropriate non-temporary directory. Only then may it be deleted.
 
 ## Documentation Organization
 
