@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-09-05
+**Last Updated**: 2026-10-26
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -23,6 +23,7 @@ pointer only helps an agent that already knows to look.
 - [Topology Node Selection (F-CANOPY-046)](#topology-node-selection-f-canopy-046)
 - [Plotly PNG Export (F-CANOPY-047)](#plotly-png-export-f-canopy-047)
 - [Sidebar model summary (X11)](#sidebar-model-summary-x11)
+- [Constants Reference](#constants-reference)
 - [Configuration Reference](#configuration-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
@@ -672,6 +673,49 @@ The unknown sentence is written again when that read fails: a transport error, a
 cd src
 pytest tests/regression/test_selection_reachability_guardrails.py -k X11 -v
 ```
+
+## Constants Reference
+
+Relocated verbatim from `AGENTS.md` § Constants Management (2026-10-26, to keep the always-loaded file under its memory budget when the temp-file rule landed) so it is read on demand rather than loaded into every session. The one edit is the Constants Guide link, re-rooted at `docs/`.
+
+All application constants are centralized in `src/canopy_constants.py` for maintainability and type safety.
+
+**Import and use constants:**
+
+```python
+from canopy_constants import TrainingConstants, DashboardConstants
+
+# Use in your code
+max_epochs = TrainingConstants.MAX_TRAINING_EPOCHS
+interval = DashboardConstants.FAST_UPDATE_INTERVAL_MS
+```
+
+**Available constant classes:**
+
+- `TrainingConstants` - Training parameters (epochs, learning rates, hidden units)
+- `DashboardConstants` - UI behavior (update intervals, timeouts, data limits)
+- `ServerConstants` - Server configuration (host, port, WebSocket paths, discovery host/ports/timeout, health probe paths)
+- `SecurityConstants` - HTTP security headers (CSP, HSTS, X-Frame-Options, etc.), default CSP policy, rate-limit headers, body-limit error messages, exempt paths
+- `BackendConstants` - REST endpoint paths, backend adapter timeouts, retry tuning, status keys
+- `WebSocketConstants` - WebSocket message types, ping/pong intervals, reconnect backoff
+- `JuniperDataConstants` - JuniperData service URL defaults and dataset endpoint paths
+
+**When to use constants:**
+
+✅ Values used in multiple places  
+✅ Configuration defaults and limits  
+✅ Values that improve code clarity  
+❌ Test-specific values (keep in test files)  
+❌ Calculated or runtime values  
+
+**Adding new constants:**
+
+See the comprehensive [Constants Guide](cascor/CONSTANTS_GUIDE.md) for detailed instructions on:
+
+- How to add new constants
+- Naming conventions (include units: `_MS`, `_S`, `_PX`)
+- Constants vs configuration
+- Best practices and examples
 
 ## Configuration Reference
 
