@@ -45,6 +45,7 @@ import requests
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
+from backend.recurrence_request import GENERIC_FIELD_PARAMS, shape_stage_payload, staged_typed_fields
 from canopy_constants import CascorPatchBounds, DashboardConstants, TrainingConstants
 from dataset_schema import apply_availability_gate, apply_seeded_defaults, availability_is_known, form_excluded_fields, generator_name_for_type, is_generator_available, parse_schema_fields, unavailable_hint, unavailable_reason
 from frontend.internal_api import internal_api_headers
@@ -647,6 +648,15 @@ RESTART_MODAL_DATASET_FIELDS = (
     ("restart-ds-rotations", "rotations", "Spiral rotations"),
     ("restart-ds-spirals", "n_spirals", "Spirals"),
 )
+# juniper-canopy#735: each TYPED modal field's canopy staging key. The modal renders a typed field only when
+# ``recurrence_request.staged_typed_fields`` names its key for the selected type, and ``_restage_dataset``
+# sends exactly the rendered ones, so Confirm re-stages what the modal displays (the owner's 2026-09-22
+# ruling, point 4 of §5.6.1 of juniper-ml's JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md).
+# Each field's wrapper is ``<field id>-group``; its ``style`` is the visibility.
+RESTART_MODAL_STAGE_KEYS = {"n_samples": "nn_dataset_elements", "noise": "nn_dataset_noise", "rotations": "nn_spiral_rotations", "n_spirals": "nn_spiral_number"}
+RESTART_MODAL_TYPED_FIELDS = tuple(field for field in RESTART_MODAL_DATASET_FIELDS if field[1] in RESTART_MODAL_STAGE_KEYS)
+_RESTART_FIELD_SHOWN: Final[Dict[str, str]] = {"display": "block"}
+_RESTART_FIELD_HIDDEN: Final[Dict[str, str]] = {"display": "none"}
 RESTART_MODAL_PARAM_FIELDS = (
     ("restart-p-nn-learning-rate", "nn_learning_rate", "Learning rate"),
     ("restart-p-nn-max-hidden-units", "nn_max_hidden_units", "Max hidden units"),
@@ -3609,6 +3619,13 @@ class DashboardManager:
             # untouched by it -- an excluded-but-seeded key (mnist's ``flatten: True``, equities'
             # unrendered ``symbols`` array) still travels, which is the whole point of the
             # ordering above.
+            #
+            # This body is deliberately WHOLE: every rendered value, untouched ones included. What
+            # reaches juniper-data is narrower for a generator ``DECLARED_PARAM_DEFAULTS`` covers.
+            # ``ServiceBackend`` forwards the seed plus what the operator edited, at stage time
+            # (``recurrence_request.shape_stage_payload``, juniper-canopy#736), and the recurrence backend
+            # does the same at Start. Both need the whole body to tell an edit from an untouched field and
+            # to name what they withheld, so neither filter belongs here.
             params = dict(dataset_default_params(dataset_type))
             params.update(DashboardManager._collect_generator_params(gen_values, gen_ids, exclude=form_excluded_fields(generator_name_for_type(dataset_type))))
             if params:
@@ -6443,6 +6460,18 @@ class DashboardManager:
                 return dash.no_update
             return not is_open
 
+        # juniper-canopy#735: render the typed dataset fields for the type the modal will stage. Driven by the
+        # type alone, so it follows every way the type changes: the open (including its ``enabled[0]`` swap of
+        # a stranded dataset, which the owner ruled on 2026-09-22 to keep) and the operator picking another
+        # type. ``_restage_dataset`` sends exactly the fields this shows, from the same function.
+        @self.app.callback(
+            [Output(f"{field_id}-group", "style") for field_id, _key, _label in RESTART_MODAL_TYPED_FIELDS] + [Output("restart-ds-no-fields-note", "style")],
+            Input("restart-ds-type", "value"),
+            prevent_initial_call=True,
+        )
+        def show_restart_dataset_fields(dataset_type):
+            return self._restart_dataset_field_styles(dataset_type)
+
         # N3b: keep the "Restart plan" summary in sync with the operator's in-place
         # edits — any change to a dataset or param field re-renders the summary so
         # every modification is reflected before Confirm (plan §4 I-6 item 4). The
@@ -6464,12 +6493,14 @@ class DashboardManager:
                 Input("restart-p-cn-corr-thresh", "value"),
             ],
             dash.dependencies.State("restart-modal-baseline", "data"),
+            # juniper-canopy#735: the FR9 mirror a re-stage carries, so the plan can name it.
+            dash.dependencies.State("model-selection-store", "data"),
             prevent_initial_call=True,
         )
-        def refresh_restart_summary(ds_type, ds_samples, ds_noise, ds_rot, ds_spirals, p_lr, p_hu, p_pat, p_pool, p_sel, p_corr, baseline):
+        def refresh_restart_summary(ds_type, ds_samples, ds_noise, ds_rot, ds_spirals, p_lr, p_hu, p_pat, p_pool, p_sel, p_corr, baseline, model_key):
             dataset_vals = {"dataset_type": ds_type, "n_samples": ds_samples, "noise": ds_noise, "rotations": ds_rot, "n_spirals": ds_spirals}
             param_vals = {"nn_learning_rate": p_lr, "nn_max_hidden_units": p_hu, "nn_patience": p_pat, "cn_pool_size": p_pool, "cn_selected_candidates": p_sel, "cn_correlation_threshold": p_corr}
-            return self._build_restart_summary(dataset_vals, param_vals, baseline)
+            return self._build_restart_summary(dataset_vals, param_vals, baseline, model_key=model_key)
 
         @self.app.callback(
             Output("restart-confirm-modal", "is_open", allow_duplicate=True),
@@ -6541,6 +6572,12 @@ class DashboardManager:
         Distinct ids from the sidebar's ``nn-dataset-*`` inputs (Dash ids are
         global). Populated on open from the currently staged / current values; an
         edit re-stages via the existing ``/api/stage_dataset`` route on Confirm.
+
+        juniper-canopy#735: the four typed fields are rendered PER TYPE, as the sidebar renders its
+        own. Each sits in a ``<field id>-group`` wrapper that ``show_restart_dataset_fields`` shows only
+        when the selected type's generator has a parameter for it
+        (``recurrence_request.staged_typed_fields``). They start hidden because the type starts unset.
+        The inputs themselves always exist, because the callbacks read them as ``State``.
         """
 
         def _num(label, _id, step, minimum=None):
@@ -6548,7 +6585,9 @@ class DashboardManager:
                 [
                     dbc.Label(label, html_for=_id, size="sm", className="mb-0"),
                     dbc.Input(id=_id, type="number", step=step, min=minimum, size="sm", debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS, className="mb-2"),
-                ]
+                ],
+                id=f"{_id}-group",
+                style=dict(_RESTART_FIELD_HIDDEN),
             )
 
         return html.Div(
@@ -6563,6 +6602,12 @@ class DashboardManager:
                 _num("Noise", "restart-ds-noise", "any", 0),
                 _num("Spiral rotations", "restart-ds-rotations", "any", 0),
                 _num("Spirals", "restart-ds-spirals", 1, 1),
+                html.Div(
+                    "This dataset type has no fields to edit here. The Restart plan lists what a re-stage sends.",
+                    id="restart-ds-no-fields-note",
+                    className="small text-muted mb-2",
+                    style=dict(_RESTART_FIELD_HIDDEN),
+                ),
             ]
         )
 
@@ -6636,12 +6681,20 @@ class DashboardManager:
         # juniper-ml's JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md. Do not
         # "reconcile" the two sites without reading it: the registry's seed ORDER is what decides
         # this fallback.
+        sidebar_type = dataset_type
         if not selection_axis_unset(dataset_type) and dataset_type not in enabled:
             dataset_type = enabled[0] if enabled else None
         dataset_vals = {"dataset_type": dataset_type, "n_samples": n_samples, "noise": noise, "rotations": rotations, "n_spirals": n_spirals}
         param_vals, context = self._read_restart_param_seed()
-        baseline = {"dataset": dict(dataset_vals), "params": dict(param_vals)}
-        summary = self._build_restart_summary(dataset_vals, param_vals, baseline)
+        # The ruling's premise is that "Confirm re-stages exactly what the modal displays". The baseline used to
+        # take the SWAPPED value, so an untouched Confirm after a swap re-staged nothing and restarted on whatever
+        # was staged: the very dataset the modal had just replaced, while the plan named the swapped one. So when
+        # the swap lands on a dataset, the baseline keeps the sidebar's value, the swap reads as a change, and
+        # Confirm re-stages what is displayed (juniper-canopy#735). A swap that finds nothing enabled leaves the
+        # type unset and changes nothing, as before.
+        baseline_dataset = dict(dataset_vals, dataset_type=sidebar_type) if dataset_type is not None else dict(dataset_vals)
+        baseline = {"dataset": baseline_dataset, "params": dict(param_vals)}
+        summary = self._build_restart_summary(dataset_vals, param_vals, baseline, model_key=model_key)
         return (
             True,
             summary,
@@ -6710,12 +6763,69 @@ class DashboardManager:
         except (TypeError, ValueError):
             return str(a) != str(b)
 
+    @staticmethod
+    def _restart_visible_dataset_keys(dataset_type):
+        """The typed modal keys rendered for ``dataset_type``, in render order (juniper-canopy#735).
+
+        A field is rendered when ``recurrence_request.staged_typed_fields`` names its staging key for the type:
+        all four for spiral, the generic fields a declared generator declares (none, for every shipped entry),
+        and Samples and Noise for any other generator. Nothing at ``⊥``.
+        """
+        staged = staged_typed_fields(dataset_type)
+        return tuple(key for _id, key, _label in RESTART_MODAL_TYPED_FIELDS if RESTART_MODAL_STAGE_KEYS[key] in staged)
+
+    @classmethod
+    def _restart_dataset_field_styles(cls, dataset_type):
+        """``show_restart_dataset_fields``'s styles: one per typed field, then the no-fields note's."""
+        visible = cls._restart_visible_dataset_keys(dataset_type)
+        styles = [dict(_RESTART_FIELD_SHOWN if key in visible else _RESTART_FIELD_HIDDEN) for _id, key, _label in RESTART_MODAL_TYPED_FIELDS]
+        note = _RESTART_FIELD_SHOWN if dataset_type and not visible else _RESTART_FIELD_HIDDEN
+        return (*styles, dict(note))
+
     @classmethod
     def _restart_dataset_changed(cls, dataset_vals, baseline_dataset):
-        """True iff the operator edited any staged-dataset field vs. the baseline."""
+        """True iff the type, or a field RENDERED for the type, differs from the baseline.
+
+        juniper-canopy#735: a field the type does not render is not compared. It keeps its value while hidden,
+        so it comes back if the operator returns to a type that renders it, but it cannot be edited and it is
+        never re-staged.
+        """
         dataset_vals = dataset_vals or {}
         baseline_dataset = baseline_dataset or {}
-        return any(cls._values_differ(dataset_vals.get(key), baseline_dataset.get(key)) for _id, key, _label in RESTART_MODAL_DATASET_FIELDS)
+        keys = ("dataset_type", *cls._restart_visible_dataset_keys(dataset_vals.get("dataset_type")))
+        return any(cls._values_differ(dataset_vals.get(key), baseline_dataset.get(key)) for key in keys)
+
+    @classmethod
+    def _restart_restage_payload(cls, dataset_vals, nn_model=None):
+        """The body Confirm's re-stage POSTs, or None at ``⊥`` (juniper-canopy#735).
+
+        ONE builder for what is sent (``_restage_dataset``) and what is shown (``_build_restart_summary``), so
+        the two cannot part. It carries ``nn_dataset_type``, each typed field the type renders and that holds a
+        value, the registry seed as ``nn_dataset_params`` (canopy#668) and the FR9 ``nn_model`` mirror
+        (canopy#674). A typed field the type does not render is not sent, whatever it holds.
+        """
+        dataset_vals = dataset_vals or {}
+        dtype = dataset_vals.get("dataset_type")
+        if selection_axis_unset(dtype):
+            return None
+        payload = {"nn_dataset_type": dtype}
+        for key in cls._restart_visible_dataset_keys(dtype):
+            value = dataset_vals.get(key)
+            if value is not None:
+                payload[RESTART_MODAL_STAGE_KEYS[key]] = value
+        # The registry seed, exactly as ``_apply_dataset_handler`` sends it: the seed is the single source of
+        # truth for the keys a generator cannot run without. This path used to send the typed fields alone, so
+        # re-staging a seeded generator from the modal dropped the very keys its seed exists for -- ``equities``
+        # without ``symbols`` (a default deployment refuses the whole 503-name universe with a 422) and
+        # ``mnist`` without ``flatten`` (which makes canopy's ``ndim=2`` declaration self-enforcing). The modal
+        # renders no schema-driven params, so the seed is all it can send; a custom list applied earlier from
+        # the sidebar is not carried -- the modal re-stages what it displays, and it does not display that.
+        seed = dataset_default_params(dtype)
+        if seed:
+            payload["nn_dataset_params"] = dict(seed)
+        if nn_model:
+            payload["nn_model"] = nn_model
+        return payload
 
     @classmethod
     def _restart_param_updates(cls, param_vals, baseline_params):
@@ -6738,25 +6848,36 @@ class DashboardManager:
         return updates
 
     @classmethod
-    def _build_restart_summary(cls, dataset_vals, param_vals, baseline):
+    def _build_restart_summary(cls, dataset_vals, param_vals, baseline, model_key=None):
         """Render the "Restart plan" summary — reflects every in-place edit (item 4).
 
         Lists the dataset config that will be applied plus, when the operator has
         changed a param field from its open-time baseline, a "Parameter changes"
         block showing ``old → new``. Returns a list of ``dbc.ListGroupItem`` (the
         ``restart-confirm-summary`` ListGroup children).
+
+        juniper-canopy#735: the dataset rows are the type and the fields RENDERED for it, nothing else. When
+        Confirm will re-stage (``_restart_dataset_changed``), ``_restart_restage_rows`` adds what that re-stage
+        carries without a field of its own and every value it does not send. When it will not, the plan says
+        so. ``model_key`` is the FR9 mirror the re-stage carries.
         """
         dataset_vals = dataset_vals or {}
         baseline = baseline if isinstance(baseline, dict) else {}
         baseline_params = baseline.get("params") or {}
-        rows = []
-        for _id, key, label in RESTART_MODAL_DATASET_FIELDS:
-            value = dataset_vals.get(key)
-            if value is None:
-                continue
-            rows.append(dbc.ListGroupItem([html.Strong(f"{label}: "), html.Span(str(value))]))
-        if not rows:
+        dtype = dataset_vals.get("dataset_type")
+        if selection_axis_unset(dtype):
             rows = [dbc.ListGroupItem(html.Em("No dataset config selected — the currently staged change will be applied."), color="warning")]
+        else:
+            labels = {key: label for _id, key, label in RESTART_MODAL_DATASET_FIELDS}
+            rows = [dbc.ListGroupItem([html.Strong(f"{labels['dataset_type']}: "), html.Span(str(dtype))])]
+            for key in cls._restart_visible_dataset_keys(dtype):
+                value = dataset_vals.get(key)
+                if value is not None:
+                    rows.append(dbc.ListGroupItem([html.Strong(f"{labels[key]}: "), html.Span(str(value))]))
+            if cls._restart_dataset_changed(dataset_vals, baseline.get("dataset") or {}):
+                rows.extend(cls._restart_restage_rows(dataset_vals, model_key))
+            else:
+                rows.append(dbc.ListGroupItem(html.Em("Dataset unchanged: nothing is re-staged, and the restart uses the dataset already staged or loaded."), className="text-muted"))
         changes = []
         for _id, key, label in RESTART_MODAL_PARAM_FIELDS:
             new = (param_vals or {}).get(key)
@@ -6770,49 +6891,68 @@ class DashboardManager:
             rows.extend(changes)
         return rows
 
-    @staticmethod
-    def _describe_dataset(dataset_vals):
-        """Short human label for a re-staged dataset (outcome-alert note)."""
+    @classmethod
+    def _restart_restage_rows(cls, dataset_vals, model_key=None):
+        """The plan rows for a re-stage Confirm WILL send (juniper-canopy#735).
+
+        Everything the re-stage carries that has no field of its own is named here -- the registry seed
+        (canopy#668) and the model it is staged for (the FR9 mirror, canopy#674) -- and so is every value it
+        does NOT send: a typed field the type does not render, and a rendered value the declared-param filter
+        would withhold downstream (``recurrence_request.shape_stage_payload``, the rule both tiers apply). With
+        every shipped declaration the second list is empty, because a rendered generic field is one the
+        generator declares; it can fill only at the generator's own default, or under a seeded key. So no
+        value the modal shows is ever dropped without the plan saying so: that is the premise of the owner's
+        2026-09-22 ruling on this modal.
+        """
+        payload = cls._restart_restage_payload(dataset_vals, nn_model=model_key) or {}
+        dtype = payload.get("nn_dataset_type")
+        spec = get_dataset_spec(dtype)
+        type_label = spec.label if spec is not None else str(dtype)
+        labels = {key: label for _id, key, label in RESTART_MODAL_DATASET_FIELDS}
+        rows = [dbc.ListGroupItem(html.Em("Confirm re-stages this dataset before the restart."), className="fw-semibold")]
+        seed = payload.get("nn_dataset_params") or {}
+        if seed:
+            seed_text = "; ".join(f"{name}={value}" for name, value in seed.items())
+            rows.append(dbc.ListGroupItem([html.Strong("Registry defaults sent with it: "), html.Span(seed_text)]))
+        if model_key:
+            model_spec = get_model_spec(model_key)
+            rows.append(dbc.ListGroupItem([html.Strong("Staged for model: "), html.Span(model_spec.label if model_spec is not None else str(model_key))]))
+        visible = cls._restart_visible_dataset_keys(dtype)
+        hidden = [labels[key] for _id, key, _label in RESTART_MODAL_TYPED_FIELDS if key not in visible and (dataset_vals or {}).get(key) is not None]
+        if hidden:
+            rows.append(dbc.ListGroupItem(f"Not sent: {', '.join(hidden)}. {type_label} has no parameter for them, so they are not shown here.", className="text-muted"))
+        stage = shape_stage_payload(payload)
+        if stage.shaped is not None:
+            forwarded = stage.payload.get("nn_dataset_params") or {}
+            for key in visible:
+                stage_key = RESTART_MODAL_STAGE_KEYS[key]
+                if stage_key in payload and GENERIC_FIELD_PARAMS.get(stage_key) not in forwarded:
+                    reason = "its registry default is sent instead" if stage_key in stage.shaped.not_forwarded else "it equals the generator's own default, which juniper-data uses anyway"
+                    rows.append(dbc.ListGroupItem(f"Shown but not sent: {labels[key]} ({reason}).", color="warning"))
+        return rows
+
+    @classmethod
+    def _describe_dataset(cls, dataset_vals):
+        """Short human label for a re-staged dataset (outcome-alert note); a sample count only when it was rendered, and so sent."""
         dataset_vals = dataset_vals or {}
         dtype = dataset_vals.get("dataset_type") or "current"
-        n = dataset_vals.get("n_samples")
+        n = dataset_vals.get("n_samples") if "n_samples" in cls._restart_visible_dataset_keys(dataset_vals.get("dataset_type")) else None
         return f"{dtype} ({n} samples)" if n is not None else str(dtype)
 
     def _restage_dataset(self, dataset_vals, *, nn_model=None):
         """Re-stage the (edited) dataset via the existing ``/api/stage_dataset`` route.
 
-        Returns ``(ok, detail)``. Mirrors the ``apply_dataset`` callback's payload
-        contract: ``nn_dataset_type`` is always sent; the optional numeric / spiral
-        fields only when present. N3b uses the ROUTE (not a new staging path) so
-        the cascor-side ``StageDatasetRequest`` stays the single authoritative
-        validator. ``nn_model`` is the FR9 mirror, omitted when no model is selected.
+        Returns ``(ok, detail)``. The body is ``_restart_restage_payload``'s: ``nn_dataset_type`` always, the
+        typed fields the type RENDERS and that hold a value (juniper-canopy#735), the registry seed, and the
+        FR9 ``nn_model`` mirror when a model is selected. N3b uses the ROUTE (not a new staging path) so the
+        cascor-side ``StageDatasetRequest`` stays the single authoritative validator.
         """
-        dataset_vals = dataset_vals or {}
-        payload = {}
-        dtype = dataset_vals.get("dataset_type")
+        payload = self._restart_restage_payload(dataset_vals, nn_model=nn_model)
         # X4: §4.2 of the design names THIS as "the correct idiom" for the null guard, but
         # skipping the key is exactly what produces the destructive empty body -- cascor reads
         # ``{}`` as "clear any prior staging". Refuse the re-stage instead of sending it.
-        if selection_axis_unset(dtype):
+        if payload is None:
             return False, "No dataset selected — nothing to re-stage."
-        payload["nn_dataset_type"] = dtype
-        for key, pkey in (("n_samples", "nn_dataset_elements"), ("noise", "nn_dataset_noise"), ("rotations", "nn_spiral_rotations"), ("n_spirals", "nn_spiral_number")):
-            value = dataset_vals.get(key)
-            if value is not None:
-                payload[pkey] = value
-        # The registry seed, exactly as ``_apply_dataset_handler`` sends it: the seed is the single
-        # source of truth for the keys a generator cannot run without. This path used to send the
-        # typed fields alone, so re-staging a seeded generator from the modal dropped the very keys
-        # its seed exists for -- ``equities`` without ``symbols`` (a default deployment refuses the
-        # whole 503-name universe with a 422) and ``mnist`` without ``flatten`` (which makes canopy's
-        # ``ndim=2`` declaration self-enforcing). The modal renders no schema-driven params, so the
-        # seed is all it can send; a custom list applied earlier from the sidebar is not carried --
-        # the modal re-stages what it displays, and it does not display that.
-        seed = dataset_default_params(dtype)
-        if seed:
-            payload["nn_dataset_params"] = dict(seed)
-        if nn_model:
-            payload["nn_model"] = nn_model
         try:
             resp = requests.post(
                 self._api_url("/api/stage_dataset"),
@@ -6850,7 +6990,10 @@ class DashboardManager:
            so the staged change survives and the operator can retry (plan §8).
 
         An untouched Confirm skips phases 1-2 entirely — the ratified simple-confirm
-        default (assumes all other params/structures unchanged).
+        default (assumes all other params/structures unchanged). The open handler's
+        ``enabled[0]`` swap is not "untouched": the modal displays the swapped dataset,
+        so phase 1 re-stages it (juniper-canopy#735; the 2026-09-22 ruling's "Confirm
+        re-stages exactly what the modal displays").
         """
         if not n_clicks:
             return dash.no_update, dash.no_update, dash.no_update, dash.no_update
