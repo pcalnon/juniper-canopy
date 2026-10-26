@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The lockfile regen could have committed an empty `requirements.lock` without failing.** The commit step built
+  its payload with `--arg contents "$(base64 -w0 requirements.lock)"`. A failure inside a command substitution used
+  as an argument does not trip `set -e`, so a failing `base64` would have handed `jq` an empty string and the step
+  would have made a signed commit that empties the lockfile. Latent: GNU `base64` does not fail on
+  `ubuntu-latest`. The encoding is now its own assignment, which `set -e` does catch, and an empty result fails the
+  step before anything is committed. `.github/workflows/lockfile-update.yml` banner 0.1.2. Found by the Cursor
+  flood-3 evaluation: juniper-ml `notes/JUNIPER_2026-10-08_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-3-DISPOSITION.md` §4.
+- **`claude.yml`'s header said `ANTHROPIC_API_KEY` is set at the organization level.** Juniper repos are
+  user-owned, so no organization secret can reach them; the key is a repository secret here, added 2026-10-10.
+  The header now says so, and the three CI docs that repeated the claim (`docs/ci_cd/CICD_REFERENCE.md`,
+  `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md` and `docs/ci_cd/CICD_MANUAL.md`) are corrected with it. Comments and docs
+  only: no trigger, step, pin or job name changed. Same record, §4.
 - **F-CANOPY-069: under every dash 3.x release the dashboard was inert in the browser.** Two callback pairs each
   claimed one `allow_duplicate` Output from one Input: `accept_live_switch` and `open_progress_alert_on_accept` on
   `live-switch-accept-button.n_clicks`, and `execute_restart` and `open_restart_progress` on

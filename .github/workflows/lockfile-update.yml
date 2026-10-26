@@ -5,10 +5,10 @@
 # Application:   juniper_canopy
 # File Name:     lockfile-update.yml
 # Author:        Paul Calnon
-# Version:       0.1.1
+# Version:       0.1.2
 #
 # Date Created:  2026-03-02
-# Last Modified: 2026-10-08
+# Last Modified: 2026-10-26
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-2026 Paul Calnon
@@ -197,12 +197,20 @@ jobs:
           # clobbering it (the old `git push` had the same protection).
           HEAD_OID=$(git rev-parse HEAD)
 
+          # Encode on its own line: a failure inside "$(...)" passed as a jq argument does
+          # not trip `set -e`, and an empty payload would commit an empty lockfile (flood-3 §4).
+          LOCK_B64=$(base64 -w0 requirements.lock)
+          if [ -z "${LOCK_B64}" ]; then
+            echo "::error::base64 produced an empty payload -- lockfile NOT committed"
+            exit 1
+          fi
+
           jq -n \
             --arg repo "${GITHUB_REPOSITORY}" \
             --arg branch "${BRANCH}" \
             --arg oid "${HEAD_OID}" \
             --arg msg "${MSG}" \
-            --arg contents "$(base64 -w0 requirements.lock)" \
+            --arg contents "${LOCK_B64}" \
             '{query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
               variables: {input: {
                 branch: {repositoryNameWithOwner: $repo, branchName: $branch},

@@ -1,7 +1,7 @@
 # CI/CD Environment Setup
 
-**Last Updated:** 2026-10-08
-**Version:** 0.28.1
+**Last Updated:** 2026-10-26
+**Version:** 0.28.2
 **Status:** Current
 
 ## Table of Contents
@@ -100,7 +100,7 @@ pip install -e .
 - `CROSS_REPO_DISPATCH_TOKEN`:
   Used by `lockfile-update.yml` to push lockfile updates in Dependabot branches with CI retriggering behavior.
 - `ANTHROPIC_API_KEY`:
-  Read by `claude.yml` as the only auth input (`anthropic_api_key`). The workflow header says this is an org secret and that the repo must be able to read it. Bedrock, Vertex, Foundry, and workload-identity inputs are not set.
+  Read by `claude.yml` as the only auth input (`anthropic_api_key`). It is a repository secret: Juniper repos are user-owned, so no organization secret can reach them. Bedrock, Vertex, Foundry, and workload-identity inputs are not set.
 
 ### Workflow permissions
 
