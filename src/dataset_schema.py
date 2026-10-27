@@ -11,7 +11,7 @@
 # File Path:     ${HOME}/Development/python/Juniper/juniper-canopy/src/
 #
 # Date Created:  2026-07-21
-# Last Modified: 2026-10-08
+# Last Modified: 2026-10-26
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -67,6 +67,8 @@
 #       generator_name_for_type / apply_availability_gate / unavailable_reason.
 #     - W1.2 (F-C2 / F-C3, ruling R7): DECLARED_PARAM_DEFAULTS / declared_param_defaults --
 #       the dated snapshot of what each recurrence-reachable generator declares.
+#     - juniper-canopy#736: the flat ``equities`` entry, captured from the published juniper-data
+#       0.17.1 wheel, and DECLARED_PARAMS_SOURCES / declared_params_source (per-entry provenance).
 #
 #####################################################################################################################################################################################################
 """Schema-driven dataset-panel helpers (N7): JSON-Schema -> field descriptors + availability.
@@ -510,11 +512,12 @@ def apply_availability_gate(options: Sequence[Mapping[str, Any]], generators: Se
     return gated
 
 
-# --- W1.2 / ruling R7: the parameters each recurrence-reachable generator DECLARES ------------------
+# --- W1.2 / ruling R7: the parameters a generator DECLARES ------------------------------------------
 #
 # juniper-ml plan ``notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md``,
 # findings F-C2 and F-C3. ``backend/recurrence_request.py`` shapes the recurrence ``POST /v1/train``
-# request from this table, and needs both halves of each entry:
+# request from this table, and, since juniper-canopy#736, the cascor staging body of any generator the table
+# covers. Both need both halves of each entry:
 #
 # * the NAMES, because it forwards only a parameter the generator declares. canopy translated its
 #   generic ``nn_dataset_elements`` / ``nn_dataset_noise`` into ``n_samples`` / ``noise`` for every
@@ -539,9 +542,23 @@ def apply_availability_gate(options: Sequence[Mapping[str, Any]], generators: Se
 # default. The field set and every default are identical at the published v0.16.0 (diffed: only the R3
 # validator and descriptions moved), where ``equities_seq`` is ``5.0.0`` rather than ``6.0.0``.
 #
+# ``equities`` -- the rank-2 sibling, and the one entry the CASCOR path reads (juniper-canopy#736). cascor's
+# staging route forwarded every rendered form value, and the restart modal added ``n_samples`` / ``noise``,
+# which flat ``EquitiesParams`` does not declare: juniper-data ignores unknown keys, so they vanished without a
+# word (F-C3). This entry was captured 2026-10-26 from the PUBLISHED juniper-data 0.17.1 wheel -- PyPI's file,
+# sha256 ``cce2c167...``, generator ``5.0.0``, 17 properties -- by
+# ``util/ad-hoc/2026-10-26_capture_published_generator_schemas.py``, which wrote
+# ``tests/fixtures/juniper_data_tabular_generator_schemas.json``. The tool checked that every file the wheel
+# installs under ``juniper_data/`` is byte-identical to release tag ``v0.17.1`` (``381e660b``). The six above name
+# a source commit; this one names a release, because a release is what a deployment runs.
+#
 # Keyed by juniper-data generator NAME. Every rank-3 seed in ``model_registry.DATASET_TYPES`` must have
 # an entry (``TestEveryRecurrenceSeedIsDeclared``): a generator missing here is forwarded UNFILTERED,
-# which is the pre-W1.2 behaviour, and logged as a WARNING.
+# which is the pre-W1.2 behaviour, and logged as a WARNING. On the cascor path a missing generator is
+# forwarded unfiltered as well, and that is the norm there: only ``equities`` has an entry. An entry is only
+# safe for a generator whose ``n_samples`` / ``noise`` reach juniper-data under those names. That rules out
+# ``spiral``, ``xor`` and ``gaussian``, whose sample counts cascor renames
+# (``TestNoCascorRenamedGeneratorIsDeclared``).
 #
 # Drift has two directions, and neither is silent. A parameter juniper-data adds is withheld from the
 # request and named in the preview's "not forwarded" line and a WARNING. A default juniper-data changes
@@ -554,11 +571,25 @@ DECLARED_PARAM_DEFAULTS: dict[str, dict[str, Any]] = {
     "ar_p": {"n_steps": 2000, "lookback": 32, "horizon": 1, "sample_dt": 1.0, "train_ratio": 0.8, "val_ratio": 0.1, "seed": 0, "scaling": "identity", "coefficients": [0.5, -0.3], "const": 0.0, "sigma": 0.1, "burn_in": 100},
     "delay_product": {"n_steps": 2000, "lookback": 32, "horizon": 1, "sample_dt": 1.0, "train_ratio": 0.8, "val_ratio": 0.1, "seed": 0, "scaling": "identity", "lag1": 2, "lag2": 8, "jitter": 0.5, "n_components": 3, "frequencies": None, "amplitudes": None, "phases": None, "noise_std": 0.0},
     "equities_seq": {"symbols": None, "start_date": "2000-01-01", "end_date": None, "purchase_date": "2000-01-03", "basis_price_field": "close", "fundamentals_fill": "nan", "regression_target": "next_close", "week52_window": 252, "normalize_features": False, "max_symbols": 14, "incomplete_rows": None, "allow_truncation": None, "use_cache": True, "train_ratio": 0.8, "val_ratio": 0.1, "test_ratio": 0.1, "seed": 42, "lookback": 64},
+    "equities": {"symbols": None, "start_date": "2000-01-01", "end_date": None, "purchase_date": "2000-01-03", "basis_price_field": "close", "fundamentals_fill": "nan", "regression_target": "next_close", "week52_window": 252, "normalize_features": False, "max_symbols": 14, "incomplete_rows": None, "allow_truncation": None, "use_cache": True, "train_ratio": 0.8, "val_ratio": 0.1, "test_ratio": 0.1, "seed": 42},
 }
 
-# Where the table above came from, quoted in the preview so an operator can tell which producer contract
-# canopy is filtering against.
+# Where each entry above came from. The recurrence preview quotes the source of the generator it filtered
+# (``declared_params_source``, shown in its notes), so an operator can tell which producer contract canopy is
+# filtering against. ``DECLARED_PARAMS_SOURCE`` is the six sequence generators' capture, and keeps its name
+# because the recurrence tests pin it. ``EQUITIES_DECLARED_PARAMS_SOURCE`` is the release ``equities`` was
+# captured from.
 DECLARED_PARAMS_SOURCE: str = "juniper-data 462da218 (main, 2026-10-08); identical at v0.16.0"
+EQUITIES_DECLARED_PARAMS_SOURCE: str = "juniper-data 0.17.1 (published wheel; release tag v0.17.1 = 381e660b), captured 2026-10-26"
+DECLARED_PARAMS_SOURCES: dict[str, str] = {
+    **dict.fromkeys(("multi_sine", "mackey_glass", "irregular_sine", "ar_p", "delay_product", "equities_seq"), DECLARED_PARAMS_SOURCE),
+    "equities": EQUITIES_DECLARED_PARAMS_SOURCE,
+}
+
+
+def declared_params_source(generator_name: str | None) -> str | None:
+    """Return where ``generator_name``'s ``DECLARED_PARAM_DEFAULTS`` entry was captured from, or None without an entry."""
+    return DECLARED_PARAMS_SOURCES.get(generator_name or "")
 
 
 def declared_param_defaults(generator_name: str | None) -> dict[str, Any] | None:

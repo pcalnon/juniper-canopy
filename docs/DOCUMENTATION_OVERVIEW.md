@@ -2,8 +2,8 @@
 
 ## Complete Navigation Guide to Juniper Canopy Documentation
 
-**Version:** 1.0.1  
-**Last Updated:** October 8, 2026  
+**Version:** 1.0.2  
+**Last Updated:** October 26, 2026  
 **Project:** Juniper Canopy - Real-Time CasCor Monitoring Frontend
 
 ---
@@ -507,8 +507,8 @@ Contains archived documentation - see [Historical Documentation](#historical-doc
 ```markdown
 # Document Title
 
-**Version:** 1.0.1  
-**Last Updated:** October 8, 2026  
+**Version:** X.Y.Z  
+**Last Updated:** Month D, YYYY  
 **Author:** Paul Calnon
 
 ## Table of Contents
@@ -962,8 +962,8 @@ All documentation should include metadata:
 
 #### Document Title Status, Version, and Last-Updated Stamps
 
-**Last Updated:** 2026-10-08  
-**Version:** 1.0.1  
+**Last Updated:** YYYY-MM-DD  
+**Version:** X.Y.Z  
 **Status:** Current | Archived | Draft
 
 **Update rules:**
