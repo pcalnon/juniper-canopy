@@ -11,6 +11,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The lockfile regen could have committed an empty `requirements.lock` without failing.** The commit step built
+  its payload with `--arg contents "$(base64 -w0 requirements.lock)"`. A failure inside a command substitution used
+  as an argument does not trip `set -e`, so a failing `base64` would have handed `jq` an empty string and the step
+  would have made a signed commit that empties the lockfile. Latent: GNU `base64` does not fail on
+  `ubuntu-latest`. The encoding is now its own assignment, which `set -e` does catch, and an empty result fails the
+  step before anything is committed. `.github/workflows/lockfile-update.yml` banner 0.1.2. Found by the Cursor
+  flood-3 evaluation: juniper-ml `notes/JUNIPER_2026-10-08_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-3-DISPOSITION.md` §4.
+- **`claude.yml`'s header said `ANTHROPIC_API_KEY` is set at the organization level.** Juniper repos are
+  user-owned, so no organization secret can reach them; the key is a repository secret here, added 2026-10-10.
+  The header now says so, and the three CI docs that repeated the claim (`docs/ci_cd/CICD_REFERENCE.md`,
+  `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md` and `docs/ci_cd/CICD_MANUAL.md`) are corrected with it. Comments and docs
+  only: no trigger, step, pin or job name changed. Same record, §4.
+- **`docs/DOCUMENTATION_OVERVIEW.md`'s two template examples carried the document's own live stamp.** The example
+  document header (`:510-511`) and the metadata example (`:965-966`) both read `1.0.1` / October 8, 2026, the
+  header's own values, so a stamp bump rewrote the examples along with the header. juniper-cascor#709 made exactly
+  that edit to cascor's copy (a row in the same record); the juniper-cascor flood-3 backlog PR found this one. The
+  examples now show placeholders, and the header moves to 1.0.2, October 26, 2026.
+- **F-CANOPY-069: under every dash 3.x release the dashboard was inert in the browser.** Two callback pairs each
+  claimed one `allow_duplicate` Output from one Input: `accept_live_switch` and `open_progress_alert_on_accept` on
+  `live-switch-accept-button.n_clicks`, and `execute_restart` and `open_restart_progress` on
+  `restart-confirm-button.n_clicks`. Dash hashes the inputs into an `allow_duplicate` output id
+  (`create_callback_id`), so each pair's ids collided. dash 3's renderer validates the served dependency list
+  unconditionally and, on that `Duplicate callback outputs` error, drops the whole callback graph: the page
+  rendered and nothing on it worked (measured on 3.0.4, 3.2.0, 3.3.0 and 3.4.0; `conf/conda_environment.yaml`
+  pinned 3.3.0). dash 4 validates only with dev tools on, ran both members of each pair, and let the order of
+  their responses decide whether the spinner flashed or stuck. The openers existed to show the progress spinner
+  before the slow POST returned, which is what a callback's `running=` spec is for: `accept_live_switch` and
+  `execute_restart` now carry their progress alerts (and the live-swap in-flight store) as `running=`, so the
+  renderer opens them the moment the request leaves and closes them when the response lands, with no second
+  callback and no round trip. `open_progress_alert_on_accept`, `open_restart_progress` and
+  `_open_progress_alert_on_accept_handler` are gone. Pinned by
+  `src/tests/unit/frontend/test_f069_duplicate_callback_outputs.py`: no output id is claimed by two callbacks
+  (ids computed as `create_callback_id` does, over the served dependency list; the scan is shown to catch the
+  shape that bit canopy), each progress alert has one writer, each of the two Inputs runs one callback, and the
+  two `running` specs are what the renderer expects. Verified alive in the browser on legs of this tree under
+  dash 3.3.0 and 4.4.1 (juniper-ml `util/ad-hoc/2026-10-20_canopy_dash_duplicate_outputs_probe.py`, Phase 14's
+  per-dash probe; one POST per click, the spinner opening on the request and closing on the response,
+  `util/ad-hoc/2026-10-20_f069_pair_members_probe.py`). Ledger: juniper-ml
+  `notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phase 14 (filed) and Phase 15 (closed).
 - **juniper-canopy#736: the cascor staging body for flat `equities` carried every rendered field, and the restart
   modal added parameters `equities` does not have.** W1.2 (canopy#733) gave the recurrence request a declared-param
   filter and R7's "send only what the operator edited"; the cascor path had neither. Sidebar Apply and the live swap
@@ -46,28 +85,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The recurrence preview did not quote the declarations it filtered against** (juniper-canopy#737, its smaller
   item). `dataset_schema.py` said the source was "quoted in the preview" while the notes never showed it; they now
   name the capture for the request's generator, and `FitRequest.describe` reports none when nothing was filtered.
-- **F-CANOPY-069: under every dash 3.x release the dashboard was inert in the browser.** Two callback pairs each
-  claimed one `allow_duplicate` Output from one Input: `accept_live_switch` and `open_progress_alert_on_accept` on
-  `live-switch-accept-button.n_clicks`, and `execute_restart` and `open_restart_progress` on
-  `restart-confirm-button.n_clicks`. Dash hashes the inputs into an `allow_duplicate` output id
-  (`create_callback_id`), so each pair's ids collided. dash 3's renderer validates the served dependency list
-  unconditionally and, on that `Duplicate callback outputs` error, drops the whole callback graph: the page
-  rendered and nothing on it worked (measured on 3.0.4, 3.2.0, 3.3.0 and 3.4.0; `conf/conda_environment.yaml`
-  pinned 3.3.0). dash 4 validates only with dev tools on, ran both members of each pair, and let the order of
-  their responses decide whether the spinner flashed or stuck. The openers existed to show the progress spinner
-  before the slow POST returned, which is what a callback's `running=` spec is for: `accept_live_switch` and
-  `execute_restart` now carry their progress alerts (and the live-swap in-flight store) as `running=`, so the
-  renderer opens them the moment the request leaves and closes them when the response lands, with no second
-  callback and no round trip. `open_progress_alert_on_accept`, `open_restart_progress` and
-  `_open_progress_alert_on_accept_handler` are gone. Pinned by
-  `src/tests/unit/frontend/test_f069_duplicate_callback_outputs.py`: no output id is claimed by two callbacks
-  (ids computed as `create_callback_id` does, over the served dependency list; the scan is shown to catch the
-  shape that bit canopy), each progress alert has one writer, each of the two Inputs runs one callback, and the
-  two `running` specs are what the renderer expects. Verified alive in the browser on legs of this tree under
-  dash 3.3.0 and 4.4.1 (juniper-ml `util/ad-hoc/2026-10-20_canopy_dash_duplicate_outputs_probe.py`, Phase 14's
-  per-dash probe; one POST per click, the spinner opening on the request and closing on the response,
-  `util/ad-hoc/2026-10-20_f069_pair_members_probe.py`). Ledger: juniper-ml
-  `notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phase 14 (filed) and Phase 15 (closed).
 - **F-CANOPY-028: a pin made just before a table rebuild was discarded.** `update_pinned_params_store` fires on every
   change to any pin checkbox's `value`, and the Parameters tables are rebuilt on every params-store or pin-store
   change, each rebuild re-creating all 22 checkboxes, so a rebuild whose request was in flight when a click's write
