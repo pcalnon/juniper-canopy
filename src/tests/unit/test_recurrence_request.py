@@ -165,7 +165,11 @@ class TestTheDeclarationMatchesJuniperData:
 
         Parses ``EquitiesSeqParams`` and its base ``EquitiesParams`` (no import -- canopy does not
         depend on juniper-data) and compares their annotated fields with the capture. Skipped when
-        the variable is unset, which is every CI run: there the capture above is the whole check.
+        the variable is unset, which is every pytest run in CI. The full comparison -- every
+        generator in every snapshot, schema and version, against the RELEASED juniper-data -- is
+        ``util/check_juniper_data_generator_schemas.py``, which
+        ``.github/workflows/juniper-data-schema-drift.yml`` runs daily and on each juniper-data
+        release (juniper-canopy#737); it takes ``--juniper-data-src`` for a checkout.
         """
         root = os.environ.get("JUNIPER_DATA_SRC")
         if not root:

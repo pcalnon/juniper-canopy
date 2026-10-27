@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **juniper-canopy#737: a CI job now notices juniper-data parameter drift against the committed generator-schema
+  snapshot.** W1.2's declared-param filter (canopy#733) reads `DECLARED_PARAM_DEFAULTS`, which the unit tests pin to
+  `src/tests/fixtures/juniper_data_sequence_generator_schemas.json`, but nothing compared that capture with
+  juniper-data: a parameter added upstream would be withheld from every request, one removed still sent and dropped
+  in silence, and a changed default sent as an edit. `util/check_juniper_data_generator_schemas.py` compares every
+  generator in every `src/tests/fixtures/juniper_data_*generator_schemas.json` (the snapshots decide which, so a
+  sibling capture such as flat `equities` is covered from the commit that adds it) with `GENERATOR_REGISTRY[name]`:
+  `params_class.model_json_schema()` and `version`, with JSON equality (`1` equals `1.0`; `false` is not `0`). Any
+  difference exits 1, naming the generator, the field and key, both values, and the exact re-capture command; a
+  check that cannot run (no or malformed snapshot, juniper-data not importable, not the expected version, or a
+  `juniper_data` imported from anywhere but the distribution it reports) exits 2. The new
+  `.github/workflows/juniper-data-schema-drift.yml` installs the released `juniper-data[api]` (a bare install cannot
+  import the registry: `pydantic_settings`) and runs it daily at 07:17 UTC, on `workflow_dispatch` (optionally for
+  a version), on `repository_dispatch` `juniper-data-published` (the event juniper-recurrence's bench lane receives;
+  it reaches canopy once juniper-data's notify-consumers matrix lists it), and on a pull request touching the
+  workflow, the script or a snapshot. Against juniper-data 0.17.1 on 2026-10-26: no drift in any of the six
+  generators. Tests: `src/tests/unit/test_check_juniper_data_generator_schemas.py` (each kind of drift is named and
+  exits 1; equality passes; both import modes run in subprocesses; the workflow's contract with juniper-data's sender
+  is pinned). Mutation check: `util/ad-hoc/2026-10-26_737_drift_check_mutation_check.py`, 23 of 23 arms caught. The
+  opt-in `test_the_live_source_still_matches_the_capture` docstring now points at the new check.
+
 ### Fixed
 
 - **The lockfile regen could have committed an empty `requirements.lock` without failing.** The commit step built
