@@ -115,15 +115,32 @@ class TestRestartRestageKeepsZeros:
         assert post.call_args.args[0].endswith("/api/stage_dataset")
         return post.call_args.kwargs["json"]
 
+    # juniper-canopy#735 changed which typed fields a re-stage carries: only those the modal renders for the
+    # type (``recurrence_request.staged_typed_fields``). These two tests pinned the zeros on fields a type no
+    # longer renders -- ``nn_spiral_number`` for circles, ``n_samples`` / ``noise`` for equities -- so each zero
+    # is now checked on a type that renders it. All four typed fields are covered, rotations included, which
+    # the old circles case left at None.
+
     def test_zero_counts_and_zero_noise_are_sent(self, dm):
         body = self._posted(
             dm,
             {"dataset_type": "circles", "n_samples": 0, "noise": 0.0, "rotations": None, "n_spirals": 0},
         )
+        # circles renders Samples and Noise, and both zeros travel. It renders no Spirals field, so that zero is
+        # not re-staged (#735): Confirm re-stages exactly what the modal displays.
         assert body == {
             "nn_dataset_type": "circles",
             "nn_dataset_elements": 0,
             "nn_dataset_noise": 0.0,
+            "nn_model": "cascor",
+        }
+        # spiral renders all four, so all four zeros travel.
+        spiral = self._posted(dm, {"dataset_type": "spirals", "n_samples": 0, "noise": 0.0, "rotations": 0.0, "n_spirals": 0})
+        assert spiral == {
+            "nn_dataset_type": "spirals",
+            "nn_dataset_elements": 0,
+            "nn_dataset_noise": 0.0,
+            "nn_spiral_rotations": 0.0,
             "nn_spiral_number": 0,
             "nn_model": "cascor",
         }
@@ -131,12 +148,21 @@ class TestRestartRestageKeepsZeros:
     def test_a_seeded_generator_keeps_the_seed_and_the_zero_typed_fields(self, dm):
         from model_registry import dataset_default_params
 
+        # mnist is seeded AND renders Samples and Noise, so the seed and both zeros must travel together.
+        mnist_seed = dataset_default_params("mnist")
+        assert mnist_seed, "an empty seed would make a dropped seed look like a pass"
+        mnist = self._posted(dm, {"dataset_type": "mnist", "n_samples": 0, "noise": 0.0})
+        assert mnist["nn_dataset_elements"] == 0
+        assert mnist["nn_dataset_noise"] == 0.0
+        assert mnist["nn_dataset_params"] == mnist_seed
+
+        # equities keeps its seed whole. It renders neither typed field -- flat EquitiesParams declares no
+        # n_samples or noise (#735 / #736) -- so those zeros are not re-staged.
         seed = dataset_default_params("equities")
         assert seed.get("symbols"), "an empty seed would make a dropped list look like a pass"
         body = self._posted(dm, {"dataset_type": "equities", "n_samples": 0, "noise": 0.0})
-        assert body["nn_dataset_elements"] == 0
-        assert body["nn_dataset_noise"] == 0.0
         assert body["nn_dataset_params"]["symbols"] == seed["symbols"]
+        assert "nn_dataset_elements" not in body and "nn_dataset_noise" not in body
 
     @pytest.mark.parametrize("nn_model", ["", None, 0, False])
     def test_a_falsy_model_is_omitted(self, dm, nn_model):
