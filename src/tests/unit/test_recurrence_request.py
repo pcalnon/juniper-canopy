@@ -46,24 +46,31 @@ from backend.recurrence_request import (
     NO_DATASET_REF_ERROR,
     SOURCE_STAGED,
     SOURCE_START_BODY,
+    TYPED_STAGE_FIELDS,
     FitRequest,
     ShapedRef,
     resolve_fit_request,
     same_value,
+    shape_stage_payload,
     shape_staged_ref,
     shape_start_body_ref,
+    staged_typed_fields,
     train_request_body,
 )
 from backend.recurrence_service_adapter import RecurrenceServiceAdapter, RecurrenceTrainResult
-from dataset_schema import DECLARED_PARAM_DEFAULTS, DECLARED_PARAMS_SOURCE, FORM_EXCLUDED_FIELDS, PARTIAL_DATA_POLICY_FIELDS, declared_param_defaults, generator_name_for_type
+from dataset_schema import DECLARED_PARAM_DEFAULTS, DECLARED_PARAMS_SOURCE, DECLARED_PARAMS_SOURCES, EQUITIES_DECLARED_PARAMS_SOURCE, FORM_EXCLUDED_FIELDS, PARTIAL_DATA_POLICY_FIELDS, declared_param_defaults, declared_params_source, generator_name_for_type
 from frontend.dashboard_manager import DashboardManager
 from model_registry import DATASET_TYPES, compatible, dataset_default_params, get_model_spec
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXTURE_PATH = REPO_ROOT / "src" / "tests" / "fixtures" / "juniper_data_sequence_generator_schemas.json"
 FIXTURE = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
-CAPTURED = {entry["name"]: entry for entry in FIXTURE["generators"]}
-RECAPTURE = "re-capture with util/ad-hoc/2026-10-08_capture_sequence_generator_schemas.py and update dataset_schema.DECLARED_PARAM_DEFAULTS from its output"
+# juniper-canopy#736: flat ``equities`` is captured from the PUBLISHED juniper-data wheel into a sibling file of
+# the same shape. The declaration is pinned against both captures together.
+TABULAR_FIXTURE_PATH = REPO_ROOT / "src" / "tests" / "fixtures" / "juniper_data_tabular_generator_schemas.json"
+TABULAR_FIXTURE = json.loads(TABULAR_FIXTURE_PATH.read_text(encoding="utf-8"))
+CAPTURED = {entry["name"]: entry for fixture in (FIXTURE, TABULAR_FIXTURE) for entry in fixture["generators"]}
+RECAPTURE = "re-capture with the tool the fixture's _provenance names (util/ad-hoc/2026-10-08_capture_sequence_generator_schemas.py for the sequence generators, util/ad-hoc/2026-10-26_capture_published_generator_schemas.py for equities) and update dataset_schema.DECLARED_PARAM_DEFAULTS from its output"
 LOGGER = "juniper_canopy.backend.recurrence_request"
 
 
@@ -79,9 +86,9 @@ def manager():
     return DashboardManager({})
 
 
-def _untouched_form(manager, dataset_value):
+def _untouched_form(manager, dataset_value, generators=FIXTURE["generators"]):
     """The rendered schema-driven form as ``{name: value}``, as Apply's collector would post it."""
-    _title, _style, children = manager._render_dataset_params_handler(dataset_value, generators=FIXTURE["generators"])
+    _title, _style, children = manager._render_dataset_params_handler(dataset_value, generators=generators)
     controls = [child for child in children if isinstance(getattr(child, "id", None), dict) and child.id.get("type") == "nn-gen-param"]
     assert controls, f"the {dataset_value!r} form rendered no controls -- this check would be vacuous"
     return DashboardManager._collect_generator_params([c.value for c in controls], [c.id for c in controls], exclude=FORM_EXCLUDED_FIELDS)
@@ -125,12 +132,44 @@ class TestTheDeclarationMatchesJuniperData:
         assert (REPO_ROOT / provenance["tool"]).is_file(), f"{provenance['tool']} is not in the repository"
         assert provenance["commit"][:8] in DECLARED_PARAMS_SOURCE, "the declaration and the capture name different juniper-data commits"
 
+    def test_equities_declares_every_field_juniper_data_has(self):
+        # juniper-canopy#736: the cascor path filters flat ``equities`` by this entry, so a field juniper-data's
+        # EquitiesParams has and canopy lacks would be withheld from every staging body that set it.
+        upstream = list(CAPTURED["equities"]["schema"]["properties"])
+        assert len(upstream) == 17, f"the capture holds {len(upstream)} equities fields; 17 at juniper-data 0.17.1 -- {RECAPTURE}"
+        assert CAPTURED["equities"]["version"] == "5.0.0"
+        assert not {"n_samples", "noise"} & set(upstream), "flat equities declares n_samples / noise now: the restart modal and the cascor filter withhold them, and must not"
+
+    def test_the_tabular_capture_names_the_release_it_read(self):
+        # Same keys as the sequence capture's provenance, so one comparison covers both files, plus the release.
+        provenance = TABULAR_FIXTURE["_provenance"]
+        assert set(FIXTURE["_provenance"]) <= set(provenance), "the tabular capture's provenance lost a key the sequence capture's has"
+        assert re.fullmatch(r"[0-9a-f]{40}", provenance["commit"]) and provenance["dirty"] is False, provenance
+        assert re.fullmatch(r"[0-9a-f]{64}", provenance["wheel_sha256"]), provenance
+        assert provenance["wheel"] == f"juniper_data-{provenance['version']}-py3-none-any.whl", provenance
+        assert (REPO_ROOT / provenance["tool"]).is_file(), f"{provenance['tool']} is not in the repository"
+        assert provenance["version"] in EQUITIES_DECLARED_PARAMS_SOURCE and provenance["commit"][:8] in EQUITIES_DECLARED_PARAMS_SOURCE, "the declaration and the capture name different juniper-data releases"
+
+    def test_no_generator_is_captured_twice(self):
+        names = [entry["name"] for fixture in (FIXTURE, TABULAR_FIXTURE) for entry in fixture["generators"]]
+        assert len(names) == len(set(names)), f"a generator is captured in both files, so which capture the declaration matches is ambiguous: {names}"
+
+    def test_every_declaration_says_where_it_came_from(self):
+        assert set(DECLARED_PARAMS_SOURCES) == set(DECLARED_PARAM_DEFAULTS)
+        assert declared_params_source("equities") == EQUITIES_DECLARED_PARAMS_SOURCE
+        assert declared_params_source("equities_seq") == DECLARED_PARAMS_SOURCE
+        assert declared_params_source("spiral") is None and declared_params_source(None) is None
+
     def test_the_live_source_still_matches_the_capture(self):
         """Opt-in drift check against a juniper-data checkout: ``JUNIPER_DATA_SRC=/path/to/juniper-data``.
 
         Parses ``EquitiesSeqParams`` and its base ``EquitiesParams`` (no import -- canopy does not
         depend on juniper-data) and compares their annotated fields with the capture. Skipped when
-        the variable is unset, which is every CI run: there the capture above is the whole check.
+        the variable is unset, which is every pytest run in CI. The full comparison -- every
+        generator in every snapshot, schema and version, against the RELEASED juniper-data -- is
+        ``util/check_juniper_data_generator_schemas.py``, which
+        ``.github/workflows/juniper-data-schema-drift.yml`` runs daily and on each juniper-data
+        release (juniper-canopy#737); it takes ``--juniper-data-src`` for a checkout.
         """
         root = os.environ.get("JUNIPER_DATA_SRC")
         if not root:
@@ -302,6 +341,156 @@ class TestShapeStartBodyRef:
         assert shape_start_body_ref({"generator": "equities_seq"}).dataset_ref == {"generator": "equities_seq"}
 
 
+# ------------------------------------------------------------------------------ the cascor tier (juniper-canopy#736 / #735)
+
+# cascor's ``_translate_staged_config`` (juniper-cascor ``src/api/lifecycle/manager.py``) renames a staged ``n_samples``
+# for these three: ``n_points_per_spiral``, ``n_points_per_quadrant``, ``n_samples_per_class``.
+CASCOR_RENAMED_COUNT_GENERATORS = frozenset({"spiral", "xor", "gaussian"})
+EQUITIES_SEED = dataset_default_params("equities")
+UNDECLARED_RANK2 = ("xor", "circles", "moons", "gaussian", "checkerboard", "mnist")
+
+
+@pytest.mark.unit
+class TestNoCascorRenamedGeneratorIsDeclared:
+    """A declaration is safe on the cascor path only where ``n_samples`` reaches juniper-data as ``n_samples``.
+
+    None of these three declares ``n_samples``, so an entry would make ``shape_stage_payload`` withhold the restart
+    modal's Samples and ``staged_typed_fields`` hide it: a working field lost to a filter that looks correct.
+    """
+
+    def test_none_of_them_has_an_entry(self):
+        assert not CASCOR_RENAMED_COUNT_GENERATORS & set(DECLARED_PARAM_DEFAULTS)
+
+
+@pytest.mark.unit
+class TestStagedTypedFields:
+    """What the restart modal renders and re-stages per type (juniper-canopy#735)."""
+
+    def test_spiral_gets_all_four(self):
+        assert staged_typed_fields("spirals") == TYPED_STAGE_FIELDS == ("nn_dataset_elements", "nn_dataset_noise", "nn_spiral_rotations", "nn_spiral_number")
+
+    @pytest.mark.parametrize("value", sorted(spec.value for spec in DATASET_TYPES if generator_name_for_type(spec.value) in DECLARED_PARAM_DEFAULTS))
+    def test_a_declared_generator_gets_only_what_it_declares(self, value):
+        # Every shipped declaration: none declares n_samples or noise, so none gets a typed field.
+        assert staged_typed_fields(value) == ()
+
+    @pytest.mark.parametrize("value", UNDECLARED_RANK2)
+    def test_an_undeclared_generator_keeps_both_generic_fields_and_never_the_spiral_pair(self, value):
+        assert staged_typed_fields(value) == ("nn_dataset_elements", "nn_dataset_noise")
+
+    def test_a_declared_generic_field_is_offered(self, monkeypatch):
+        monkeypatch.setitem(DECLARED_PARAM_DEFAULTS, "fake_gen", {"noise": 0.0})
+        assert staged_typed_fields("fake_gen") == ("nn_dataset_noise",)
+
+    @pytest.mark.parametrize("empty", [None, ""])
+    def test_no_dataset_gets_nothing(self, empty):
+        assert staged_typed_fields(empty) == ()
+
+    def test_the_cases_above_cover_every_dataset_type(self):
+        declared = {spec.value for spec in DATASET_TYPES if generator_name_for_type(spec.value) in DECLARED_PARAM_DEFAULTS}
+        assert {"spirals"} | declared | set(UNDECLARED_RANK2) == {spec.value for spec in DATASET_TYPES}
+
+
+def _untouched_equities_form(manager):
+    """The flat-equities form rendered from the PUBLISHED-wheel capture, as Apply's collector would post it untouched."""
+    return _untouched_form(manager, "equities", generators=TABULAR_FIXTURE["generators"])
+
+
+@pytest.mark.unit
+class TestShapeStagePayload:
+    """R7 over the cascor staging body, one rule per test (juniper-canopy#736)."""
+
+    def test_an_untouched_equities_form_forwards_the_seed_alone(self, manager):
+        form = _untouched_equities_form(manager)
+        stage = shape_stage_payload({"nn_dataset_type": "equities", "nn_dataset_params": {**EQUITIES_SEED, **form}, "nn_model": "cascor"})
+        assert stage.payload == {"nn_dataset_type": "equities", "nn_dataset_params": EQUITIES_SEED, "nn_model": "cascor"}
+        assert stage.untouched, "no rendered field was left out -- this check would be vacuous"
+        assert set(stage.untouched) == set(form) - set(EQUITIES_SEED)
+        assert stage.shaped.edited == () and stage.shaped.not_forwarded == ()
+
+    def test_an_edit_wins_over_the_seed(self):
+        # "Form overrides seed" -- pinned at the dashboard by TestTheCascorPathCarriesRegistryDefaults.
+        stage = shape_stage_payload({"nn_dataset_type": "equities", "nn_dataset_params": {**EQUITIES_SEED, "fundamentals_fill": "zero"}})
+        assert stage.payload["nn_dataset_params"] == {**EQUITIES_SEED, "fundamentals_fill": "zero"}
+        assert stage.shaped.edited == ("fundamentals_fill",)
+
+    def test_an_edit_to_an_unseeded_field_is_forwarded_and_an_untouched_one_is_not(self):
+        stage = shape_stage_payload({"nn_dataset_type": "equities", "nn_dataset_params": {**EQUITIES_SEED, "start_date": "2010-01-04", "max_symbols": 14}})
+        assert stage.payload["nn_dataset_params"] == {**EQUITIES_SEED, "start_date": "2010-01-04"}
+        assert stage.shaped.edited == ("start_date",) and stage.untouched == ("max_symbols",)
+
+    def test_the_typed_fields_are_withheld_and_named(self):
+        stage = shape_stage_payload({"nn_dataset_type": "equities", "nn_dataset_elements": 500, "nn_dataset_noise": 0.1, "nn_spiral_rotations": 1.5, "nn_spiral_number": 2})
+        assert stage.payload == {"nn_dataset_type": "equities", "nn_dataset_params": EQUITIES_SEED}
+        assert stage.shaped.not_forwarded == ("nn_spiral_rotations", "nn_spiral_number", "nn_dataset_elements", "nn_dataset_noise")
+        assert stage.shaped.undeclared == (), "canopy's own typed fields are not snapshot drift"
+
+    def test_a_parameter_equities_does_not_declare_is_withheld_as_drift(self):
+        stage = shape_stage_payload({"nn_dataset_type": "equities", "nn_dataset_params": {"interval": "1h"}})
+        assert stage.payload["nn_dataset_params"] == EQUITIES_SEED
+        assert stage.shaped.undeclared == ("interval",)
+
+    def test_a_forwarded_generic_value_rides_in_params(self, monkeypatch):
+        monkeypatch.setitem(DECLARED_PARAM_DEFAULTS, "fake_gen", {"n_samples": 100})
+        assert shape_stage_payload({"nn_dataset_type": "fake_gen", "nn_dataset_elements": 40}).payload == {"nn_dataset_type": "fake_gen", "nn_dataset_params": {"n_samples": 40}}
+        assert shape_stage_payload({"nn_dataset_type": "fake_gen", "nn_dataset_elements": 100}).payload == {"nn_dataset_type": "fake_gen"}
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"nn_dataset_type": "spirals", "nn_dataset_elements": 200, "nn_dataset_noise": 0.1, "nn_spiral_rotations": 1.5, "nn_spiral_number": 2, "nn_model": "cascor"},
+            {"nn_dataset_type": "xor", "nn_dataset_elements": 300},
+            {"nn_dataset_type": "circles", "nn_dataset_params": {"n_samples": 100, "noise": 0.05}},
+            {"nn_dataset_type": "mnist", "nn_dataset_params": {"flatten": True, "n_samples": 5000}},
+        ],
+        ids=lambda body: body["nn_dataset_type"],
+    )
+    def test_an_undeclared_generator_is_forwarded_as_staged(self, body):
+        stage = shape_stage_payload(body)
+        assert stage.payload == body and stage.shaped is None
+
+    def test_an_empty_body_still_clears_and_none_values_are_dropped(self):
+        # cascor documents an empty body as "clear any prior staging"; shaping must leave it empty.
+        assert shape_stage_payload({}).payload == {}
+        assert shape_stage_payload({"nn_dataset_type": "spirals", "nn_dataset_noise": None}).payload == {"nn_dataset_type": "spirals"}
+
+    def test_no_partial_data_stance_is_added_and_the_seed_is_a_copy(self):
+        stage = shape_stage_payload({"nn_dataset_type": "equities"})
+        assert not PARTIAL_DATA_POLICY_FIELDS & set(stage.payload["nn_dataset_params"])
+        stage.payload["nn_dataset_params"]["symbols"].append("MUTATED")
+        assert "MUTATED" not in dataset_default_params("equities")["symbols"]
+
+    def test_a_filtered_body_is_logged_at_info_with_its_account(self, caplog):
+        caplog.set_level(logging.DEBUG, logger=LOGGER)
+        shape_stage_payload({"nn_dataset_type": "equities", "nn_dataset_noise": 0.1, "nn_dataset_params": {**EQUITIES_SEED, "max_symbols": 14}}).log("stage")
+        records = [record for record in caplog.records if record.name == LOGGER]
+        assert [record.levelno for record in records] == [logging.INFO]
+        message = records[0].getMessage()
+        assert "(stage) for 'equities'" in message and json.dumps(EQUITIES_SEED, sort_keys=True) in message
+        assert "untouched (juniper-data's default): max_symbols" in message and "not forwarded: nn_dataset_noise" in message
+
+    def test_drift_is_a_warning_that_names_the_capture(self, caplog):
+        caplog.set_level(logging.INFO, logger=LOGGER)
+        shape_stage_payload({"nn_dataset_type": "equities", "nn_dataset_params": {"interval": "1h"}}).log("live swap")
+        warnings = [record.getMessage() for record in caplog.records if record.name == LOGGER and record.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "withheld interval" in warnings[0] and EQUITIES_DECLARED_PARAMS_SOURCE in warnings[0] and "2026-10-26_capture_published_generator_schemas.py" in warnings[0]
+
+    def test_an_unfiltered_body_is_logged_at_debug_only(self, caplog):
+        caplog.set_level(logging.DEBUG, logger=LOGGER)
+        shape_stage_payload({"nn_dataset_type": "spirals", "nn_dataset_elements": 200}).log("stage")
+        assert [record.levelno for record in caplog.records if record.name == LOGGER] == [logging.DEBUG]
+
+
+@pytest.mark.unit
+class TestEveryCascorSeedKeyIsDeclared:
+    """The rank-2 counterpart of ``TestEveryRecurrenceSeedIsDeclared``, for the one rank-2 entry."""
+
+    def test_every_equities_seed_key_is_a_declared_parameter(self):
+        # An undeclared seed key would be withheld by the filter that is meant to carry the seed whole.
+        assert not set(EQUITIES_SEED) - set(DECLARED_PARAM_DEFAULTS["equities"])
+
+
 # ------------------------------------------------------------------------------ the body on the wire
 
 
@@ -355,6 +544,12 @@ class TestFitRequest:
         request = self._request(dataset_ref={})
         assert request.body is None
         assert request.describe()["ok"] is False and request.describe()["error"] == NO_DATASET_REF_ERROR
+
+    def test_describe_quotes_no_capture_when_nothing_was_filtered(self):
+        # The preview quotes ``declared_params_source`` as the contract canopy filtered against (juniper-canopy#737's
+        # small item); a reference by name was filtered against nothing, so it must not claim one.
+        request = self._request(dataset_ref={"name": "equities_seq", "params": {"n": 1}, "split": "train"}, declared=False)
+        assert request.describe()["declared_params_source"] is None
 
     def test_the_preview_logs_info_only(self, caplog):
         caplog.set_level(logging.INFO, logger=LOGGER)
