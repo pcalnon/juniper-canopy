@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **juniper-canopy#737: a CI job now notices juniper-data parameter drift against the committed generator-schema
+  snapshot.** W1.2's declared-param filter (canopy#733) reads `DECLARED_PARAM_DEFAULTS`, which the unit tests pin to
+  `src/tests/fixtures/juniper_data_sequence_generator_schemas.json`, but nothing compared that capture with
+  juniper-data: a parameter added upstream would be withheld from every request, one removed still sent and dropped
+  in silence, and a changed default sent as an edit. `util/check_juniper_data_generator_schemas.py` compares every
+  generator in every `src/tests/fixtures/juniper_data_*generator_schemas.json` (the snapshots decide which, so a
+  sibling capture such as flat `equities` is covered from the commit that adds it) with `GENERATOR_REGISTRY[name]`:
+  `params_class.model_json_schema()` and `version`, with JSON equality (`1` equals `1.0`; `false` is not `0`). Any
+  difference exits 1, naming the generator, the field and key, both values, and the exact re-capture command; a
+  check that cannot run (no or malformed snapshot, juniper-data not importable, not the expected version, or a
+  `juniper_data` imported from anywhere but the distribution it reports) exits 2. The new
+  `.github/workflows/juniper-data-schema-drift.yml` installs the released `juniper-data[api]` (a bare install cannot
+  import the registry: `pydantic_settings`) and runs it daily at 07:17 UTC, on `workflow_dispatch` (optionally for
+  a version), on `repository_dispatch` `juniper-data-published` (the event juniper-recurrence's bench lane receives;
+  it reaches canopy once juniper-data's notify-consumers matrix lists it), and on a pull request touching the
+  workflow, the script or a snapshot. Against juniper-data 0.17.1 on 2026-10-26: no drift in any of the six
+  generators. Tests: `src/tests/unit/test_check_juniper_data_generator_schemas.py` (each kind of drift is named and
+  exits 1; equality passes; both import modes run in subprocesses; the workflow's contract with juniper-data's sender
+  is pinned). Mutation check: `util/ad-hoc/2026-10-26_737_drift_check_mutation_check.py`, 23 of 23 arms caught. The
+  opt-in `test_the_live_source_still_matches_the_capture` docstring now points at the new check.
+
 ### Fixed
 
 - **The lockfile regen could have committed an empty `requirements.lock` without failing.** The commit step built
@@ -50,6 +73,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-dash probe; one POST per click, the spinner opening on the request and closing on the response,
   `util/ad-hoc/2026-10-20_f069_pair_members_probe.py`). Ledger: juniper-ml
   `notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phase 14 (filed) and Phase 15 (closed).
+- **juniper-canopy#736: the cascor staging body for flat `equities` carried every rendered field, and the restart
+  modal added parameters `equities` does not have.** W1.2 (canopy#733) gave the recurrence request a declared-param
+  filter and R7's "send only what the operator edited"; the cascor path had neither. Sidebar Apply and the live swap
+  posted every rendered value, so untouched fields went to cascor at canopy's displayed defaults, and the restart
+  modal re-staged `n_samples` / `noise`, which juniper-data's flat `EquitiesParams` does not declare and silently
+  ignores (F-C3). `ServiceBackend.stage_dataset` and `swap_dataset_live` now forward
+  `recurrence_request.shape_stage_payload`'s body, built with the recurrence request's own `shape_staged_ref`: for a
+  generator `DECLARED_PARAM_DEFAULTS` covers, the registry seed plus every field the operator edited (an edit still
+  wins over the seed), with an undeclared parameter withheld; every other generator's body goes as staged. Each
+  shaped body is logged at INFO (forwarded params, edited, untouched, not forwarded), and a parameter withheld as
+  undeclared is a WARNING naming the capture. `DECLARED_PARAM_DEFAULTS` gains `equities` (17 parameters, generator
+  `5.0.0`), captured from the published juniper-data 0.17.1 wheel (sha256 `cce2c167…`, byte-identical to release tag
+  `v0.17.1` = `381e660b`) by `util/ad-hoc/2026-10-26_capture_published_generator_schemas.py` into
+  `src/tests/fixtures/juniper_data_tabular_generator_schemas.json`, with per-entry provenance
+  (`DECLARED_PARAMS_SOURCES`). No full cascor preview: the logs, and the restart modal's plan below, cover it. Tests:
+  `test_cascor_staging_declared_params.py` (dashboard body to the real route, `ServiceBackend` and adapter, read off
+  the wire), `test_recurrence_request.py` (`TestShapeStagePayload`, the capture pins, `TestNoCascorRenamedGeneratorIsDeclared`).
+- **juniper-canopy#735: the restart modal showed the spiral-era dataset fields for every type and re-staged them all.**
+  Samples, Noise, Spiral rotations and Spirals were rendered and re-staged for sequence generators and `equities`
+  alike, so the modal "planned" values that were then dropped. Each field now renders only when the selected type's
+  generator has a parameter for it (`recurrence_request.staged_typed_fields`: all four for spiral, none for
+  `equities` or a sequence generator, Samples and Noise otherwise), driven by the type alone
+  (`show_restart_dataset_fields`), and Confirm re-stages exactly the rendered fields through one builder
+  (`_restart_restage_payload`) that the Restart plan also reads. This keeps the owner's 2026-09-22 ruling that
+  "Confirm re-stages exactly what the modal displays" (point 4 of §5.6.1 of juniper-ml's
+  `JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md`): the plan now names the registry defaults and
+  the model a re-stage carries, every value it does not send, and whether anything is re-staged at all. The
+  `enabled[0]` swap and the `⊥` refusal are unchanged, but the swap now counts as a change: its baseline used to take
+  the swapped value, so an untouched Confirm after a swap re-staged nothing and restarted on the dataset the modal had
+  replaced. Tests: `test_restart_modal_restages_what_it_shows.py` (Confirm's keys equal the rendered fields plus the
+  seed and mirror, for every type and after the swap); `test_recurrence_staging.py`'s assertion that the modal sends
+  the spiral fields to `equities_seq` is flipped.
+- **The recurrence preview did not quote the declarations it filtered against** (juniper-canopy#737, its smaller
+  item). `dataset_schema.py` said the source was "quoted in the preview" while the notes never showed it; they now
+  name the capture for the request's generator, and `FitRequest.describe` reports none when nothing was filtered.
 - **F-CANOPY-028: a pin made just before a table rebuild was discarded.** `update_pinned_params_store` fires on every
   change to any pin checkbox's `value`, and the Parameters tables are rebuilt on every params-store or pin-store
   change, each rebuild re-creating all 22 checkboxes, so a rebuild whose request was in flight when a click's write
