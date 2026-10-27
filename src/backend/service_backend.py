@@ -11,7 +11,7 @@
 # File Path:     JuniperCanopy/juniper_canopy/src/backend/
 #
 # Date Created:  2026-02-26
-# Last Modified: 2026-02-26
+# Last Modified: 2026-10-26
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -44,6 +44,7 @@ import logging
 from typing import Any, Callable, Dict, List, Optional, cast
 
 import validation_gate
+from backend import recurrence_request
 from backend.cascor_service_adapter import CascorServiceAdapter, _first_defined
 from backend.protocol import (
     ApplyParamsResult,
@@ -400,9 +401,18 @@ class ServiceBackend:
 
     # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 / Issue #3 Phase 1 — pass-through
     # to the cascor pending-dataset surface (cascor #242).
+    #
+    # juniper-canopy#736: no longer a BLIND pass-through. cascor forwards what it is staged with to
+    # juniper-data, so the body is shaped first by the rules the recurrence request uses
+    # (``recurrence_request.shape_stage_payload``): for a generator ``DECLARED_PARAM_DEFAULTS`` covers
+    # (flat ``equities``), the registry seed plus what the operator edited, and nothing the generator
+    # does not declare. Every other generator's body is forwarded as staged. Apply Dataset, the live
+    # swap and the restart modal's re-stage all arrive here, so all three are covered.
 
     def stage_dataset(self, **canopy_params: Any) -> Dict[str, Any]:
-        return self._adapter.stage_dataset(**canopy_params)
+        stage = recurrence_request.shape_stage_payload(canopy_params)
+        stage.log("stage")
+        return self._adapter.stage_dataset(**stage.payload)
 
     def cancel_pending_dataset(self) -> Dict[str, Any]:
         return self._adapter.cancel_pending_dataset()
@@ -423,7 +433,11 @@ class ServiceBackend:
     # cascor's /v1/training/dataset/live (POST + DELETE).
 
     def swap_dataset_live(self, **canopy_params: Any) -> Dict[str, Any]:
-        return self._adapter.swap_dataset_live(**canopy_params)
+        # Shaped exactly as ``stage_dataset`` shapes it (juniper-canopy#736): the live swap fetches from
+        # juniper-data at once, so an unshaped body would carry the untouched fields straight there.
+        stage = recurrence_request.shape_stage_payload(canopy_params)
+        stage.log("live swap")
+        return self._adapter.swap_dataset_live(**stage.payload)
 
     def cancel_swap_dataset_live(self) -> Dict[str, Any]:
         return self._adapter.cancel_swap_dataset_live()

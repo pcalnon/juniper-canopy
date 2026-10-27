@@ -1,0 +1,167 @@
+---
+#####################################################################################################################################################################################################
+# Project:       Juniper
+# Sub-Project:   JuniperCanopy
+# Application:   juniper_canopy
+# File Name:     juniper-data-schema-drift.yml
+# Author:        Paul Calnon
+# License:       MIT License
+# Copyright:     Copyright (c) 2024-2026 Paul Calnon
+#
+# Description:   Compare canopy's committed snapshots of juniper-data's generator parameter schemas with the
+#                RELEASED juniper-data, and fail on any difference (juniper-canopy#737).
+#
+#    WHY. canopy forwards to a juniper-data generator only the parameters src/dataset_schema.py declares
+#    (DECLARED_PARAM_DEFAULTS, W1.2 / juniper-canopy#733), and the unit tests pin that table to a committed
+#    capture, src/tests/fixtures/juniper_data_sequence_generator_schemas.json. Nothing compared the capture
+#    with juniper-data, so drift was silent: a parameter added upstream is withheld from every request, one
+#    removed is still sent and silently dropped, and a changed default makes an untouched field read as an
+#    edit. util/check_juniper_data_generator_schemas.py holds the comparison and runs the same way locally;
+#    its unit tests (src/tests/unit/test_check_juniper_data_generator_schemas.py, in ci.yml's unit lane) prove
+#    it fails on each of those and passes on equality.
+#
+#    WHAT. Every generator in every src/tests/fixtures/juniper_data_*generator_schemas.json -- the fixtures
+#    decide which; nothing here or in the script is hard-coded -- against GENERATOR_REGISTRY[name] of the
+#    installed juniper-data: params_class.model_json_schema() and version. A difference fails the job and
+#    names the generator, the field and key that differ, and the exact re-capture command.
+#
+#    WHICH JUNIPER-DATA. The released wheel with its [api] extra: the registry module imports FastAPI and
+#    pydantic-settings, so a bare `juniper-data` install cannot import it (0.17.1: ModuleNotFoundError:
+#    pydantic_settings). [equities], [mnist] and [arc-agi] are not needed; those generators import their
+#    heavy dependencies lazily. The version is pinned exactly -- the dispatched one, a workflow_dispatch
+#    input, or PyPI's latest -- and --expected-version makes the script refuse any other, or a package
+#    imported from anywhere but that distribution. The newest pydantic the wheel admits is resolved (not
+#    juniper-data's lock), so a pydantic release that changes model_json_schema() output fails this job too;
+#    the report's first line names the pydantic version, so that case is recognisable.
+#
+#    TRIGGERS.
+#      * repository_dispatch `juniper-data-published`: juniper-data's notify-consumers workflow sends it,
+#        with client_payload {source, version, sha}, once a release is on PyPI -- the event
+#        juniper-recurrence's ci-recurrence-bench.yml already receives. It fires here only once
+#        juniper-data's notify matrix lists juniper-canopy. That workflow confirms delivery by finding a run
+#        whose title is the event type, which is a dispatch run's DEFAULT title: so no `run-name:` here.
+#      * schedule, daily at 07:17 UTC: the backstop. PyPI took six juniper-data releases between
+#        2026-09-05 and 2026-10-23, 2 to 16 days apart, so a weekly poll could leave a drift unseen for most
+#        of a release cycle; daily bounds that at a day whenever a dispatch does not arrive (canopy is not
+#        yet in that matrix, the dispatch token is a PAT that expires, a delivery can be lost). It is also
+#        what sees drift that arrives through a pydantic release, with no juniper-data release to announce
+#        it. A run takes about a minute. Off the hour, because GitHub delays scheduled runs most at the top
+#        of the hour (canopy's own scheduled lanes start at 06:00).
+#      * workflow_dispatch: on demand, optionally for a given version.
+#      * pull_request, path-filtered to this file, the script and the snapshots, so a change to any of them
+#        is checked before it merges. It is not a required check: it reports on no other PR.
+#
+#    No pytest here: ci.yml's unit lane runs the script's tests, and a pytest step would make this a lane
+#    that src/tests/regression/test_ci_lane_wiring.py requires to install the [juniper-cascor] extra.
+#####################################################################################################################################################################################################
+
+name: juniper-data Schema Drift
+
+on:
+  schedule:
+    - cron: '17 7 * * *'  # daily, 07:17 UTC -- see TRIGGERS above
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "juniper-data version to compare against, X.Y.Z (empty: the latest on PyPI)"
+        required: false
+        type: string
+        default: ""
+  # juniper-data's notify-consumers workflow, after a release reaches PyPI. client_payload: {source, version, sha}.
+  repository_dispatch:
+    types: [juniper-data-published]
+  pull_request:
+    paths:
+      - ".github/workflows/juniper-data-schema-drift.yml"
+      - "util/check_juniper_data_generator_schemas.py"
+      # The script's FIXTURE_GLOB under its FIXTURES_DIR; the unit tests pin the two together.
+      - "src/tests/fixtures/juniper_data_*generator_schemas.json"
+
+concurrency:
+  # A dispatch is keyed on its version as well: two releases in quick succession must not cancel each
+  # other's check (juniper-recurrence#178 learned this for its bench lane). For other events the last
+  # segment is the workflow_dispatch input or empty.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ github.event.client_payload.version || inputs.version || '' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: Compare generator schemas with juniper-data
+    runs-on: ubuntu-latest
+    # The installability wait below is bounded at 10 minutes; the rest takes about one.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      # juniper-data's own runtime, and canopy's PYTHON_TEST_VERSION.
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.14"
+
+      # A dispatch must carry its version: falling back to "latest" would quietly test something else.
+      # Event data reaches the shell only through env.
+      - name: Choose the juniper-data release
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PAYLOAD_VERSION: ${{ github.event.client_payload.version }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "${EVENT_NAME}" == "repository_dispatch" ]]; then
+            version="${PAYLOAD_VERSION#v}"
+            origin="dispatched by juniper-data"
+          elif [[ -n "${INPUT_VERSION}" ]]; then
+            version="${INPUT_VERSION#v}"
+            origin="requested"
+          else
+            version="$(curl --fail-with-body --silent --show-error --max-time 30 --retry 3 --retry-delay 10 https://pypi.org/pypi/juniper-data/json | python -c 'import json, sys; print(json.load(sys.stdin)["info"]["version"])')"
+            origin="the latest on PyPI"
+          fi
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::the juniper-data version must be a plain X.Y.Z release, got '${version}'"
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "juniper-data ${version} (${origin})"
+
+      # A dispatch can beat the release onto PyPI's CDN, and the JSON API can lead the index. Wait until it
+      # is installable rather than quietly comparing against the previous release -- the wait
+      # juniper-recurrence's bench lane does.
+      - name: Wait until that release is installable
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if python -m pip download --no-deps --only-binary=:all: --quiet --dest "${RUNNER_TEMP}/juniper-data-probe" "juniper-data==${VERSION}"; then
+              echo "juniper-data ${VERSION} is installable (attempt ${attempt})"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::error::juniper-data ${VERSION} did not become installable from PyPI within 10 minutes"
+          exit 1
+
+      - name: Install juniper-data with its [api] extra
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade "pip>=26.1.1"
+          python -m pip install "juniper-data[api]==${VERSION}"
+
+      # -I keeps the checkout and the user site off sys.path, so nothing in this repository can stand in for
+      # juniper_data. --expected-version refuses any other version, and any copy but the installed one.
+      - name: Compare every snapshot with juniper-data
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: python -I util/check_juniper_data_generator_schemas.py --expected-version "${VERSION}"
