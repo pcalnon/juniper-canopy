@@ -11,7 +11,7 @@
 # File Path:     JuniperCanopy/juniper_canopy/src/frontend/components/
 #
 # Date Created:  2026-10-08
-# Last Modified: 2026-10-08
+# Last Modified: 2026-10-26
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -168,6 +168,11 @@ class RecurrenceRequestPreview(BaseComponent):
         withheld = payload.get("not_forwarded") or []
         if withheld:
             lines.append(f"Staged but not sent (not a parameter of this generator, or held to the registry default): {', '.join(withheld)}.")
+        # ``dataset_schema.DECLARED_PARAMS_SOURCES`` says this panel quotes where the declarations came from; it
+        # did not until juniper-canopy#737 noticed. Absent when nothing was filtered (a dataset_id / name reference).
+        declarations = payload.get("declared_params_source")
+        if declarations:
+            lines.append(f"Parameters checked against juniper-data's declarations from {declarations}.")
         if payload.get("fit_in_progress"):
             lines.append("A fit is in progress: Start is refused until it ends.")
         return [html.Div(line) for line in lines]

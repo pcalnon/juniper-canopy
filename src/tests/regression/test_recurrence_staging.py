@@ -499,15 +499,21 @@ class TestTheEffectiveRequestRoute:
         fake.preview_train_request.assert_not_called()
 
     def test_the_restart_modal_restage_reaches_the_service_as_the_seed(self, client, wire, manager):
-        # F-C3 on the path that actually carries the generic fields: the restart modal re-stages
-        # ``n_samples`` / ``noise`` for every dataset type (``_restage_dataset``).
+        # F-C3 on the path that used to carry the generic fields. The restart modal re-staged ``n_samples`` /
+        # ``noise`` for every dataset type, and this test asserted that it did, leaving W1.2's filter to drop
+        # them at Start while the modal showed them. juniper-canopy#735 flipped it: the modal renders, and so
+        # re-stages, only the typed fields the type's generator has a parameter for, which for equities_seq
+        # is none. The values the sidebar prefilled are still in the modal's state; they are not sent.
         rb, sent = wire
         with mock.patch("frontend.dashboard_manager.requests.post") as post:
             post.return_value = mock.MagicMock(status_code=200, text="{}")
             ok, _detail = manager._restage_dataset({"dataset_type": "equities_seq", "n_samples": 100, "noise": 0.1}, nn_model="recurrence")
         assert ok is True
         payload = post.call_args.kwargs["json"]
-        assert payload["nn_dataset_elements"] == 100 and payload["nn_dataset_noise"] == 0.1, "the modal no longer sends the generic fields -- this test would be vacuous"
+        assert "nn_dataset_elements" not in payload and "nn_dataset_noise" not in payload, f"the modal re-staged generic fields equities_seq does not declare: {payload}"
+        assert payload == {"nn_dataset_type": "equities_seq", "nn_dataset_params": EQUITIES_SEQ_SEED, "nn_model": "recurrence"}
         assert client.post("/api/stage_dataset", json=payload).status_code == 200
+        # Nothing is left for W1.2's filter to withhold, so the preview names nothing.
+        assert client.post("/api/recurrence/effective_request", json={}).json()["not_forwarded"] == []
         body = _start_and_read_the_wire(client, rb, sent)
         assert body["dataset"]["params"] == EQUITIES_SEQ_SEED

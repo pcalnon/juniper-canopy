@@ -1942,13 +1942,22 @@ Demo mode has no `start_fresh` body field. `DemoBackend.start_training` calls `D
 
 `_execute_restart_handler` does three steps, and it stops at the first failure:
 
-1. If a dataset field differs from the baseline captured when the modal opened, re-stage with `POST /api/stage_dataset`. A staging failure aborts. The pending banner stays open.
+1. If the dataset type, or a dataset field the modal renders for that type, differs from the baseline captured when the modal opened, re-stage with `POST /api/stage_dataset`. A staging failure aborts. The pending banner stays open. The `enabled[0]` swap of a stranded dataset counts as a difference: the baseline keeps the sidebar's value, so Confirm re-stages the swapped dataset the modal displays (juniper-canopy#735).
 2. If a parameter field differs, clamp and apply through `/api/set_params` **before** the restart. An apply failure aborts. A re-stage that already succeeded is left in place.
 3. `POST /api/train/restart` with `{"start_fresh": <toggle>, "reset": true}`.
 
-An untouched Confirm skips steps 1 and 2. It does not send `nn_model`. When a re-stage or a parameter apply does run, the body includes the tab's `nn_model` (omitted when no model is selected). Those routes answer 409 when that mirror is not the server's selection, and the restart does not start.
+An untouched Confirm skips steps 1 and 2, unless the modal swapped a stranded dataset when it opened. It does not send `nn_model`. When a re-stage or a parameter apply does run, the body includes the tab's `nn_model` (omitted when no model is selected). Those routes answer 409 when that mirror is not the server's selection, and the restart does not start.
 
-The re-stage payload is the dataset type, the numeric fields the modal shows, and that type's registry seed (`dataset_default_params`). The modal does not render schema-driven generator params, so a custom list applied earlier from the sidebar is not carried. Re-staging `equities` sends the seed's symbols; it does not send a sidebar override. An empty dataset type is refused locally (`"No dataset selected — nothing to re-stage."`) and is not posted as `{}`.
+The re-stage payload is the dataset type, the typed fields the modal renders for that type, and that type's registry seed (`dataset_default_params`).
+Which typed fields render is `recurrence_request.staged_typed_fields`: all four for spiral, Samples and Noise for the other rank-2 types, and none for `equities` or a sequence generator, none of which declares `n_samples` or `noise` (juniper-canopy#735).
+A field the type does not render is never re-staged.
+The Restart plan is built from the same payload. It names everything a re-stage sends, the registry defaults and the model mirror included, and every value it does not send.
+So Confirm re-stages exactly what the modal displays, which is the owner's 2026-09-22 ruling (§5.6.1 point 4 of juniper-ml's `JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md`).
+The modal does not render schema-driven generator params, so a custom list applied earlier from the sidebar is not carried. Re-staging `equities` sends the seed's symbols; it does not send a sidebar override.
+An empty dataset type is refused locally (`"No dataset selected — nothing to re-stage."`) and is not posted as `{}`.
+
+On the cascor service path, `ServiceBackend` shapes every staging body before cascor sees it: Apply, the live swap and this re-stage alike (`recurrence_request.shape_stage_payload`, juniper-canopy#736).
+A generator with a `dataset_schema.DECLARED_PARAM_DEFAULTS` entry (today only flat `equities`) is forwarded as its registry seed plus the fields the operator edited, with nothing it does not declare. Every other generator's body is forwarded as staged.
 
 `/api/train/restart` (`main.py`) then:
 
