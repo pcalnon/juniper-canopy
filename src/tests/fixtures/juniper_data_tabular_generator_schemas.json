@@ -1,0 +1,202 @@
+{
+  "_provenance": {
+    "source": "juniper-data",
+    "commit": "381e660b0e813b75350b12bcecfe65650df01537",
+    "dirty": false,
+    "captured": "2026-10-26",
+    "what": "GENERATOR_REGISTRY[name]['params_class'].model_json_schema() -- the `schema` field of each GET /v1/generators entry",
+    "tool": "util/ad-hoc/2026-10-26_capture_published_generator_schemas.py",
+    "distribution": "juniper-data",
+    "version": "0.17.1",
+    "wheel": "juniper_data-0.17.1-py3-none-any.whl",
+    "wheel_sha256": "cce2c1670a582a79f5aaa8830629b350448f33e44ae355fbf8e3cd42f6ebe3c4"
+  },
+  "generators": [
+    {
+      "name": "equities",
+      "version": "5.0.0",
+      "schema": {
+        "description": "Configuration parameters for the equities time-series generator.\n\nDownloads and conditions daily S&P 500 equities data into the JuniperData\nNPZ contract: a numeric feature matrix with one column per entry of\n``EQUITIES_FEATURE_COLUMNS`` (``defaults.py``; 15 as of generator 4.0.0 -- ``adj_close`` left the\nDEFAULTS in 4.0.0, see the note beside the list), a one-hot next-day\ndirection label, and a configurable next-day regression target (raw\nclose, simple return, or log return -- see ``regression_target``).",
+        "properties": {
+          "symbols": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Tickers to include. None = the bundled S&P 500 constituents.",
+            "title": "Symbols"
+          },
+          "start_date": {
+            "default": "2000-01-01",
+            "description": "Inclusive start date (YYYY-MM-DD) for the price history.",
+            "title": "Start Date",
+            "type": "string"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Exclusive end date (YYYY-MM-DD). None = today (UTC).",
+            "title": "End Date"
+          },
+          "purchase_date": {
+            "default": "2000-01-03",
+            "description": "Cost-basis purchase date (YYYY-MM-DD); per-ticker clamped to the first available trading day. Rows before it carry a NaN cost_basis. Under fundamentals_fill='drop' a purchase_date after start_date (at least one weekday apart) is refused.",
+            "title": "Purchase Date",
+            "type": "string"
+          },
+          "basis_price_field": {
+            "default": "close",
+            "description": "Price field used for cost basis on the purchase date.",
+            "enum": [
+              "close",
+              "adj_close"
+            ],
+            "title": "Basis Price Field",
+            "type": "string"
+          },
+          "fundamentals_fill": {
+            "default": "nan",
+            "description": "How to represent pre-2009 missing total_shares / market_cap: zero-fill, leave NaN, or drop rows. 'drop' also drops any row before the purchase session (its cost_basis is unknown) and refuses a purchase_date after start_date.",
+            "enum": [
+              "zero",
+              "nan",
+              "drop"
+            ],
+            "title": "Fundamentals Fill",
+            "type": "string"
+          },
+          "regression_target": {
+            "default": "next_close",
+            "description": "Representation of the y_reg target: raw next-day close, simple return (next_close/close - 1), or log return ln(next_close/close). The return variants are stationary; the raw close is not.",
+            "enum": [
+              "next_close",
+              "return",
+              "log_return"
+            ],
+            "title": "Regression Target",
+            "type": "string"
+          },
+          "week52_window": {
+            "default": 252,
+            "description": "Rolling window (trading sessions) for 52-week high/low.",
+            "maximum": 2520,
+            "minimum": 2,
+            "title": "Week52 Window",
+            "type": "integer"
+          },
+          "normalize_features": {
+            "default": false,
+            "description": "Min-max normalize each feature column to [0, 1], fit on the TRAIN partition only (falling back to the full set only when train is empty). Fitting on the full set would let validation and test rows move the scaler and leak into training -- the leak juniper-data#314 removed.",
+            "title": "Normalize Features",
+            "type": "boolean"
+          },
+          "max_symbols": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 14,
+            "description": "Cap on the number of symbols (after ordering), APD-DATA-018. A universe larger than this is REFUSED unless allow_truncation is set. Omit to use the deployment default (JUNIPER_DATA_EQUITIES_MAX_SYMBOLS); None means unbounded and is honoured only up to that deployment ceiling.",
+            "title": "Max Symbols"
+          },
+          "incomplete_rows": {
+            "anyOf": [
+              {
+                "enum": [
+                  "accept",
+                  "drop"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What to do with rows whose fundamentals no rescue path could resolve, once allow_truncation has opened the gate: 'accept' keeps them (filled per fundamentals_fill) or 'drop' excludes those symbols entirely. Either way the dataset is PERMANENTLY annotated in DatasetMeta.data_quality. None inherits the deployment default (JUNIPER_DATA_EQUITIES_INCOMPLETE_ROWS). Without allow_truncation this has no effect -- the request is refused instead.",
+            "title": "Incomplete Rows"
+          },
+          "allow_truncation": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Accept a partial universe when it exceeds max_symbols, and open the gate on unresolvable-fundamentals rows. TRI-STATE (APD-DATA-052): true opts in for this request; false REFUSES truncation for this request even where the deployment enabled it; null -- the default, and what an omitted field means -- defers to JUNIPER_DATA_EQUITIES_ALLOW_TRUNCATION (or the matching .env entry), which is itself false by default, so an omitted field on a default deployment still refuses with 422. When truncation is in force the leading max_symbols symbols are imported and the dataset is PERMANENTLY annotated as truncated in its metadata.",
+            "title": "Allow Truncation"
+          },
+          "use_cache": {
+            "default": true,
+            "description": "Cache raw downloads under ~/.cache/juniper_data/equities for fast re-runs.",
+            "title": "Use Cache",
+            "type": "boolean"
+          },
+          "train_ratio": {
+            "default": 0.8,
+            "description": "Fraction of each ticker's earliest rows used for training.",
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "title": "Train Ratio",
+            "type": "number"
+          },
+          "val_ratio": {
+            "default": 0.1,
+            "description": "Fraction of each ticker's rows used for in-loop validation, taken from the rows immediately after train and before test.",
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Val Ratio",
+            "type": "number"
+          },
+          "test_ratio": {
+            "default": 0.1,
+            "description": "Fraction of each ticker's latest rows used for testing.",
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Test Ratio",
+            "type": "number"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 42,
+            "description": "Unused for the temporal split; retained for API parity. Defaulted rather than left None purely for consistency with the other generators (juniper-data#319) -- setting it changes nothing here. Note this generator's real non-reproducibility source is elsewhere: ``end_date`` defaults to the wall clock, so the same params yield different data on different days.",
+            "title": "Seed"
+          }
+        },
+        "title": "EquitiesParams",
+        "type": "object"
+      }
+    }
+  ]
+}

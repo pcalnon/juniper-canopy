@@ -3,15 +3,15 @@
 # Project:       Juniper
 # Sub-Project:   JuniperCanopy
 # Application:   juniper_canopy
-# Purpose:       Shape the recurrence POST /v1/train request: schema-filtered params + R7 precedence + preview
+# Purpose:       Shape what canopy sends for a dataset: schema-filtered params + R7 precedence + preview
 #
 # Author:        Paul Calnon
-# Version:       0.1.0
+# Version:       0.2.0
 # File Name:     recurrence_request.py
 # File Path:     JuniperCanopy/juniper_canopy/src/backend/
 #
 # Date Created:  2026-10-08
-# Last Modified: 2026-10-08
+# Last Modified: 2026-10-26
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -22,6 +22,10 @@
 #     owner's ruling). The one place canopy decides what the recurrence service's ``POST /v1/train``
 #     carries, so that the fit, the INFO log line and the dashboard's "effective request" preview are
 #     the same computation and cannot disagree.
+#
+#     The same rules now cover the cascor tier (juniper-canopy#736): ``shape_stage_payload`` is what
+#     ``ServiceBackend`` forwards when a dataset is staged or live-swapped. ``staged_typed_fields`` is the
+#     typed field set the restart modal renders and re-stages per dataset type (juniper-canopy#735).
 #
 #####################################################################################################################################################################################################
 # Notes:
@@ -66,6 +70,13 @@ Two defects, one rule (juniper-ml plan ``notes/JUNIPER_2026-10-03_JUNIPER-RECURR
 "Edited" is read from the value, because nothing else records it: Dash inputs carry no dirty flag,
 and the form posts every rendered value. A value set back to its rendered default therefore reads as
 untouched and is not sent -- which asks juniper-data for exactly the value the form showed.
+
+**The cascor tier (juniper-canopy#736).** cascor forwards what it is staged with, so the rules above
+apply to its staging body too, at the moment it is staged: ``shape_stage_payload`` runs
+``shape_staged_ref`` for a generator ``DECLARED_PARAM_DEFAULTS`` covers (flat ``equities``) and returns any
+other generator's body unchanged. ``ServiceBackend`` calls it for Apply, the live swap and the restart
+modal's re-stage alike, and logs the account. The recurrence backend does NOT: it holds the raw staged
+config and shapes it at Start, where the preview can still name what it withheld.
 """
 
 from __future__ import annotations
@@ -75,20 +86,26 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from dataset_schema import DECLARED_PARAMS_SOURCE, declared_param_defaults, generator_name_for_type
+from dataset_schema import declared_param_defaults, declared_params_source, generator_name_for_type
 from model_registry import dataset_default_params
 
 logger = logging.getLogger("juniper_canopy.backend.recurrence_request")
 
 # canopy's GENERIC dataset-form fields -> the juniper-data parameter each one names. These are the
-# spiral-era typed inputs: the sidebar sends them only for spiral, but the restart modal re-stages them
-# for every dataset type (``DashboardManager._restage_dataset``), which is how they reach a sequence
-# generator. No rank-3 generator declares either parameter (``dataset_schema.DECLARED_PARAM_DEFAULTS``).
+# spiral-era typed inputs. The sidebar sends them only for spiral. The restart modal re-stages them only
+# for a dataset type whose generator has a parameter for them (``staged_typed_fields``,
+# juniper-canopy#735); until then it re-staged them for every type, which is how they reached a sequence
+# generator. They still can, from a tab rendered before that change or from an API caller, so the rule
+# stays. No rank-3 generator declares either parameter, and nor does flat ``equities``
+# (``dataset_schema.DECLARED_PARAM_DEFAULTS``).
 GENERIC_FIELD_PARAMS: Dict[str, str] = {"nn_dataset_elements": "n_samples", "nn_dataset_noise": "noise"}
 
 # Spiral-only typed fields. A spiral is rank-2 and cannot be staged into the recurrence backend, so
 # these never have a parameter to become; they are reported, not silently dropped.
 SPIRAL_ONLY_FIELDS: Tuple[str, ...] = ("nn_spiral_rotations", "nn_spiral_number")
+
+# Every typed staging field, in the order the restart modal renders them.
+TYPED_STAGE_FIELDS: Tuple[str, ...] = (*GENERIC_FIELD_PARAMS, *SPIRAL_ONLY_FIELDS)
 
 # Where the request came from: a dataset staged with Apply (it wins, X6 / design §4.9) or the
 # one-shot Start body (the dropdown value and the registry seed).
@@ -211,6 +228,110 @@ def shape_start_body_ref(ref: Mapping[str, Any]) -> ShapedRef:
     return ShapedRef(dataset_ref=out, not_forwarded=withheld, undeclared=withheld)
 
 
+def staged_typed_fields(dataset_type: Optional[str]) -> Tuple[str, ...]:
+    """The typed staging fields that carry a parameter for ``dataset_type``'s generator (juniper-canopy#735).
+
+    The restart modal renders exactly these for the type, and re-stages exactly these:
+
+    * ``spirals`` -- all four. They are spiral's own convenience fields (the sidebar's typed block), and cascor
+      translates each into a spiral parameter.
+    * a generator ``DECLARED_PARAM_DEFAULTS`` covers -- the generic fields whose parameter it declares. For every
+      shipped entry that is none: no sequence generator declares ``n_samples`` or ``noise``, and nor does flat
+      ``equities``.
+    * any other generator -- both generic fields. canopy holds no declaration to read for it, so this keeps the
+      posture ``shape_staged_ref`` takes for an undeclared generator, and cascor's ``_translate_staged_config``
+      gives ``n_samples`` a destination in each. One known gap: ``mnist`` declares no ``noise``, and it keeps the
+      field until it has an entry of its own.
+    * no dataset -- none.
+
+    The spiral-only pair is never offered for anything but spiral.
+    """
+    if not dataset_type:
+        return ()
+    generator = generator_name_for_type(dataset_type)
+    if generator == "spiral":
+        return TYPED_STAGE_FIELDS
+    declared = declared_param_defaults(generator)
+    return tuple(field for field, param in GENERIC_FIELD_PARAMS.items() if declared is None or param in declared)
+
+
+@dataclass(frozen=True)
+class StagePayload:
+    """A canopy-dialect staging body as a forwarding backend sends it, and what R7 did to it (juniper-canopy#736).
+
+    ``payload`` is the body to forward. ``shaped`` is the R7 account when the generator has a
+    ``DECLARED_PARAM_DEFAULTS`` entry, and None when it has none and the body goes as staged. ``untouched``
+    names the staged ``nn_dataset_params`` keys left out because they still hold juniper-data's own default --
+    a rendered field nobody edited, which juniper-data fills with that same value.
+    """
+
+    payload: Dict[str, Any]
+    shaped: Optional[ShapedRef] = None
+    untouched: Tuple[str, ...] = ()
+
+    def log(self, phase: str) -> None:
+        """Log what the cascor tier forwards at INFO, and WARN about a parameter withheld as undeclared.
+
+        ``phase`` names the path (``"stage"``, ``"live swap"``). A body forwarded as staged is logged at DEBUG
+        only: that is every spiral-era generator, and the dashboard already logs the body it posted.
+        """
+        generator = generator_name_for_type(self.payload.get("nn_dataset_type"))
+        if self.shaped is None:
+            logger.debug("cascor staging body (%s) for %r forwarded as staged: no DECLARED_PARAM_DEFAULTS entry", phase, generator)
+            return
+        forwarded = json.dumps(self.payload.get("nn_dataset_params") or {}, sort_keys=True, default=str)
+        logger.info(
+            "cascor staging body (%s) for %r: forwarded params %s; edited: %s; untouched (juniper-data's default): %s; not forwarded: %s",
+            phase,
+            generator,
+            forwarded,
+            ", ".join(self.shaped.edited) or "none",
+            ", ".join(self.untouched) or "none",
+            ", ".join(self.shaped.not_forwarded) or "none",
+        )
+        if self.shaped.undeclared:
+            logger.warning(
+                "cascor staging body for %r withheld %s: not declared in dataset_schema.DECLARED_PARAM_DEFAULTS (%s). If juniper-data added them, re-capture with util/ad-hoc/2026-10-26_capture_published_generator_schemas.py",
+                generator,
+                ", ".join(self.shaped.undeclared),
+                declared_params_source(generator),
+            )
+
+
+def shape_stage_payload(canopy_params: Mapping[str, Any]) -> StagePayload:
+    """R7 over a staging body bound for a backend that forwards it to juniper-data -- cascor (juniper-canopy#736).
+
+    cascor keeps what it is staged with and, at the next start or live swap, merges the typed fields and
+    ``nn_dataset_params`` (generic winning) into juniper-data's create request. So W1.2's protections have to
+    be applied before the body reaches it, and they are applied with the recurrence request's own code:
+
+    * a generator with a ``DECLARED_PARAM_DEFAULTS`` entry (flat ``equities``) -- ``nn_dataset_params`` becomes
+      ``shape_staged_ref``'s params: the registry seed, plus every field the operator edited, an edit winning
+      over the seed. A rendered field still at its default is left out, which asks juniper-data for the value
+      the form showed. A parameter the generator does not declare is withheld and named, the generic
+      ``n_samples`` / ``noise`` included (F-C3). A generic value that IS forwarded rides in
+      ``nn_dataset_params`` under its juniper-data name, so the typed fields are always dropped here.
+    * any other generator -- the body as staged. That is ``shape_staged_ref``'s own posture for an undeclared
+      generator, and the only correct one for spiral, xor and gaussian, whose sample counts cascor renames
+      into parameters ``GENERIC_FIELD_PARAMS`` does not name.
+
+    ``nn_dataset_type`` stays canopy's value, because cascor applies the alias itself. Keys this does not own,
+    such as the FR9 ``nn_model`` mirror, pass through. ``None`` values are dropped, as every staging backend
+    drops them.
+    """
+    body = {key: value for key, value in canopy_params.items() if value is not None}
+    if declared_param_defaults(generator_name_for_type(body.get("nn_dataset_type"))) is None:
+        return StagePayload(payload=body)
+    shaped = shape_staged_ref(body)
+    params = shaped.dataset_ref["params"]
+    payload = {key: value for key, value in body.items() if key not in TYPED_STAGE_FIELDS and key != "nn_dataset_params"}
+    if params:
+        payload["nn_dataset_params"] = params
+    staged = body.get("nn_dataset_params") or {}
+    untouched = tuple(key for key in staged if key not in params and key not in shaped.not_forwarded)
+    return StagePayload(payload=payload, shaped=shaped, untouched=untouched)
+
+
 def train_request_body(dataset_ref: Mapping[str, Any], hyperparams: Mapping[str, Any]) -> Dict[str, Any]:
     """The JSON body ``RecurrenceServiceAdapter.train(**dataset_ref, **hyperparams)`` POSTs.
 
@@ -261,7 +382,9 @@ class FitRequest:
             "request": self.body,
             "not_forwarded": list(self.shaped.not_forwarded),
             "edited": list(self.shaped.edited),
-            "declared_params_source": DECLARED_PARAMS_SOURCE,
+            # The capture this request was filtered against, which the preview quotes. None when nothing was
+            # filtered: a reference by dataset_id / name, or a generator canopy declares nothing for.
+            "declared_params_source": declared_params_source(self.dataset_ref.get("generator")) if self.shaped.declared else None,
         }
         if not self.has_dataset_ref:
             preview["error"] = NO_DATASET_REF_ERROR
@@ -287,7 +410,7 @@ class FitRequest:
                 "recurrence request for %r withheld %s: not declared in dataset_schema.DECLARED_PARAM_DEFAULTS (%s). If juniper-data added them, re-capture with util/ad-hoc/2026-10-08_capture_sequence_generator_schemas.py",
                 self.dataset_ref.get("generator"),
                 ", ".join(self.shaped.undeclared),
-                DECLARED_PARAMS_SOURCE,
+                declared_params_source(self.dataset_ref.get("generator")),
             )
         if not self.shaped.declared and self.dataset_ref.get("generator"):
             logger.warning("recurrence request for %r is forwarded unfiltered: dataset_schema.DECLARED_PARAM_DEFAULTS has no entry for it", self.dataset_ref.get("generator"))

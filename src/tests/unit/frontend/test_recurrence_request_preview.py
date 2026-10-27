@@ -125,6 +125,21 @@ class TestRefreshHandler:
         assert "Staged but not sent" in text and "nn_dataset_elements, nn_dataset_noise" in text
         assert "A fit is in progress" in text
 
+    def test_the_notes_quote_where_the_declarations_came_from(self, preview):
+        # juniper-canopy#737's small item: ``dataset_schema`` says this panel quotes the capture canopy filters
+        # against. The backend has always sent it (``FitRequest.describe``); the panel did not show it.
+        from dataset_schema import DECLARED_PARAMS_SOURCE
+
+        payload = _ok_payload(declared_params_source=DECLARED_PARAMS_SOURCE)
+        with mock.patch.object(module.requests, "post", return_value=_response(payload=payload)):
+            _style, _body, notes = preview._refresh_handler(model_class="one_shot", start_body=START_BODY)
+        assert f"Parameters checked against juniper-data's declarations from {DECLARED_PARAMS_SOURCE}." in _text(notes)
+
+    def test_nothing_is_quoted_when_nothing_was_filtered(self, preview):
+        with mock.patch.object(module.requests, "post", return_value=_response(payload=_ok_payload(declared_params_source=None))):
+            _style, _body, notes = preview._refresh_handler(model_class="one_shot", start_body=START_BODY)
+        assert "declarations from" not in _text(notes)
+
     def test_a_refusal_is_shown_in_place_of_the_body(self, preview):
         refused = _response(status_code=409, payload={"ok": False, "error": "Training could not be started: recurrence is not active"})
         with mock.patch.object(module.requests, "post", return_value=refused):
