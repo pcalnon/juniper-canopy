@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
 **Last Updated:** 2026-10-26
-**Version:** 0.28.2
+**Version:** 0.29.0
 **Status:** Current
 
 ## Table of Contents
