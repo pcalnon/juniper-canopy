@@ -580,7 +580,7 @@ The job `if` is not the last gate. The pinned action then applies its own checks
   `@Claude` therefore schedules the job and passes the check. A substring such as `foo@claude` or `@claudefoo` can schedule the job and then miss this token check.
 - When the token check fails, the step logs `No trigger found, skipping remaining steps` and returns without failing. Assigning an issue is this case. The workflow `if` matches `@claude` already present in the title or body, but `assignee_trigger` is unset, so the action does not treat the assignee as a trigger and it does not re-read the title or body on `assigned`.
 - A matching human with write access continues. `allowed_bots` is unset; the default empty string allows no bots. A bot whose text matches the token fails the step (non-human actor) instead of running. `allowed_non_write_users` is unset, so an actor without write access fails the step (`Actor does not have write permissions to the repository`) before the trigger check.
-- Bedrock, Vertex, Foundry, and the workload-identity inputs are unset. `id-token: write` is still granted. The workflow header says `ANTHROPIC_API_KEY` is an org secret and that this repo must be able to read it. No other auth input is passed. The action installs its own Claude Code CLI; that version is inside the action pin, not a canopy setting.
+- Bedrock, Vertex, Foundry, and the workload-identity inputs are unset. `id-token: write` is still granted. `ANTHROPIC_API_KEY` is a repository secret: Juniper repos are user-owned, so no organization secret can reach them. No other auth input is passed. The action installs its own Claude Code CLI; that version is inside the action pin, not a canopy setting.
 
 ## Tooling and Configuration Sources
 
