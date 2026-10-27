@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-10-08
-**Version:** 0.28.1
+**Last Updated:** 2026-10-26
+**Version:** 0.29.0
 **Status:** Current
 
 ## Table of Contents
@@ -187,6 +187,7 @@ lint:
 | `.github/workflows/main-verify.yml`         | push to `main`                                                       | Post-merge sequence-safety net                       |
 | `.github/workflows/pr-base-branch-guard.yml` | `pull_request` + `merge_group`                                       | Fail if PR base is not the default branch            |
 | `.github/workflows/scheduled-tests.yml`     | daily cron + manual                                                  | Slow / integration tests                             |
+| `.github/workflows/juniper-data-schema-drift.yml` | daily cron, manual, `repository_dispatch` `juniper-data-published`, path-filtered PR | Generator-schema snapshots vs the released juniper-data. See [`juniper-data-schema-drift.yml`](#juniper-data-schema-driftyml) |
 | `.github/workflows/agents-md-touch-up.yml`  | PR paths `AGENTS.md`                                                 | Verify `Last Updated` date (does not rewrite)        |
 | `.github/workflows/claude.yml`              | comment, submitted review, or new/assigned issue with `@claude`      | Optional assistant; not a merge gate. See [Claude Code workflow](#claude-code-workflow) |
 
@@ -454,6 +455,20 @@ This catches broken internal file and heading links without requiring sibling re
   - `pip-audit --strict --desc on`
 - Uploads `reports/security/` artifacts
 
+### `juniper-data-schema-drift.yml`
+
+Compares canopy's committed snapshots of juniper-data's generator parameter schemas with the **released** juniper-data (juniper-canopy#737). W1.2's declared-param filter reads `DECLARED_PARAM_DEFAULTS`, which the unit tests pin to those snapshots, so a snapshot that has drifted from juniper-data makes the filter wrong without failing any test. The comparison lives in `util/check_juniper_data_generator_schemas.py`, which runs the same way locally.
+
+- Triggers:
+  - daily `07:17 UTC`
+  - `workflow_dispatch`, with an optional `version` input (empty: the latest on PyPI)
+  - `repository_dispatch` type `juniper-data-published`, which juniper-data's `notify-consumers.yml` sends with `client_payload` `{source, version, sha}` once a release is on PyPI. It reaches canopy only once that workflow's matrix lists `juniper-canopy`
+  - `pull_request` whose paths include the workflow, the script or `src/tests/fixtures/juniper_data_*generator_schemas.json`
+- No `run-name:`. juniper-data's sender confirms delivery by finding a run whose title is the event type, which is a dispatch run's default title
+- Steps: Python 3.14; choose the version (the dispatched one, the input, or PyPI's latest; it must be `X.Y.Z`); wait up to 10 minutes for it to be installable; `pip install "juniper-data[api]==<version>"` (a bare install cannot import the registry); `python -I util/check_juniper_data_generator_schemas.py --expected-version <version>`
+- Compared: every entry of every matching snapshot against `GENERATOR_REGISTRY[name]`: `params_class.model_json_schema()` and `version`. Exit 1 on drift, naming the generator, the field and key, both values and the re-capture command. Exit 2 when the check cannot run
+- Permissions: `contents: read`. Not a required check: it reports only on pull requests that touch its paths
+
 ### `lockfile-update.yml`
 
 Operator runbook: [Dependabot lockfile automation](CICD_MANUAL.md#runbook-dependabot-lockfile-automation).
@@ -565,7 +580,7 @@ The job `if` is not the last gate. The pinned action then applies its own checks
   `@Claude` therefore schedules the job and passes the check. A substring such as `foo@claude` or `@claudefoo` can schedule the job and then miss this token check.
 - When the token check fails, the step logs `No trigger found, skipping remaining steps` and returns without failing. Assigning an issue is this case. The workflow `if` matches `@claude` already present in the title or body, but `assignee_trigger` is unset, so the action does not treat the assignee as a trigger and it does not re-read the title or body on `assigned`.
 - A matching human with write access continues. `allowed_bots` is unset; the default empty string allows no bots. A bot whose text matches the token fails the step (non-human actor) instead of running. `allowed_non_write_users` is unset, so an actor without write access fails the step (`Actor does not have write permissions to the repository`) before the trigger check.
-- Bedrock, Vertex, Foundry, and the workload-identity inputs are unset. `id-token: write` is still granted. The workflow header says `ANTHROPIC_API_KEY` is an org secret and that this repo must be able to read it. No other auth input is passed. The action installs its own Claude Code CLI; that version is inside the action pin, not a canopy setting.
+- Bedrock, Vertex, Foundry, and the workload-identity inputs are unset. `id-token: write` is still granted. `ANTHROPIC_API_KEY` is a repository secret: Juniper repos are user-owned, so no organization secret can reach them. No other auth input is passed. The action installs its own Claude Code CLI; that version is inside the action pin, not a canopy setting.
 
 ## Tooling and Configuration Sources
 
@@ -811,7 +826,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-10-08
-**Version:** 0.28.1
+**Last Updated:** 2026-10-26
+**Version:** 0.29.0
 **Maintained By:** Development Team
 **Status:** ✅ Current
