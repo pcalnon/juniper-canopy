@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-09-05
+**Last Updated**: 2026-10-26
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -23,7 +23,9 @@ pointer only helps an agent that already knows to look.
 - [Topology Node Selection (F-CANOPY-046)](#topology-node-selection-f-canopy-046)
 - [Plotly PNG Export (F-CANOPY-047)](#plotly-png-export-f-canopy-047)
 - [Sidebar model summary (X11)](#sidebar-model-summary-x11)
+- [Constants Reference](#constants-reference)
 - [Configuration Reference](#configuration-reference)
+- [Test Environment Variables Reference](#test-environment-variables-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
 - [Replay index contract](#replay-index-contract)
@@ -673,6 +675,49 @@ cd src
 pytest tests/regression/test_selection_reachability_guardrails.py -k X11 -v
 ```
 
+## Constants Reference
+
+Relocated verbatim from `AGENTS.md` § Constants Management (2026-10-26, to keep the always-loaded file under its memory budget when the temp-file rule landed) so it is read on demand rather than loaded into every session. The one edit is the Constants Guide link, re-rooted at `docs/`.
+
+All application constants are centralized in `src/canopy_constants.py` for maintainability and type safety.
+
+**Import and use constants:**
+
+```python
+from canopy_constants import TrainingConstants, DashboardConstants
+
+# Use in your code
+max_epochs = TrainingConstants.MAX_TRAINING_EPOCHS
+interval = DashboardConstants.FAST_UPDATE_INTERVAL_MS
+```
+
+**Available constant classes:**
+
+- `TrainingConstants` - Training parameters (epochs, learning rates, hidden units)
+- `DashboardConstants` - UI behavior (update intervals, timeouts, data limits)
+- `ServerConstants` - Server configuration (host, port, WebSocket paths, discovery host/ports/timeout, health probe paths)
+- `SecurityConstants` - HTTP security headers (CSP, HSTS, X-Frame-Options, etc.), default CSP policy, rate-limit headers, body-limit error messages, exempt paths
+- `BackendConstants` - REST endpoint paths, backend adapter timeouts, retry tuning, status keys
+- `WebSocketConstants` - WebSocket message types, ping/pong intervals, reconnect backoff
+- `JuniperDataConstants` - JuniperData service URL defaults and dataset endpoint paths
+
+**When to use constants:**
+
+✅ Values used in multiple places  
+✅ Configuration defaults and limits  
+✅ Values that improve code clarity  
+❌ Test-specific values (keep in test files)  
+❌ Calculated or runtime values  
+
+**Adding new constants:**
+
+See the comprehensive [Constants Guide](cascor/CONSTANTS_GUIDE.md) for detailed instructions on:
+
+- How to add new constants
+- Naming conventions (include units: `_MS`, `_S`, `_PX`)
+- Constants vs configuration
+- Best practices and examples
+
 ## Configuration Reference
 
 Relocated verbatim from `AGENTS.md` (P3 of the shared-session-memory plan) so it is read on demand rather than loaded into every session.
@@ -875,6 +920,34 @@ python -c "import yaml; yaml.safe_load(open('conf/app_config.yaml'))"
 ```
 
 ---
+
+## Test Environment Variables Reference
+
+Relocated verbatim from `AGENTS.md` § Quick Start Commands → Coverage → Test Environment Variables (2026-10-26, to keep the always-loaded file under its memory budget when the owner's `tmp/` rulings landed) so it is read on demand rather than loaded into every session.
+
+The test suite auto-skips certain tests unless you opt in via environment variables:
+
+| Variable                   | Effect                                                          | Default |
+| -------------------------- | --------------------------------------------------------------- | ------- |
+| `CASCOR_BACKEND_AVAILABLE` | Enable tests marked `requires_cascor`                           | unset   |
+| `RUN_SERVER_TESTS`         | Enable tests marked `requires_server`                           | unset   |
+| `RUN_DISPLAY_TESTS`        | Enable tests marked `requires_display` in headless environments | unset   |
+| `ENABLE_SLOW_TESTS`        | Run tests marked `slow`                                         | unset   |
+| `CASSANDRA_INTEGRATION_TEST` | Enable Cassandra integration tests                            | unset   |
+| `REDIS_INTEGRATION_TEST`  | Enable Redis integration tests                                  | unset   |
+| `JUNIPER_DATA_E2E_TEST`   | Enable JuniperData end-to-end tests                             | unset   |
+
+> **Note:** `conftest.py` **forces** `JUNIPER_CANOPY_DEMO_MODE=1` for the test process by default so tests do **not** require a real backend unless you explicitly enable it via `CASCOR_BACKEND_AVAILABLE=1`.
+
+Example:
+
+```bash
+# Enable CasCor backend and slow tests
+export CASCOR_BACKEND_AVAILABLE=1
+export ENABLE_SLOW_TESTS=1
+cd src
+pytest -m "not requires_display" -v
+```
 
 ## API and WebSocket Contract Reference
 
