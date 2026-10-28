@@ -5,7 +5,7 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.9.0
-**Last Updated**: 2026-10-10
+**Last Updated**: 2026-10-26
 
 ---
 
@@ -36,9 +36,10 @@ section in the same PR rather than waiving the budget gate.
 - **Long-lived collections must be size-bounded.** Use `maxlen` for deques and cap history buffers
   (`REPLAY_WEIGHT_BUFFER_MAX` reasons about a few-hundred-MB peak). Unbounded growth kills a long
   run with no warning.
-- **`/tmp/` is prohibited** as the home for any script that produces, modifies or analyzes
-  repository content — it is reaped and the scripts are irrecoverable. Scratch *data* there is fine;
-  source files are not. Full rule and the motivating incident: § File Placement Rules.
+- **Nothing is written under `/tmp`** — no script, scratch data, test output or pid file. It is a
+  tmpfs aged daily (a file untouched for ten days is deleted, in use or not), and in the week to
+  2026-10-26 it emptied a live test stack's pid files and venv three times. Use the repo's gitignored
+  `tmp/`. Full rule: § File Placement Rules → Temporary files.
 - **Plotly trace *names* are a cross-language contract with the clientside JS — renaming one
   silently mis-appends live data to the wrong trace.** Trace 0 of each plot is the WS-bridge
   `extendTraces` target (appended by index); every other series is looked up by its exact **display
@@ -237,29 +238,7 @@ pytest -m performance -v
 
 #### Test Environment Variables
 
-The test suite auto-skips certain tests unless you opt in via environment variables:
-
-| Variable                   | Effect                                                          | Default |
-| -------------------------- | --------------------------------------------------------------- | ------- |
-| `CASCOR_BACKEND_AVAILABLE` | Enable tests marked `requires_cascor`                           | unset   |
-| `RUN_SERVER_TESTS`         | Enable tests marked `requires_server`                           | unset   |
-| `RUN_DISPLAY_TESTS`        | Enable tests marked `requires_display` in headless environments | unset   |
-| `ENABLE_SLOW_TESTS`        | Run tests marked `slow`                                         | unset   |
-| `CASSANDRA_INTEGRATION_TEST` | Enable Cassandra integration tests                            | unset   |
-| `REDIS_INTEGRATION_TEST`  | Enable Redis integration tests                                  | unset   |
-| `JUNIPER_DATA_E2E_TEST`   | Enable JuniperData end-to-end tests                             | unset   |
-
-> **Note:** `conftest.py` **forces** `JUNIPER_CANOPY_DEMO_MODE=1` for the test process by default so tests do **not** require a real backend unless you explicitly enable it via `CASCOR_BACKEND_AVAILABLE=1`.
-
-Example:
-
-```bash
-# Enable CasCor backend and slow tests
-export CASCOR_BACKEND_AVAILABLE=1
-export ENABLE_SLOW_TESTS=1
-cd src
-pytest -m "not requires_display" -v
-```
+The opt-in variables that un-skip the gated tests (`requires_cascor`, `requires_server`, `requires_display`, `slow`, and the Cassandra, Redis and JuniperData integration suites), and why the suite runs in demo mode by default. Moved to [`docs/AGENTS_REFERENCE.md` § Test Environment Variables Reference](docs/AGENTS_REFERENCE.md#test-environment-variables-reference) — read it when working on this area.
 
 #### Key Test Fixtures
 
@@ -443,44 +422,7 @@ cd ../juniper-deploy && docker compose up --build
 
 ### Using Constants
 
-All application constants are centralized in `src/canopy_constants.py` for maintainability and type safety.
-
-**Import and use constants:**
-
-```python
-from canopy_constants import TrainingConstants, DashboardConstants
-
-# Use in your code
-max_epochs = TrainingConstants.MAX_TRAINING_EPOCHS
-interval = DashboardConstants.FAST_UPDATE_INTERVAL_MS
-```
-
-**Available constant classes:**
-
-- `TrainingConstants` - Training parameters (epochs, learning rates, hidden units)
-- `DashboardConstants` - UI behavior (update intervals, timeouts, data limits)
-- `ServerConstants` - Server configuration (host, port, WebSocket paths, discovery host/ports/timeout, health probe paths)
-- `SecurityConstants` - HTTP security headers (CSP, HSTS, X-Frame-Options, etc.), default CSP policy, rate-limit headers, body-limit error messages, exempt paths
-- `BackendConstants` - REST endpoint paths, backend adapter timeouts, retry tuning, status keys
-- `WebSocketConstants` - WebSocket message types, ping/pong intervals, reconnect backoff
-- `JuniperDataConstants` - JuniperData service URL defaults and dataset endpoint paths
-
-**When to use constants:**
-
-✅ Values used in multiple places  
-✅ Configuration defaults and limits  
-✅ Values that improve code clarity  
-❌ Test-specific values (keep in test files)  
-❌ Calculated or runtime values  
-
-**Adding new constants:**
-
-See the comprehensive [Constants Guide](docs/cascor/CONSTANTS_GUIDE.md) for detailed instructions on:
-
-- How to add new constants
-- Naming conventions (include units: `_MS`, `_S`, `_PX`)
-- Constants vs configuration
-- Best practices and examples
+How to import the `src/canopy_constants.py` classes, which class holds what, and when a value belongs there. Moved to [`docs/AGENTS_REFERENCE.md` § Constants Reference](docs/AGENTS_REFERENCE.md#constants-reference) — read it when working on this area.
 
 ## Configuration Management
 
@@ -840,7 +782,7 @@ Organize files according to their purpose:
 
 **Script placement (mandatory)** — `/tmp/` is **prohibited** as the home for any script that produces, modifies, or analyzes repository content. `/tmp/` is reaped when sessions / sandboxes / containers end, and scripts placed there are lost (irrecoverable).
 
-`/tmp/` is still fine as a scratch *workspace* for intermediate artifacts that the script itself creates and reads — the prohibition is on script *source files*, not on transient data.
+Scratch *data* does not go there either: that exception was withdrawn on 2026-10-26 (§ Temporary files, below).
 
 This is an ecosystem-wide rule restated in the parent `Juniper/AGENTS.md` "Cross-Project Conventions" section. See [`util/ad-hoc/README.md`](util/ad-hoc/README.md) for the per-script convention (file-header requirements, graduation lifecycle). Motivating incident: irrecoverable loss of `phase4_consolidate.py` and `v2_citation_validate.py` from the juniper-ml requirements-snapshot effort.
 
@@ -850,6 +792,33 @@ This is an ecosystem-wide rule restated in the parent `Juniper/AGENTS.md` "Cross
 src/demo_mode.py           -> src/tests/unit/test_demo_mode_*.py
 src/communication/         -> src/tests/unit/test_websocket_*.py
 ```
+
+### Temporary files: `tmp/`, never `/tmp` (mandatory)
+
+**No file is ever written under `/tmp`** (nor `/var/tmp`) by this repo's scripts, tests, tools, services, sessions
+or agents (owner directive, 2026-10-26). On the Linux host `/tmp` is a tmpfs that `systemd-tmpfiles-clean` ages
+daily (`q /tmp 1777 root root 10d`): a file untouched for ten days is deleted while still in use, and a reboot
+erases the rest. In the week to 2026-10-26 it emptied a live test stack's pid files and venv three times. macOS
+ages `/tmp` too.
+
+- This repo's temp root is its gitignored `tmp/`. `TMPDIR` points at the **primary** checkout's (it outlives any
+  worktree); a worktree-isolated session writes its own scratch files into its worktree's `tmp/`.
+- Sessions get `TMPDIR` from the juniper-ml launcher and a user-level SessionStart hook, so `tempfile`, `mktemp` and
+  pytest's `tmp_path` follow it.
+- In code: never a `/tmp/...` literal and never `${TMPDIR:-/tmp}`; tests use `tmp_path`; state another process must
+  find (pid files, run directories) lives at a fixed path under the primary's `tmp/` or `~/.local/state/`, never one
+  derived from `TMPDIR`.
+- Out of scope: GitHub-hosted CI runners and a container's own `/tmp`.
+- Ecosystem rule and rationale: `juniper-ml/notes/JUNIPER_2026-10-26_JUNIPER-ECOSYSTEM_REPO-TMP-DIRECTORY-CONVENTION.md`.
+- **Owner rulings, 2026-10-26** (canonical: the note above): `juniper-check-doc-links` passes `--exclude tmp` and a
+  local Docker build's `.dockerignore` lists `tmp/`; pytest does not ignore it (no `norecursedirs`, `--ignore` or
+  `collect_ignore` names it). Full-tree repo copies and log-file copies may live there.
+  - A script that counts matches with `grep` or `find` chooses its scope deliberately: the repo with its `tmp/`
+    excluded, or `tmp/` alone; it searches both only for a stated edge case that needs both. Existing counting
+    scripts are to be modified to make that choice explicit, not left to `.gitignore` or a tool's defaults.
+  - **Retention.** A file a work arc writes to `tmp/` is kept until it is no longer needed, no work arc (its own
+    included) uses it, and it is no longer needed for documentation or reference, and, where needed, until it has
+    been archived in an appropriate non-temporary directory. Only then may it be deleted.
 
 ## Documentation Organization
 

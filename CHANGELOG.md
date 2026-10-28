@@ -155,6 +155,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Temporary files go in the repo's gitignored `tmp/`, never `/tmp` (owner directive, 2026-10-26), and the owner's
+  rulings on it are applied.** `/tmp/` is ignored, and `AGENTS.md` § Temporary files carries the rule and the
+  rulings, retention included. `juniper-check-doc-links` passes `--exclude tmp` in the pre-commit hook and in CI,
+  and `.dockerignore` lists `tmp/`; nothing keeps pytest out of it, and counting scripts are to choose their scope
+  as to `tmp/` deliberately (the owner's revised ruling). To stay under the memory budget, `AGENTS.md`'s Test
+  Environment Variables table moved verbatim to `docs/AGENTS_REFERENCE.md`.
 - **The dash floor is `dash>=4.0.0`** (`pyproject.toml`; `conf/requirements_ci.txt`, which `requirements.txt` and
   `requirements_ci.txt` link to), and `conf/conda_environment.yaml` pins `dash=4.4.1` with dash 4's two new run
   dependencies, `comm` and `janus`, at the lock's versions. Everything canopy tests runs dash 4.x (the lock's 4.4.1,
