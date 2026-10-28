@@ -60,6 +60,8 @@ dist/
 data/
 logs/
 reports/
+# The repo's gitignored temp root (owner ruling, 2026-10-26): scratch, never build context.
+tmp/
 *.prof
 *.log
 **/*.log
