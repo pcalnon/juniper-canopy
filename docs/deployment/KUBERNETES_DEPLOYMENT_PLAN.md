@@ -252,9 +252,10 @@ minikube addons enable metrics-server
 **Option B: Cloud Provider (AWS EKS):**
 
 ```bash
-# Install eksctl
-curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
-sudo mv /tmp/eksctl /usr/local/bin
+# Install eksctl (unpacked in the repo's gitignored tmp/, never /tmp)
+mkdir -p tmp
+curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C tmp
+sudo mv tmp/eksctl /usr/local/bin
 
 # Create cluster
 eksctl create cluster \
@@ -1145,9 +1146,11 @@ echo "Rotating secrets for $SECRET_NAME in $NAMESPACE"
 NEW_JWT_SECRET=$(openssl rand -base64 32)
 NEW_LOG_API_KEY=$(openssl rand -hex 16)
 
-# 2. Backup current secret
-kubectl get secret $SECRET_NAME -n $NAMESPACE -o yaml > /tmp/secret-backup.yaml
-echo "Backup saved to /tmp/secret-backup.yaml"
+# 2. Backup current secret: owner-only, in the repo's gitignored tmp/ (never /tmp)
+BACKUP_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tmp/secret-backup.yaml"
+mkdir -p "$(dirname "$BACKUP_FILE")"
+(umask 077; kubectl get secret $SECRET_NAME -n $NAMESPACE -o yaml > "$BACKUP_FILE")
+echo "Backup saved to $BACKUP_FILE"
 
 # 3. Patch secret with new values
 kubectl patch secret $SECRET_NAME -n $NAMESPACE -p "{
