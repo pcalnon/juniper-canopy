@@ -123,7 +123,7 @@ pydantic==2.14.1
     #   pydantic-settings
 pydantic-core==2.50.1
     # via pydantic
-pydantic-settings==2.16.1
+pydantic-settings==2.16.2
     # via
     #   juniper-canopy (pyproject.toml)
     #   juniper-service-core
