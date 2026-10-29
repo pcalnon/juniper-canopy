@@ -100,7 +100,7 @@ numpy==2.5.4
     #   juniper-data-client
     #   juniper-service-core
     #   scipy
-opentelemetry-api==1.45.1
+opentelemetry-api==1.45.2
     # via fastapi
 packaging==26.3
     # via plotly
@@ -112,7 +112,7 @@ prometheus-client==0.26.0
     # via juniper-canopy (pyproject.toml)
 psutil==7.2.2
     # via juniper-canopy (pyproject.toml)
-pydantic==2.14.1
+pydantic==2.14.2
     # via
     #   juniper-canopy (pyproject.toml)
     #   dash
@@ -121,7 +121,7 @@ pydantic==2.14.1
     #   juniper-observability
     #   juniper-service-core
     #   pydantic-settings
-pydantic-core==2.50.1
+pydantic-core==2.50.2
     # via pydantic
 pydantic-settings==2.16.2
     # via
