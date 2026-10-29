@@ -34,6 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Security Scans job's Bandit SARIF report is written and uploaded again.** `.github/workflows/ci.yml`
+  installed bare `bandit`, whose CLI has no `sarif` formatter without the `bandit[sarif]` extra. So `bandit -f sarif`
+  failed with `invalid choice: 'sarif'`, no report was written, the step warned "Bandit found security issues" for an
+  argument error, and the upload's `continue-on-error: true` kept the job green over `Path does not exist:
+  reports/security/bandit.sarif` (main run 40942351409, job 123689681187). The job now installs `"bandit[sarif]"`,
+  as `security-scan.yml` and every sibling repository's `ci.yml` already do. Run on `src/` with `.bandit.yml`,
+  Bandit 1.9.4 exits 0 with 0 results, so the upload adds no alert. Found by the Cursor flood-3 evaluation: juniper-ml
+  `notes/JUNIPER_2026-10-08_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-3-DISPOSITION.md` §4.
 - **The memory-budget gate's own 40 tests now run in the required unit legs, and the Codecov upload sends the
   repository's token.** #516 (2026-08-25) ported `util/memory_budget_check.py` with its suite at
   `src/tests/test_memory_budget_check.py`, the top of the test tree, which no CI lane reaches: the unit job selects
