@@ -1,7 +1,7 @@
 """
 Pin CI lane wiring: which lanes install what, and which test directories any lane actually names.
 
-Three guards, one theme -- a suite can be green, or look green, while not running.
+Four guards, one theme -- a suite can be green, or look green, while not running.
 
 Regression guard for the class that kept ``Scheduled Tests`` red for 63 consecutive runs
 (2026-07-21 .. 2026-09-21). Its last green run was 2026-07-20; ``#459`` added the offending import
@@ -30,11 +30,13 @@ by NO workflow path list, and its tests are ``@pytest.mark.unit`` so the schedul
 mentioned the directory at all. ``src/tests/performance/`` was in the same state -- 5 tests, 1
 explicitly skipped, 4 live and running nowhere. Both are now named by the unit lane.
 
-The three guards:
+The four guards:
 
 * ``TestTheStubCoversEverySubmoduleSrcImports`` -- a new ``juniper_cascor_client`` submodule
   imported by ``src/`` that the stub does not register.
 * ``TestEveryTestDirectoryIsNamedBySomeLane`` -- a test directory no lane names.
+* ``TestNoTestModuleSitsAtTheTopOfTheTestTree`` -- a test module directly in ``src/tests/``,
+  which the directory guard cannot see.
 * ``TestEveryPytestLaneInstallsTheCascorExtra`` -- a lane that runs this suite without the extra.
 
 The first is the load-bearing one for the outage: it pins the cause rather than one workflow's
@@ -165,6 +167,14 @@ def _installs_extra(shell: str) -> bool:
     return False
 
 
+def _top_level_test_modules(tests_root: Path) -> list[str]:
+    """Test modules directly in ``tests_root`` (pyproject's ``python_files = ["test_*.py"]``), depth one only.
+
+    Subdirectories are ``TestEveryTestDirectoryIsNamedBySomeLane``'s job; this sees only what that guard cannot.
+    """
+    return sorted(path.name for path in tests_root.glob("test_*.py") if path.is_file())
+
+
 def _lanes_running_this_suite() -> list[tuple[Path, str]]:
     """Workflows whose run-steps invoke pytest against this repo's tests."""
     lanes: list[tuple[Path, str]] = []
@@ -226,6 +236,31 @@ class TestEveryTestDirectoryIsNamedBySomeLane:
         joined = "\n".join(joined for _, joined in _lanes_running_this_suite())
         unwired = sorted(name for name in self._test_dirs() if name not in self.EXEMPT and f"src/tests/{name}" not in joined)
         assert not unwired, "These src/tests subdirectories are named by no workflow pytest invocation, so their " f"tests run in no lane: {', '.join(unwired)}. Add each to a lane's path list (or to " "EXEMPT with the lane that covers it). A directory that runs nowhere still collects, " "so it can look healthy while asserting nothing."
+
+
+@pytest.mark.regression
+class TestNoTestModuleSitsAtTheTopOfTheTestTree:
+    """A test module directly in ``src/tests/`` runs in no lane, and the directory guard above cannot see it.
+
+    ``TestEveryTestDirectoryIsNamedBySomeLane`` walks SUBDIRECTORIES. ``src/tests/test_memory_budget_check.py``
+    sat at the top of the tree from its port (#516, 2026-08-25) until 2026-10-29, and no lane reached it: the
+    unit job names four subdirectories, the integration and ui jobs one each, and the scheduled lane walks
+    ``testpaths`` under ``-m "slow or integration"``, which deselects an unmarked module. So its 40 tests, the
+    negative controls of the ``Memory Budget`` check, never ran in CI. It now lives in ``src/tests/unit/``.
+    """
+
+    def test_discovery_finds_a_planted_top_level_module(self, tmp_path):
+        """Guard the instrument: a discovery that finds nothing would pass the wiring check below vacuously."""
+        (tmp_path / "test_planted.py").write_text("", encoding="utf-8")
+        (tmp_path / "unit").mkdir()
+        (tmp_path / "unit" / "test_nested.py").write_text("", encoding="utf-8")
+        found = _top_level_test_modules(tmp_path)
+        assert found == ["test_planted.py"], f"Top-level discovery returned {found} for a tree holding one top-level module and one nested one. It must find the first and leave the second to the directory guard."
+
+    def test_every_top_level_test_module_is_named_by_some_lane(self):
+        joined = "\n".join(joined for _, joined in _lanes_running_this_suite())
+        unwired = [name for name in _top_level_test_modules(SRC / "tests") if f"src/tests/{name}" not in joined]
+        assert not unwired, f"These test modules sit directly in src/tests/, and no workflow pytest invocation names them, so they run in no lane: {', '.join(unwired)}. Move each into the subdirectory whose lane should run it (src/tests/unit/ for the required unit lane), or name it in a lane's path list. The directory guard cannot see a module at this level."
 
 
 @pytest.mark.regression

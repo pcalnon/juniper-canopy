@@ -34,6 +34,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The memory-budget gate's own 40 tests now run in the required unit legs, and the Codecov upload sends the
+  repository's token.** #516 (2026-08-25) ported `util/memory_budget_check.py` with its suite at
+  `src/tests/test_memory_budget_check.py`, the top of the test tree, which no CI lane reaches: the unit job selects
+  by path (`src/tests/unit/`, `regression/`, `contract/`, `performance/`), the integration and ui jobs name one
+  directory each, and the scheduled lane walks `testpaths` under `-m "slow or integration"`, which deselects an
+  unmarked module. So the negative controls behind the `Memory Budget` check had never run in CI. The suite moves to
+  `src/tests/unit/test_memory_budget_check.py`, its repo root goes from `parents[2]` to `parents[3]`, and it gains
+  `pytestmark = pytest.mark.unit` for `pytest -m unit` runs (the unit job's selector is negative, so the path is
+  what CI keys on). No test body changed, and the checker's docstring now names the real path.
+  `src/tests/regression/test_ci_lane_wiring.py` gains `TestNoTestModuleSitsAtTheTopOfTheTestTree`, because its
+  directory guard walks subdirectories and could not see a module at this level; restoring the old layout fails it.
+  The unit lane now selects 8,224 of 8,228 collected tests, up from 8,182 of 8,186: the 40 of this suite plus the
+  guard's 2. The twin of juniper-cascor#734. Separately, the Codecov step in `.github/workflows/ci.yml` now passes
+  `token: ${{ secrets.CODECOV_TOKEN }}`, as juniper-data's does, after the owner added the secret on 2026-10-29.
+  Until then its uploads were refused ("Token required - not valid tokenless upload") inside a step that stays
+  green under `fail_ci_if_error: false`: all 24 in the six `ci.yml` runs from 2026-10-28 20:56Z to 2026-10-29
+  19:41Z. A Dependabot PR reads the Dependabot secret store, which does not hold the token, so its upload stays
+  tokenless. Found by the Cursor flood-3 evaluation: juniper-ml
+  `notes/JUNIPER_2026-10-08_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-3-DISPOSITION.md` §4.
 - **The lockfile regen could have committed an empty `requirements.lock` without failing.** The commit step built
   its payload with `--arg contents "$(base64 -w0 requirements.lock)"`. A failure inside a command substitution used
   as an argument does not trip `set -e`, so a failing `base64` would have handed `jq` an empty string and the step

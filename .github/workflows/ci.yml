@@ -288,10 +288,15 @@ jobs:
             reports/htmlcov/
           retention-days: 30
 
+      # CODECOV_TOKEN is an Actions repository secret (owner ruling, 2026-10-29). Without it the
+      # uploads were refused -- "Token required - not valid tokenless upload" -- inside this step,
+      # which stays green because fail_ci_if_error is false. A Dependabot PR reads the Dependabot
+      # secret store, which does not hold the token, so its upload is still tokenless.
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
         if: always()
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: reports/coverage.xml
           flags: unittests
           fail_ci_if_error: false

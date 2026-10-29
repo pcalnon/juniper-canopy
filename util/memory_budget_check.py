@@ -46,7 +46,7 @@ Vacuous-pass resistance
 This repo has a documented class where a check's machinery breaks and it reports
 SUCCESS. Guards here: a governed file that is MISSING is a hard failure (not a
 silent skip); an empty governed set is a hard failure; and an unreadable budget
-file is a hard failure. ``tests/test_memory_budget_check.py`` carries the
+file is a hard failure. ``src/tests/unit/test_memory_budget_check.py`` carries the
 negative controls proving each can still fail.
 
 Usage:
