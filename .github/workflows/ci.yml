@@ -578,7 +578,11 @@ jobs:
         if: always()
         with:
           sarif_file: reports/security/bandit.sarif
-        continue-on-error: true
+        # No ruleset here requires the `Bandit` check that code scanning creates from this upload, so a
+        # failed upload used to be silent: juniper-canopy#780 found this step uploading nothing while
+        # Security Scans stayed green. Security Scans is required, so on a PR a failed upload now turns
+        # it red with the cause in this step's log. Every other event still tolerates it.
+        continue-on-error: ${{ github.event_name != 'pull_request' }}
 
       - name: Run pip-audit (Dependency Vulnerabilities)
         id: pip_audit
