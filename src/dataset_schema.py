@@ -11,7 +11,7 @@
 # File Path:     ${HOME}/Development/python/Juniper/juniper-canopy/src/
 #
 # Date Created:  2026-07-21
-# Last Modified: 2026-10-26
+# Last Modified: 2026-11-03
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -69,6 +69,8 @@
 #       the dated snapshot of what each recurrence-reachable generator declares.
 #     - juniper-canopy#736: the flat ``equities`` entry, captured from the published juniper-data
 #       0.17.1 wheel, and DECLARED_PARAMS_SOURCES / declared_params_source (per-entry provenance).
+#     - juniper-canopy#778: the ``mnist`` entry, captured from the same wheel without juniper-data's
+#       ``[mnist]`` extra, so the restart modal and the cascor path stop sending it a ``noise``.
 #
 #####################################################################################################################################################################################################
 """Schema-driven dataset-panel helpers (N7): JSON-Schema -> field descriptors + availability.
@@ -219,6 +221,12 @@ GENERATOR_NAME_ALIASES: dict[str, str] = {
 # published nothing does this curated map speak, and it survives for exactly one reason: a
 # juniper-data older than W-4 sends no hint at all, and "unavailable in this deployment" is a
 # worse answer than the two entries below for the two generators canopy happens to know about.
+#
+# The extra the ``mnist`` entry names gates GENERATING ``mnist``, not reading its schema. juniper-data's
+# ``MnistGenerator`` imports ``datasets`` inside ``try`` / ``except ImportError``, so a deployment without
+# the ``[mnist]`` extra reports ``available: false`` with the install hint and still serves the schema.
+# Measured at juniper-data 0.17.1, and it is how ``mnist``'s ``DECLARED_PARAM_DEFAULTS`` entry below was
+# captured from an ``[api]``-only install (juniper-canopy#778). So ``mnist``'s reason below stays as it is.
 _UNAVAILABLE_REASONS: dict[str, str] = {
     "mnist": "needs juniper-data's optional dataset extra",
     "arc_agi": "needs juniper-data's optional dataset extra",
@@ -542,7 +550,7 @@ def apply_availability_gate(options: Sequence[Mapping[str, Any]], generators: Se
 # default. The field set and every default are identical at the published v0.16.0 (diffed: only the R3
 # validator and descriptions moved), where ``equities_seq`` is ``5.0.0`` rather than ``6.0.0``.
 #
-# ``equities`` -- the rank-2 sibling, and the one entry the CASCOR path reads (juniper-canopy#736). cascor's
+# ``equities`` -- the rank-2 sibling, and the first entry the CASCOR path read (juniper-canopy#736). cascor's
 # staging route forwarded every rendered form value, and the restart modal added ``n_samples`` / ``noise``,
 # which flat ``EquitiesParams`` does not declare: juniper-data ignores unknown keys, so they vanished without a
 # word (F-C3). This entry was captured 2026-10-26 from the PUBLISHED juniper-data 0.17.1 wheel -- PyPI's file,
@@ -552,12 +560,22 @@ def apply_availability_gate(options: Sequence[Mapping[str, Any]], generators: Se
 # installs under ``juniper_data/`` is byte-identical to release tag ``v0.17.1`` (``381e660b``). The six above name
 # a source commit; this one names a release, because a release is what a deployment runs.
 #
+# ``mnist`` -- the second rank-2 entry (juniper-canopy#778), closing the same F-C3 gap. The restart modal rendered
+# Noise for it and cascor forwarded the value, but juniper-data's ``MnistParams`` (generator ``3.0.0``, 13
+# properties) declares no ``noise``, so it was dropped without a word. Captured 2026-11-03 from the same published
+# wheel by the same tool into the same fixture, which now holds both generators; ``equities`` came back identical.
+# The wheel was installed with ``[api]`` only: the schema reads without the ``[mnist]`` extra, which gates
+# generating ``mnist`` and nothing else (``_UNAVAILABLE_REASONS``). Unlike ``equities`` it declares ``n_samples``,
+# which cascor forwards to juniper-data under that name, so the restart modal keeps Samples for it and loses only
+# Noise. ``flatten`` stays pinned as canopy#623 left it: ``SHAPE_DETERMINING_FIELDS`` withholds it from the form
+# and from what Apply collects, so a body the dashboard stages carries the registry seed's ``flatten: True``.
+#
 # Keyed by juniper-data generator NAME. Every rank-3 seed in ``model_registry.DATASET_TYPES`` must have
 # an entry (``TestEveryRecurrenceSeedIsDeclared``): a generator missing here is forwarded UNFILTERED,
 # which is the pre-W1.2 behaviour, and logged as a WARNING. On the cascor path a missing generator is
-# forwarded unfiltered as well, and that is the norm there: only ``equities`` has an entry. An entry is only
-# safe for a generator whose ``n_samples`` / ``noise`` reach juniper-data under those names. That rules out
-# ``spiral``, ``xor`` and ``gaussian``, whose sample counts cascor renames
+# forwarded unfiltered as well, and that is the norm there: only ``equities`` and ``mnist`` have entries.
+# An entry is only safe for a generator whose ``n_samples`` / ``noise`` reach juniper-data under those
+# names. That rules out ``spiral``, ``xor`` and ``gaussian``, whose sample counts cascor renames
 # (``TestNoCascorRenamedGeneratorIsDeclared``).
 #
 # Drift has two directions, and neither is silent. A parameter juniper-data adds is withheld from the
@@ -572,18 +590,22 @@ DECLARED_PARAM_DEFAULTS: dict[str, dict[str, Any]] = {
     "delay_product": {"n_steps": 2000, "lookback": 32, "horizon": 1, "sample_dt": 1.0, "train_ratio": 0.8, "val_ratio": 0.1, "seed": 0, "scaling": "identity", "lag1": 2, "lag2": 8, "jitter": 0.5, "n_components": 3, "frequencies": None, "amplitudes": None, "phases": None, "noise_std": 0.0},
     "equities_seq": {"symbols": None, "start_date": "2000-01-01", "end_date": None, "purchase_date": "2000-01-03", "basis_price_field": "close", "fundamentals_fill": "nan", "regression_target": "next_close", "week52_window": 252, "normalize_features": False, "max_symbols": 14, "incomplete_rows": None, "allow_truncation": None, "use_cache": True, "train_ratio": 0.8, "val_ratio": 0.1, "test_ratio": 0.1, "seed": 42, "lookback": 64},
     "equities": {"symbols": None, "start_date": "2000-01-01", "end_date": None, "purchase_date": "2000-01-03", "basis_price_field": "close", "fundamentals_fill": "nan", "regression_target": "next_close", "week52_window": 252, "normalize_features": False, "max_symbols": 14, "incomplete_rows": None, "allow_truncation": None, "use_cache": True, "train_ratio": 0.8, "val_ratio": 0.1, "test_ratio": 0.1, "seed": 42},
+    "mnist": {"sizing_mode": "carve", "val_percent": 40.0, "test_percent": 30.0, "val_ratio": 0.1, "dataset": "mnist", "n_samples": None, "flatten": True, "normalize": True, "one_hot_labels": True, "seed": 42, "train_ratio": 0.8, "test_ratio": 0.1, "shuffle": True},
 }
 
 # Where each entry above came from. The recurrence preview quotes the source of the generator it filtered
 # (``declared_params_source``, shown in its notes), so an operator can tell which producer contract canopy is
 # filtering against. ``DECLARED_PARAMS_SOURCE`` is the six sequence generators' capture, and keeps its name
 # because the recurrence tests pin it. ``EQUITIES_DECLARED_PARAMS_SOURCE`` is the release ``equities`` was
-# captured from.
+# captured from, and ``MNIST_DECLARED_PARAMS_SOURCE`` the same release, read again on the day ``mnist`` joined the
+# capture (juniper-canopy#778). That re-capture returned ``equities`` unchanged, so its source still stands.
 DECLARED_PARAMS_SOURCE: str = "juniper-data 462da218 (main, 2026-10-08); identical at v0.16.0"
 EQUITIES_DECLARED_PARAMS_SOURCE: str = "juniper-data 0.17.1 (published wheel; release tag v0.17.1 = 381e660b), captured 2026-10-26"
+MNIST_DECLARED_PARAMS_SOURCE: str = "juniper-data 0.17.1 (published wheel; release tag v0.17.1 = 381e660b), captured 2026-11-03"
 DECLARED_PARAMS_SOURCES: dict[str, str] = {
     **dict.fromkeys(("multi_sine", "mackey_glass", "irregular_sine", "ar_p", "delay_product", "equities_seq"), DECLARED_PARAMS_SOURCE),
     "equities": EQUITIES_DECLARED_PARAMS_SOURCE,
+    "mnist": MNIST_DECLARED_PARAMS_SOURCE,
 }
 
 

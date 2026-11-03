@@ -34,6 +34,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **juniper-canopy#778: the restart modal rendered Noise for `mnist`, and juniper-data dropped the value.** cascor
+  forwarded the re-staged `noise`, and juniper-data's `MnistParams` (generator `3.0.0`, 13 parameters) declares
+  none, so it vanished without a word: the F-C3 class juniper-canopy#736 closed for flat `equities`.
+  `DECLARED_PARAM_DEFAULTS` gains `mnist`, captured from the published juniper-data 0.17.1 wheel (sha256
+  `cce2c167…`, equal to PyPI's; 101 package files byte-identical to release tag `v0.17.1` = `381e660b`) by
+  `util/ad-hoc/2026-10-26_capture_published_generator_schemas.py`, whose default now captures both generators, with
+  its own provenance (`MNIST_DECLARED_PARAMS_SOURCE`). `src/tests/fixtures/juniper_data_tabular_generator_schemas.json`
+  holds both: the re-captured `equities` entry is identical, and only `captured` moved, from 2026-10-26 to
+  2026-11-03. The capture needed no `[mnist]` extra, because juniper-data imports `datasets` lazily, so an
+  `[api]`-only install serves `mnist`'s schema while it reports `available: false`. `_UNAVAILABLE_REASONS["mnist"]`
+  concerns generating `mnist`, which does need the extra, so it is unchanged, and its comment now says which.
+  - The restart modal renders Samples alone for `mnist` (`staged_typed_fields`).
+  - The cascor path shapes `mnist`'s staging body as it shapes `equities`', on Apply, the live swap and the
+    re-stage alike: the registry seed's `flatten: True`, plus what the operator edited. A staged `noise` is withheld
+    and named. `n_samples` rides in `params` under its own name, which cascor's `_translate_staged_config` passes
+    through to juniper-data.
+  - The schema drift job now compares 8 generators in 2 fixtures; against 0.17.1, none drifts.
+  - Tests: `test_cascor_staging_declared_params.py` (`TestMnistGetsTheDeclaredParamFilter`) and
+    `test_recurrence_request.py`. The `mnist` expectations that pinned its Noise field changed in
+    `test_restart_modal_restages_what_it_shows.py` and `test_empty_axis_commit_and_restage_zeros.py`.
 - **The Security Scans job's Bandit SARIF report is written and uploaded again.** `.github/workflows/ci.yml`
   installed bare `bandit`, whose CLI has no `sarif` formatter without the `bandit[sarif]` extra. So `bandit -f sarif`
   failed with `invalid choice: 'sarif'`, no report was written, the step warned "Bandit found security issues" for an

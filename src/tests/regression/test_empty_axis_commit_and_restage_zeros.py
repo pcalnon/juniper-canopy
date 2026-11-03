@@ -119,7 +119,8 @@ class TestRestartRestageKeepsZeros:
     # type (``recurrence_request.staged_typed_fields``). These two tests pinned the zeros on fields a type no
     # longer renders -- ``nn_spiral_number`` for circles, ``n_samples`` / ``noise`` for equities -- so each zero
     # is now checked on a type that renders it. All four typed fields are covered, rotations included, which
-    # the old circles case left at None.
+    # the old circles case left at None. juniper-canopy#778 took Noise away from mnist, whose MnistParams declares no
+    # noise, so the seeded case below checks a zero Samples; circles and spiral above carry the zero noise.
 
     def test_zero_counts_and_zero_noise_are_sent(self, dm):
         body = self._posted(
@@ -148,12 +149,13 @@ class TestRestartRestageKeepsZeros:
     def test_a_seeded_generator_keeps_the_seed_and_the_zero_typed_fields(self, dm):
         from model_registry import dataset_default_params
 
-        # mnist is seeded AND renders Samples and Noise, so the seed and both zeros must travel together.
+        # mnist is seeded AND renders Samples, so the seed and the zero must travel together. It renders no Noise
+        # (juniper-canopy#778), so that zero is not re-staged.
         mnist_seed = dataset_default_params("mnist")
         assert mnist_seed, "an empty seed would make a dropped seed look like a pass"
         mnist = self._posted(dm, {"dataset_type": "mnist", "n_samples": 0, "noise": 0.0})
         assert mnist["nn_dataset_elements"] == 0
-        assert mnist["nn_dataset_noise"] == 0.0
+        assert "nn_dataset_noise" not in mnist
         assert mnist["nn_dataset_params"] == mnist_seed
 
         # equities keeps its seed whole. It renders neither typed field -- flat EquitiesParams declares no

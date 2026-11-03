@@ -3,7 +3,7 @@
     "source": "juniper-data",
     "commit": "381e660b0e813b75350b12bcecfe65650df01537",
     "dirty": false,
-    "captured": "2026-10-26",
+    "captured": "2026-11-03",
     "what": "GENERATOR_REGISTRY[name]['params_class'].model_json_schema() -- the `schema` field of each GET /v1/generators entry",
     "tool": "util/ad-hoc/2026-10-26_capture_published_generator_schemas.py",
     "distribution": "juniper-data",
@@ -195,6 +195,125 @@
           }
         },
         "title": "EquitiesParams",
+        "type": "object"
+      }
+    },
+    {
+      "name": "mnist",
+      "version": "3.0.0",
+      "schema": {
+        "description": "Configuration parameters for MNIST dataset generation.\n\nLoads and preprocesses MNIST or Fashion-MNIST datasets from\nHugging Face Hub.",
+        "properties": {
+          "sizing_mode": {
+            "default": "carve",
+            "description": "Fixed to 'carve': this generator reads real data and cannot generate additional rows",
+            "title": "Sizing Mode",
+            "type": "string"
+          },
+          "val_percent": {
+            "default": 40.0,
+            "description": "Additive mode: validation rows as a percentage of the train count (default 40)",
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Val Percent",
+            "type": "number"
+          },
+          "test_percent": {
+            "default": 30.0,
+            "description": "Additive mode: test rows as a percentage of the train count (default 30)",
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Test Percent",
+            "type": "number"
+          },
+          "val_ratio": {
+            "default": 0.1,
+            "description": "Carve mode: fraction of the fixed dataset used for in-loop validation",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Val Ratio",
+            "type": "number"
+          },
+          "dataset": {
+            "default": "mnist",
+            "description": "Dataset to load: 'mnist' or 'fashion_mnist'",
+            "enum": [
+              "mnist",
+              "fashion_mnist"
+            ],
+            "title": "Dataset",
+            "type": "string"
+          },
+          "n_samples": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Limit number of samples (None for full dataset)",
+            "title": "N Samples"
+          },
+          "flatten": {
+            "default": true,
+            "description": "Flatten images to 1D (784 features) or keep 2D (28x28)",
+            "title": "Flatten",
+            "type": "boolean"
+          },
+          "normalize": {
+            "default": true,
+            "description": "Normalize pixel values to [0, 1]",
+            "title": "Normalize",
+            "type": "boolean"
+          },
+          "one_hot_labels": {
+            "default": true,
+            "description": "One-hot encode labels (10 classes)",
+            "title": "One Hot Labels",
+            "type": "boolean"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 42,
+            "description": "Random seed for reproducibility. Defaults to DEFAULT_GENERATOR_SEED so the documented default configuration is REPRODUCIBLE (juniper-data#319); pass None explicitly to opt into a fresh draw per call.",
+            "title": "Seed"
+          },
+          "train_ratio": {
+            "default": 0.8,
+            "description": "Fraction of data for training",
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "title": "Train Ratio",
+            "type": "number"
+          },
+          "test_ratio": {
+            "default": 0.1,
+            "description": "Fraction of data for testing",
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Test Ratio",
+            "type": "number"
+          },
+          "shuffle": {
+            "default": true,
+            "description": "Shuffle before splitting",
+            "title": "Shuffle",
+            "type": "boolean"
+          }
+        },
+        "title": "MnistParams",
         "type": "object"
       }
     }

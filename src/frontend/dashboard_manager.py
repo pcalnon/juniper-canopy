@@ -6768,8 +6768,8 @@ class DashboardManager:
         """The typed modal keys rendered for ``dataset_type``, in render order (juniper-canopy#735).
 
         A field is rendered when ``recurrence_request.staged_typed_fields`` names its staging key for the type:
-        all four for spiral, the generic fields a declared generator declares (none, for every shipped entry),
-        and Samples and Noise for any other generator. Nothing at ``⊥``.
+        all four for spiral, the generic fields a declared generator declares (Samples alone for ``mnist``, none for
+        every other shipped entry), and Samples and Noise for any other generator. Nothing at ``⊥``.
         """
         staged = staged_typed_fields(dataset_type)
         return tuple(key for _id, key, _label in RESTART_MODAL_TYPED_FIELDS if RESTART_MODAL_STAGE_KEYS[key] in staged)

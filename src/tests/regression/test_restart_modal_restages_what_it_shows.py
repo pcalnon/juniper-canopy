@@ -51,7 +51,8 @@ PREFILL = {"n_samples": 200, "noise": 0.1, "rotations": 1.5, "n_spirals": 2}
 EXPECTED_FIELDS = {
     "spirals": ("n_samples", "noise", "rotations", "n_spirals"),
     "xor": ("n_samples", "noise"),
-    "mnist": ("n_samples", "noise"),
+    # juniper-canopy#778: MnistParams declares n_samples and no noise, so mnist renders Samples alone.
+    "mnist": ("n_samples",),
     "circles": ("n_samples", "noise"),
     "moons": ("n_samples", "noise"),
     "gaussian": ("n_samples", "noise"),
@@ -191,6 +192,14 @@ class TestConfirmReStagesExactlyWhatTheModalDisplays:
         assert displayed["dataset_type"] == "circles"
         assert _confirm(manager, displayed, baseline_dataset, "cascor") is None
 
+    def test_mnist_re_stages_samples_and_no_noise(self, manager):
+        # juniper-canopy#778: the modal rendered Noise for mnist and Confirm re-staged it, and juniper-data's MnistParams
+        # dropped it. mnist now shows Samples alone, and Confirm sends the sample count and the seed, never a noise.
+        payload = _confirm(manager, {"dataset_type": "mnist", **PREFILL}, {"dataset_type": "circles", **PREFILL}, "cascor")
+        assert payload["nn_dataset_elements"] == PREFILL["n_samples"]
+        assert "nn_dataset_noise" not in payload
+        _assert_restages_what_it_shows(manager, payload, "mnist", "cascor")
+
     def test_a_field_edited_and_then_hidden_is_not_re_staged(self, manager):
         # Samples edited under circles, then the type moved to equities, which renders no Samples.
         payload = _confirm(manager, {"dataset_type": "equities", **PREFILL, "n_samples": 900}, {"dataset_type": "circles", **PREFILL}, "cascor")
@@ -237,8 +246,9 @@ class TestThePlanShowsWhatConfirmSends:
 
     def test_a_shown_value_the_filter_would_withhold_is_named(self, manager, monkeypatch):
         # No shipped declaration lets this happen: a rendered generic field is one the generator declares.
-        # A future entry that declares n_samples would render Samples, and R7 holds a value equal to the
-        # generator's own default. The plan must then say so rather than drop a visible value silently.
+        # mnist's entry declares n_samples and renders Samples (juniper-canopy#778), but its default is None, which
+        # the modal never sends. An entry whose n_samples default is a number would render Samples, and R7 holds a
+        # value equal to that default. The plan must then say so rather than drop a visible value silently.
         from dataset_schema import DECLARED_PARAM_DEFAULTS
 
         monkeypatch.setitem(DECLARED_PARAM_DEFAULTS, "fake_gen", {"n_samples": 100})
