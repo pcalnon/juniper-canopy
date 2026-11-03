@@ -6,7 +6,7 @@ annotated-doc==0.0.5
     # via fastapi
 annotated-types==0.8.0
     # via pydantic
-anyio==4.15.1
+anyio==4.16.0
     # via
     #   httpx
     #   starlette
@@ -29,7 +29,7 @@ colorama==0.4.6
     # via juniper-canopy (pyproject.toml)
 comm==0.2.3
     # via dash
-dash==4.4.1
+dash==4.5.0
     # via
     #   juniper-canopy (pyproject.toml)
     #   dash-bootstrap-components
@@ -131,7 +131,7 @@ python-dotenv==1.2.4
     # via
     #   pydantic-settings
     #   uvicorn
-python-multipart==0.0.32
+python-multipart==0.0.33
     # via juniper-canopy (pyproject.toml)
 pyyaml==6.0.3
     # via
@@ -183,7 +183,7 @@ uvloop==0.23.0
     # via uvicorn
 watchfiles==1.3.0
     # via uvicorn
-websockets==17.3
+websockets==17.4
     # via
     #   juniper-canopy (pyproject.toml)
     #   juniper-cascor-client
