@@ -832,7 +832,7 @@ Review findings at GitHub Security → Code scanning. The `ci.yml` `Quality Gate
 
 - Workflow permissions: `actions: read`, `contents: read`, `security-events: write`.
 - Language matrix is Python only.
-- `ci.yml` `upload-sarif` uses `continue-on-error: true`, so a failed Bandit SARIF upload does not fail `Security Scans`. A failed CodeQL analyze step **does** fail `Analyze (python)`.
+- `ci.yml` `upload-sarif` is `continue-on-error` on every event except a pull request. On a PR a failed Bandit SARIF upload fails `Security Scans`, a required check, with the cause in the step log. No ruleset requires the `Bandit` check that code scanning creates from the upload, so before this a failed upload was silent (juniper-canopy#780). On pushes and dispatches a failed upload still does not fail `Security Scans`. A failed CodeQL analyze step **does** fail `Analyze (python)`.
 
 ### Runbook: Release publishing
 

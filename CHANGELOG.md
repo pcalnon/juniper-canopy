@@ -34,6 +34,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Security Scans job's Bandit SARIF report is written and uploaded again.** `.github/workflows/ci.yml`
+  installed bare `bandit`, whose CLI has no `sarif` formatter without the `bandit[sarif]` extra. So `bandit -f sarif`
+  failed with `invalid choice: 'sarif'`, no report was written, the step warned "Bandit found security issues" for an
+  argument error, and the upload's `continue-on-error: true` kept the job green over `Path does not exist:
+  reports/security/bandit.sarif` (main run 40942351409, job 123689681187). The job now installs `"bandit[sarif]"`,
+  as `security-scan.yml` and every sibling repository's `ci.yml` already do. Run on `src/` with `.bandit.yml`,
+  Bandit 1.9.4 exits 0 with 0 results, so the upload adds no alert. Found by the Cursor flood-3 evaluation: juniper-ml
+  `notes/JUNIPER_2026-10-08_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-3-DISPOSITION.md` §4.
+- **The memory-budget gate's own 40 tests now run in the required unit legs, and the Codecov upload sends the
+  repository's token.** #516 (2026-08-25) ported `util/memory_budget_check.py` with its suite at
+  `src/tests/test_memory_budget_check.py`, the top of the test tree, which no CI lane reaches: the unit job selects
+  by path (`src/tests/unit/`, `regression/`, `contract/`, `performance/`), the integration and ui jobs name one
+  directory each, and the scheduled lane walks `testpaths` under `-m "slow or integration"`, which deselects an
+  unmarked module. So the negative controls behind the `Memory Budget` check had never run in CI. The suite moves to
+  `src/tests/unit/test_memory_budget_check.py`, its repo root goes from `parents[2]` to `parents[3]`, and it gains
+  `pytestmark = pytest.mark.unit` for `pytest -m unit` runs (the unit job's selector is negative, so the path is
+  what CI keys on). No test body changed, and the checker's docstring now names the real path.
+  `src/tests/regression/test_ci_lane_wiring.py` gains `TestNoTestModuleSitsAtTheTopOfTheTestTree`, because its
+  directory guard walks subdirectories and could not see a module at this level; restoring the old layout fails it.
+  The unit lane now selects 8,224 of 8,228 collected tests, up from 8,182 of 8,186: the 40 of this suite plus the
+  guard's 2. The twin of juniper-cascor#734. Separately, the Codecov step in `.github/workflows/ci.yml` now passes
+  `token: ${{ secrets.CODECOV_TOKEN }}`, as juniper-data's does, after the owner added the secret on 2026-10-29.
+  Until then its uploads were refused ("Token required - not valid tokenless upload") inside a step that stays
+  green under `fail_ci_if_error: false`: all 24 in the six `ci.yml` runs from 2026-10-28 20:56Z to 2026-10-29
+  19:41Z. A Dependabot PR reads the Dependabot secret store, which does not hold the token, so its upload stays
+  tokenless. Found by the Cursor flood-3 evaluation: juniper-ml
+  `notes/JUNIPER_2026-10-08_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-3-DISPOSITION.md` §4.
 - **The lockfile regen could have committed an empty `requirements.lock` without failing.** The commit step built
   its payload with `--arg contents "$(base64 -w0 requirements.lock)"`. A failure inside a command substitution used
   as an argument does not trip `set -e`, so a failing `base64` would have handed `jq` an empty string and the step
@@ -155,6 +182,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`agents-md-touch-up.yml` pins `actions/checkout` to a commit SHA (owner ruling 2026-11-03).** It checked out with
+  the `v7.0.1` tag, the only tag-only `actions/checkout` in `.github/workflows/`. It now uses
+  `3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1`, the commit that tag resolves to and the pin every other
+  workflow here uses, so behaviour is unchanged. A census of the nine Juniper repositories' `main` on 2026-11-01 found
+  249 `actions/checkout` uses, 242 pinned to that SHA; the seven tag-only ones were this workflow's copies, one per
+  repository. juniper-data#503 pinned juniper-data's, and this change is one of the seven that pin the rest.
+- **A failed Bandit SARIF upload now fails `Security Scans` on a pull request (owner ruling 2026-10-30).**
+  `.github/workflows/ci.yml`'s upload step is `continue-on-error: ${{ github.event_name != 'pull_request' }}`, as in
+  juniper-cascor#735. No ruleset here requires the `Bandit` check that code scanning creates from the upload, so a
+  failed upload was silent: juniper-canopy#780 found the step uploading nothing while `Security Scans` stayed green.
+  `Security Scans` is required, so a PR now shows the failure, with the cause in the step log. Pushes and dispatches
+  still tolerate it. `docs/ci_cd/CICD_MANUAL.md` says so. Found in the 2026-10-08 flood-3 disposition (juniper-ml
+  `notes/JUNIPER_2026-10-08_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-3-DISPOSITION.md` §8).
 - **Temporary files go in the repo's gitignored `tmp/`, never `/tmp` (owner directive, 2026-10-26), and the owner's
   rulings on it are applied.** `/tmp/` is ignored, and `AGENTS.md` § Temporary files carries the rule and the
   rulings, retention included. `juniper-check-doc-links` passes `--exclude tmp` in the pre-commit hook and in CI,
