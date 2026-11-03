@@ -13,6 +13,19 @@ Tests for ``util/memory_budget_check.py`` (P2 of the shared-session-memory plan)
 ``scripts/`` + ``tests/``), so this suite IS the gate -- the same gap that left
 ``tests/test_assert_release_tag.py`` unwired and its vacuous-pass guard unrun.
 
+WHERE THIS FILE LIVES, AND WHY IT IS MARKED. #516 (2026-08-25) ported this suite to
+``src/tests/test_memory_budget_check.py``, the top of the test tree, and there it ran in
+NO CI lane. ``ci.yml``'s unit job selects by PATH (``src/tests/unit/``, ``regression/``,
+``contract/``, ``performance/``); the integration and ui jobs each name one directory;
+the scheduled lane walks ``testpaths`` under ``-m "slow or integration"``, which deselects
+an unmarked module; and ``conftest.py`` adds no marker by directory. The unit job's PATH
+list is what runs it now. That job's selector is negative (``not requires_cascor and not
+requires_server and not slow``), so it takes this module with or without a marker;
+``pytestmark`` below serves ``pytest -m unit`` runs, such as AGENTS.md's quick start. Move
+the file out of ``src/tests/unit/`` and it silently stops running in CI again;
+``src/tests/regression/test_ci_lane_wiring.py`` fails if a test module sits at the top of
+``src/tests/``.
+
 The load-bearing cases are the ones a well-meaning refactor silently breaks:
 
 * the **no-worsening rule** -- over-ceiling alone must NOT fail; it must also have
@@ -36,10 +49,15 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-# canopy keeps tests in src/tests/ (pyproject: testpaths = ["src/tests"]),
-# so the repo root is TWO levels up, not one. juniper-ml's copy of this file
-# uses parents[1] because its tests live at the top level.
-REPO_ROOT = Path(__file__).resolve().parents[2]
+import pytest
+
+pytestmark = pytest.mark.unit
+
+# canopy keeps this file in src/tests/unit/, so the repo root is THREE levels
+# up. juniper-ml's copy uses parents[1] because its tests live at the top level.
+# A wrong depth is loud: MODULE_PATH then names a missing file, and exec_module
+# below raises FileNotFoundError, which is a collection error.
+REPO_ROOT = Path(__file__).resolve().parents[3]
 MODULE_PATH = REPO_ROOT / "util" / "memory_budget_check.py"
 
 _spec = importlib.util.spec_from_file_location("memory_budget_check", MODULE_PATH)

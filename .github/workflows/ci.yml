@@ -80,7 +80,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -139,7 +139,7 @@ jobs:
           fetch-depth: 1
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -288,10 +288,15 @@ jobs:
             reports/htmlcov/
           retention-days: 30
 
+      # CODECOV_TOKEN is an Actions repository secret (owner ruling, 2026-10-29). Without it the
+      # uploads were refused -- "Token required - not valid tokenless upload" -- inside this step,
+      # which stays green because fail_ci_if_error is false. A Dependabot PR reads the Dependabot
+      # secret store, which does not hold the token, so its upload is still tokenless.
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
         if: always()
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: reports/coverage.xml
           flags: unittests
           fail_ci_if_error: false
@@ -321,7 +326,7 @@ jobs:
           fetch-depth: 1
 
       - name: Set up Python ${{ env.PYTHON_TEST_VERSION }}
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: ${{ env.PYTHON_TEST_VERSION }}
           cache: pip
@@ -386,7 +391,7 @@ jobs:
           fetch-depth: 1
 
       - name: Set up Python ${{ env.PYTHON_TEST_VERSION }}
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: ${{ env.PYTHON_TEST_VERSION }}
           cache: pip
@@ -450,7 +455,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Python ${{ env.PYTHON_TEST_VERSION }}
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: ${{ env.PYTHON_TEST_VERSION }}
           cache: pip
@@ -533,16 +538,21 @@ jobs:
         # this step ran with ZERO rules and could not fail.
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           # python-version: ["3.12", "3.13", "3.14"]
           python-version: "3.14"
           cache: pip
 
       - name: Install security tools
+        # bandit[sarif], not bare bandit: the SARIF formatter ships in that extra. Bare bandit
+        # answered "-f sarif" with "invalid choice: 'sarif'", wrote no report, the step below
+        # warned "Bandit found security issues" for an argument error, and the upload's
+        # continue-on-error hid "Path does not exist" (found 2026-10-29, main run 40942351409).
+        # security-scan.yml and every sibling repo's ci.yml already install the extra.
         run: |
           python -m pip install --upgrade "pip>=26.1.1"
-          pip install bandit pip-audit
+          pip install "bandit[sarif]" pip-audit
 
       - name: Create reports directory
         run: mkdir -p reports/security
@@ -568,7 +578,11 @@ jobs:
         if: always()
         with:
           sarif_file: reports/security/bandit.sarif
-        continue-on-error: true
+        # No ruleset here requires the `Bandit` check that code scanning creates from this upload, so a
+        # failed upload used to be silent: juniper-canopy#780 found this step uploading nothing while
+        # Security Scans stayed green. Security Scans is required, so on a PR a failed upload now turns
+        # it red with the cause in this step's log. Every other event still tolerates it.
+        continue-on-error: ${{ github.event_name != 'pull_request' }}
 
       - name: Run pip-audit (Dependency Vulnerabilities)
         id: pip_audit
@@ -630,7 +644,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Python ${{ env.PYTHON_TEST_VERSION }}
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: ${{ env.PYTHON_TEST_VERSION }}
           cache: pip
@@ -692,7 +706,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           # python-version: ["3.12", "3.13", "3.14"]
           python-version: "3.14"
@@ -750,7 +764,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           # python-version: ["3.12", "3.13", "3.14"]
           python-version: "3.14"
@@ -852,7 +866,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: "3.14"
 
@@ -977,7 +991,7 @@ jobs:
           fetch-depth: 0 # need the base tip to apply the no-worsening rule
 
       - name: Set up Python ${{ env.PYTHON_TEST_VERSION }}
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.PYTHON_TEST_VERSION }}
 
