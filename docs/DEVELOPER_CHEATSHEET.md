@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.5
-**Date**: 2026-10-08
+**Version**: 1.0.10
+**Date**: 2026-11-04
 **Project**: juniper-canopy
 
 ---
@@ -240,6 +240,16 @@ cd src && pytest tests/regression/test_selection_reachability_guardrails.py -k X
 ```
 
 > See: [AGENTS_REFERENCE.md § Sidebar model summary](AGENTS_REFERENCE.md#sidebar-model-summary-x11)
+
+### 12. Stage MNIST without a silent Noise
+
+`DECLARED_PARAM_DEFAULTS["mnist"]` is the juniper-data 0.17.1 `MnistParams` capture (13 fields, `n_samples` declared, `noise` absent, `flatten` declared). The restart modal renders Samples alone. On the cascor service path, `shape_stage_payload` sends the seed `{"flatten": true}` plus edits, with Samples as `params.n_samples`. A posted `nn_dataset_noise` is withheld and named at INFO, with no WARNING. Do not add an entry for `spiral`, `xor`, or `gaussian`: cascor renames their sample counts. Demo mode stores the posted body and does not shape it. Landed with canopy#778.
+
+```bash
+cd src && pytest tests/regression/test_cascor_staging_declared_params.py::TestMnistGetsTheDeclaredParamFilter -q
+```
+
+> See: [REFERENCE.md § Declared-param staging](REFERENCE.md#declared-param-staging-mnist)
 
 ---
 

@@ -1,8 +1,8 @@
 # Juniper Canopy User Manual
 
-**Version:** 0.26.3
+**Version:** 0.26.8
 **Status:** ✅ Production Ready
-**Last Updated:** October 8, 2026
+**Last Updated:** November 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -232,7 +232,7 @@ When cascor opens that refusal with `[start_fresh_required]`:
 2. The pending-dataset banner, "Dataset change pending — restart training to apply.", stays up, because the dataset is still staged.
 3. Click **Stop & Restart with new dataset**.
 4. Turn **Start fresh** on. It defaults to off. Off would continue the narrow network.
-5. Confirm. Parameter edits in the expanded section are applied first, then the restart. Confirm stops the current run if one is active, waits for it to settle, and starts on the staged dataset.
+5. Confirm. Parameter edits in the expanded section are applied first, then the restart. If a dataset field the modal shows for this type differs from the value it opened with, Confirm re-stages that field first. MNIST shows Samples and does not show Noise. See [What Apply sends for a declared generator](#what-apply-sends-for-a-declared-generator). Confirm stops the current run if one is active, waits for it to settle, and starts on the staged dataset.
 
 | Start fresh | Result |
 |-------------|--------|
@@ -644,7 +644,9 @@ frontend:
 
 - **Service mode (juniper-cascor backend):** datasets come from the juniper-data service. In the
   sidebar's **Dataset** section pick a generator (the list is `GET /api/dataset/generators`, proxied
-  from juniper-data), fill in its parameters and click **Apply** (`POST /api/stage_dataset`). The
+  from juniper-data), fill in its parameters and click **Apply** (`POST /api/stage_dataset`).
+  Apply does not forward every displayed default for `mnist` or `equities`. See
+  [What Apply sends for a declared generator](#what-apply-sends-for-a-declared-generator). The
   staged dataset takes effect through **Restart with new dataset** (`POST /api/train/restart`) or —
   with **Experimental Functions** enabled and a run in progress — the **Live Switch**
   (`POST /api/live_dataset_swap`).
@@ -655,6 +657,53 @@ frontend:
   sample per row, the last column is the integer class label, a header row is auto-detected, and
   files are capped at 10 MB / 50 000 rows / 100 features. JSON, NumPy `.npy` and HDF5 `.h5` files
   are **not** accepted. In service mode all three actions are refused with HTTP `400`.
+
+### What Apply sends for a declared generator
+
+On the cascor service path, `mnist` and flat `equities` have a declared-parameter entry
+(`dataset_schema.DECLARED_PARAM_DEFAULTS`, captured from the published juniper-data 0.17.1 wheel).
+`ServiceBackend.stage_dataset` and `swap_dataset_live` run `recurrence_request.shape_stage_payload`
+before cascor sees the body (juniper-canopy#736, `mnist` since #778). Cascor receives the registry
+seed plus the fields you edited. A field still at the value the form showed is left out, and
+juniper-data fills its own default. A parameter the generator does not declare is not sent.
+
+| Generator | Restart modal | Untouched Apply, as cascor receives it |
+| --- | --- | --- |
+| `mnist` | Samples only. Noise is not a field. | `{"dataset_type": "mnist", "params": {"flatten": true}}` |
+| `equities` | Neither Samples nor Noise. | The three-key registry seed: `symbols` `["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"]`, `fundamentals_fill` `"drop"`, `normalize_features` `true`. |
+| `spirals` | Samples, Noise, rotations, and spirals. | Not shaped. Those typed fields are forwarded as staged. |
+| Other rank-2 types with no entry (`circles`, `moons`, `xor`, `gaussian`, `checkerboard`) | Samples and Noise. | Not shaped. The posted body is forwarded. |
+
+Changing Samples on MNIST becomes `params.n_samples`, and `flatten: true` stays. The form does not
+render `flatten` (`SHAPE_DETERMINING_FIELDS`). The registry seed for `mnist` is that one key
+(`model_registry`). It is what keeps the images rank-2. Do not stage `flatten: false`.
+
+An edit such as `dataset: fashion_mnist` is sent with the seed. Neighbours you did not touch
+(`normalize`, `one_hot_labels`) are not. Setting a value back to the default the form showed reads
+as untouched, so it is left out too.
+
+A client that still posts `nn_dataset_noise` for `mnist` (a tab rendered before #778) is not a
+WARNING. The INFO line from `juniper_canopy.backend.recurrence_request` names
+`not forwarded: nn_dataset_noise`. That field is canopy's own control. A key inside
+`nn_dataset_params` that the capture does not list is a WARNING, and the line names the capture
+(`MNIST_DECLARED_PARAMS_SOURCE`: juniper-data 0.17.1, captured 2026-11-03).
+
+Demo mode does not run this filter. `DemoMode.stage_dataset` stores the posted body. The modal
+still hides Noise for `mnist`, so Confirm does not re-stage it.
+
+The `[mnist]` extra is required to generate MNIST. It is not required to read the parameter
+schema. The dropdown can show MNIST as unavailable ("needs juniper-data's optional dataset extra")
+on an install that still served the schema this entry was captured from.
+
+Sequence generators are not a cascor dataset. Their declared-param entries are read when a
+recurrence Start is shaped. The restart modal shows them no Samples and no Noise, same as `equities`.
+
+```bash
+cd src && pytest tests/regression/test_cascor_staging_declared_params.py::TestMnistGetsTheDeclaredParamFilter -q
+```
+
+Developer contract: [REFERENCE.md § Declared-param staging](REFERENCE.md#declared-param-staging-mnist)
+and [AGENTS_REFERENCE.md § Restart modal](AGENTS_REFERENCE.md#restart-modal-f2).
 
 **Data Source:**
 
