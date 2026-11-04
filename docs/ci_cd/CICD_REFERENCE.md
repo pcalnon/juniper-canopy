@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-10-26
-**Version:** 0.29.0
+**Last Updated:** 2026-11-04
+**Version:** 0.29.3
 **Status:** Current
 
 ## Table of Contents
@@ -188,7 +188,7 @@ lint:
 | `.github/workflows/pr-base-branch-guard.yml` | `pull_request` + `merge_group`                                       | Fail if PR base is not the default branch            |
 | `.github/workflows/scheduled-tests.yml`     | daily cron + manual                                                  | Slow / integration tests                             |
 | `.github/workflows/juniper-data-schema-drift.yml` | daily cron, manual, `repository_dispatch` `juniper-data-published`, path-filtered PR | Generator-schema snapshots vs the released juniper-data. See [`juniper-data-schema-drift.yml`](#juniper-data-schema-driftyml) |
-| `.github/workflows/agents-md-touch-up.yml`  | PR paths `AGENTS.md`                                                 | Verify `Last Updated` date (does not rewrite)        |
+| `.github/workflows/agents-md-touch-up.yml`  | PR paths `AGENTS.md`                                                 | Verify `Last Updated`. [Runbook](CICD_MANUAL.md#runbook-agentsmd-date-check) |
 | `.github/workflows/claude.yml`              | comment, submitted review, or new/assigned issue with `@claude`      | Optional assistant; not a merge gate. See [Claude Code workflow](#claude-code-workflow) |
 
 ## Main CI Workflow (`ci.yml`)
@@ -491,6 +491,17 @@ uv pip compile pyproject.toml \
 - The compiler input is `pyproject.toml`. Dependabot's pip floor edits land in `conf/requirements_ci.txt` (repo-root `requirements.txt` resolves to that file through the `conf/requirements.txt` symlink). A package absent from `pyproject.toml` stays out of `requirements.lock`. `--upgrade` can still move other pins in the same commit.
 - Commit, only when `requirements.lock` changed, via `createCommitOnBranch` (`expectedHeadOid` is the checked-out HEAD). Push subjects: `[dependabot skip] Update requirements.lock` on `push`, `chore(deps): auto-regenerate requirements.lock after pyproject change` on `pull_request`.
 - Lockfile Freshness (`ci.yml` job `lockfile-check`) is a separate `--constraint` compile. A skipped regen stays green while the current pins still satisfy `pyproject.toml`.
+
+### `agents-md-touch-up.yml`
+
+Operator runbook: [AGENTS.md date check](CICD_MANUAL.md#runbook-agentsmd-date-check).
+
+- Workflow name `AGENTS.md Date Check`. Job id `verify-date`, check name `Verify AGENTS.md Last Updated`.
+- Triggers: `pull_request` types `opened`, `reopened`, `synchronize`, paths `AGENTS.md`. Concurrency group `agents-md-date-check-<pull request number>` cancels the in-progress run.
+- Permissions `contents: read`. Fork pull requests run. The job has no secret and creates no commit.
+- Checkout is SHA-pinned with comment `# v7.0.1`, `fetch-depth: 0`, `ref` the pull request head SHA. Leave the SHA in the workflow file.
+- The step passes when the first `**Last Updated**:` value equals today's UTC date, or when `git diff <base sha>...HEAD -- AGENTS.md` adds a `**Last Updated**:` line whose value is a `YYYY-MM-DD` date that is not in the future. `<base sha>` is `github.event.pull_request.base.sha`. A missing field warns and passes. A malformed or future value fails.
+- `ci.yml` job `docs` (`Documentation Links`) runs `juniper-lint-agents-md-header` and `juniper-lint-agents-md-version` from `juniper-ci-tools>=0.9.0,<0.10.0` with no arguments, on every CI run. Header schema (0.9.1): the block before the first `---` or `## ` holds `Project`, `Repository`, `Author`, `License`, `Version`, and `Last Updated` in that relative order, each non-empty, date `YYYY-MM-DD`. Extra bullets may sit between them. Version lint: one whole-file `**Version**: <token>` equals `[project].version`. A missing version line is a skip (exit 0) from that lint; the header lint still fails it. Two version lines exit 2.
 
 ### `publish.yml`
 
@@ -826,7 +837,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-10-26
-**Version:** 0.29.0
+**Last Updated:** 2026-11-04
+**Version:** 0.29.3
 **Maintained By:** Development Team
 **Status:** ✅ Current
