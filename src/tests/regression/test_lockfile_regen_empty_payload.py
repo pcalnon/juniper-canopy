@@ -1,0 +1,356 @@
+"""The lockfile regen refuses an empty payload before it can sign a commit.
+
+``#775`` moved ``base64 -w0`` out of a ``jq --arg`` substitution. A failure inside
+``$(...)`` used as an argument does not trip ``set -e``, so a failing encode would
+have handed ``jq`` an empty string and ``createCommitOnBranch`` would have signed a
+commit that empties ``requirements.lock``. The encode is now its own assignment,
+and an empty result exits 1 before ``jq`` or ``gh``.
+
+The shell under test is the workflow's own ``run:`` block, not a copy. ``gh`` is a
+stub. The two commit-body paths the step writes are relocated under ``tmp_path``
+for the cases that reach ``jq``; the workflow text itself is not modified.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import os
+import re
+import subprocess  # nosec B404 - the workflow's own shell, with stub gh and base64 on PATH
+from pathlib import Path
+
+import pytest
+import yaml
+
+pytestmark = [pytest.mark.regression, pytest.mark.unit]
+
+REPO = Path(__file__).resolve().parents[3]
+WORKFLOW = REPO / ".github" / "workflows" / "lockfile-update.yml"
+STEP_NAME = "Commit updated lockfile (GitHub-signed, via API)"
+TOKEN = "lockfile-regen-token-not-real"
+REPO_NAME = "pcalnon/juniper-canopy"
+BRANCH = "dependabot/pip/example"
+PR_HEADLINE = "chore(deps): auto-regenerate requirements.lock after pyproject change"
+PUSH_HEADLINE = "[dependabot skip] Update requirements.lock"
+LOCK_BYTES = b"# lock\npackage==1.2.3\n"
+SIGNED = {
+    "data": {
+        "createCommitOnBranch": {
+            "commit": {"oid": "abc123", "url": "https://example.test/commit/abc123"},
+        }
+    }
+}
+
+_GH = """\
+#!/bin/bash
+{
+  printf '%s' gh
+  for arg in "$@"; do printf '\\t%s' "$arg"; done
+  printf '\\n'
+} >> "$GH_LOG"
+if [[ "${GH_RC:-0}" -ne 0 ]]; then
+  printf '%s\\n' "${GH_ERR:-gh failed}" >&2
+  exit "${GH_RC}"
+fi
+printf '%s' "${GH_STDOUT-}"
+"""
+
+_JQ_POISON = """\
+#!/bin/bash
+printf 'jq\\n' >> "$JQ_LOG"
+exit 97
+"""
+
+_B64_FAIL_WITH_BYTES = """\
+#!/bin/bash
+printf 'called\\n' >> "$B64_LOG"
+printf 'encoded-but-failed'
+exit 1
+"""
+
+_B64_EMPTY = """\
+#!/bin/bash
+printf 'called\\n' >> "$B64_LOG"
+exit 0
+"""
+
+_B64_FORBIDDEN = """\
+#!/bin/bash
+printf 'called\\n' >> "$B64_LOG"
+exit 99
+"""
+
+
+def _workflow() -> dict:
+    doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    # PyYAML (YAML 1.1) reads the bare `on:` key as boolean True.
+    doc["on"] = doc.pop(True, doc.get("on"))
+    return doc
+
+
+def _step() -> dict:
+    steps = _workflow()["jobs"]["update-lockfile"]["steps"]
+    found = [step for step in steps if step.get("name") == STEP_NAME]
+    assert len(found) == 1, STEP_NAME
+    assert "run" in found[0]
+    return found[0]
+
+
+def _script() -> str:
+    return _step()["run"]
+
+
+def _uncommented(script: str) -> str:
+    return "\n".join(line for line in script.splitlines() if not line.lstrip().startswith("#"))
+
+
+def _ci_paths(script: str) -> tuple[str, str]:
+    """The two absolute paths the commit step writes. Read from the step, not hardcoded."""
+    found = re.findall(r"(/\S*lockfile-commit(?:-result)?\.json)", script)
+    body = [path for path in found if path.endswith("/lockfile-commit.json")]
+    result = [path for path in found if path.endswith("/lockfile-commit-result.json")]
+    assert body and result, found
+    assert len(set(body)) == 1 and len(set(result)) == 1
+    return body[0], result[0]
+
+
+def _write_exe(path: Path, body: str) -> None:
+    path.write_text(body, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _git(repo: Path, *args: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": str(repo),
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
+    return subprocess.run(  # nosec B603 B607 - git against the temp repo only
+        ["git", *args],
+        cwd=repo,
+        env=env,
+        check=not capture,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _init_repo(repo: Path, text: str) -> str:
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "t@t")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "config", "commit.gpgsign", "false")
+    _git(repo, "config", "core.autocrlf", "false")
+    (repo / "requirements.lock").write_bytes(text.encode("utf-8"))
+    _git(repo, "add", "requirements.lock")
+    _git(repo, "commit", "-q", "-m", "base")
+    return _git(repo, "rev-parse", "HEAD", capture=True).stdout.strip()
+
+
+class _Result:
+    def __init__(self, code: int, out: str, err: str, gh_log: Path, jq_log: Path, b64_log: Path, body: Path, result: Path, head: str) -> None:
+        self.code = code
+        self.out = out
+        self.err = err
+        self.gh = gh_log.read_text(encoding="utf-8") if gh_log.is_file() else ""
+        self.jq = jq_log.read_text(encoding="utf-8") if jq_log.is_file() else ""
+        self.b64 = b64_log.read_text(encoding="utf-8") if b64_log.is_file() else ""
+        self.body = body
+        self.result = result
+        self.head = head
+
+    @property
+    def combined(self) -> str:
+        return self.out + self.err
+
+
+def _run(
+    tmp: Path,
+    *,
+    committed: str = LOCK_BYTES.decode("utf-8"),
+    dirty: str | None = None,
+    delete_lock: bool = False,
+    event: str = "pull_request",
+    base64_stub: str | None = None,
+    poison_jq: bool = False,
+    gh_stdout: str = "",
+    gh_rc: int = 0,
+    relocate_writes: bool = False,
+    script: str | None = None,
+) -> _Result:
+    source = script if script is not None else _script()
+    body_path, result_path = _ci_paths(source)
+    executed = source
+    local_body = tmp / "lockfile-commit.json"
+    local_result = tmp / "lockfile-commit-result.json"
+    if relocate_writes:
+        # The workflow's paths stay in the file CI runs. The test copy writes beside the repo.
+        executed = source.replace(body_path, str(local_body)).replace(result_path, str(local_result))
+        assert body_path not in executed and result_path not in executed
+    repo = tmp / "repo"
+    head = _init_repo(repo, committed)
+    if dirty is not None:
+        (repo / "requirements.lock").write_text(dirty, encoding="utf-8")
+    if delete_lock:
+        (repo / "requirements.lock").unlink()
+    bin_dir = tmp / "bin"
+    bin_dir.mkdir()
+    _write_exe(bin_dir / "gh", _GH)
+    if poison_jq:
+        _write_exe(bin_dir / "jq", _JQ_POISON)
+    if base64_stub is not None:
+        _write_exe(bin_dir / "base64", base64_stub)
+    gh_log = tmp / "gh.log"
+    jq_log = tmp / "jq.log"
+    b64_log = tmp / "b64.log"
+    env = {
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '/usr/bin:/bin')}",
+        "HOME": str(tmp),
+        "LANG": "C",
+        "GH_TOKEN": TOKEN,
+        "GH_LOG": str(gh_log),
+        "JQ_LOG": str(jq_log),
+        "B64_LOG": str(b64_log),
+        "GH_STDOUT": gh_stdout,
+        "GH_RC": str(gh_rc),
+        "EVENT_NAME": event,
+        "GITHUB_REPOSITORY": REPO_NAME,
+        "BRANCH": BRANCH,
+    }
+    proc = subprocess.run(  # nosec B603 B607 - bash runs the extracted workflow step
+        ["bash", "-c", executed],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    combined = proc.stdout + proc.stderr
+    assert TOKEN not in combined, "the commit step printed the token"
+    return _Result(proc.returncode, proc.stdout, proc.stderr, gh_log, jq_log, b64_log, local_body, local_result, head)
+
+
+def _mutation(result: _Result) -> dict:
+    assert result.body.is_file(), result.combined
+    payload = json.loads(result.body.read_text(encoding="utf-8"))
+    return payload["variables"]["input"]
+
+
+def test_the_encode_is_its_own_statement_ahead_of_jq() -> None:
+    """The defect was ``--arg contents "$(base64 ...)"``. A comment naming it must not count."""
+    step = _step()
+    assert step["if"] == "steps.gate.outputs.proceed == 'true'"
+    code = _uncommented(step["run"])
+    for line in code.splitlines():
+        assert not ("base64" in line and ("jq" in line or "--arg" in line)), line
+    assign = "LOCK_B64=$(base64 -w0 requirements.lock)"
+    guard = '[ -z "${LOCK_B64}" ]'
+    assert assign in code
+    assert guard in code
+    assert code.index("set -euo pipefail") < code.index(assign) < code.index(guard) < code.index("jq -n")
+    assert "exit 1" in code[code.index(guard) : code.index("jq -n")]
+    body, result = _ci_paths(step["run"])
+    assert Path(body).is_absolute() and Path(result).is_absolute()
+    assert not Path(body).is_relative_to(REPO)
+    assert not Path(result).is_relative_to(REPO)
+
+
+def test_an_empty_lockfile_is_not_committed(tmp_path: Path) -> None:
+    """GNU ``base64 -w0`` of an empty file is empty and exits 0. The guard has to refuse that."""
+    result = _run(tmp_path, dirty="", poison_jq=True)
+    assert result.code == 1, result.combined
+    assert "base64 produced an empty payload" in result.combined
+    assert "lockfile NOT committed" in result.combined
+    assert result.jq == ""
+    assert result.gh == ""
+    assert not result.body.exists()
+
+
+def test_an_empty_encode_of_a_nonempty_file_is_not_committed(tmp_path: Path) -> None:
+    """The guard reads the payload. A non-empty lockfile whose encode is empty is still refused."""
+    result = _run(tmp_path, dirty="still-has-bytes\n", base64_stub=_B64_EMPTY, poison_jq=True)
+    assert result.code == 1, result.combined
+    assert "base64 produced an empty payload" in result.combined
+    assert result.b64 == "called\n"
+    assert result.jq == ""
+    assert result.gh == ""
+
+
+def test_a_failing_encode_that_printed_bytes_does_not_reach_jq(tmp_path: Path) -> None:
+    """``set -e`` has to fire on the assignment. The emptiness check would let these bytes through."""
+    result = _run(tmp_path, dirty="changed\n", base64_stub=_B64_FAIL_WITH_BYTES, poison_jq=True)
+    assert result.code != 0, result.combined
+    assert "empty payload" not in result.combined
+    assert result.b64 == "called\n"
+    assert result.jq == ""
+    assert result.gh == ""
+
+
+def test_a_missing_lockfile_does_not_reach_jq(tmp_path: Path) -> None:
+    result = _run(tmp_path, delete_lock=True, poison_jq=True)
+    assert result.code != 0, result.combined
+    assert result.jq == ""
+    assert result.gh == ""
+
+
+def test_an_unchanged_lockfile_commits_nothing(tmp_path: Path) -> None:
+    result = _run(tmp_path, base64_stub=_B64_FORBIDDEN, poison_jq=True)
+    assert result.code == 0, result.combined
+    assert "Lockfile already up to date" in result.combined
+    assert result.b64 == ""
+    assert result.jq == ""
+    assert result.gh == ""
+
+
+@pytest.mark.parametrize(
+    ("event", "headline"),
+    [("pull_request", PR_HEADLINE), ("push", PUSH_HEADLINE)],
+)
+def test_a_changed_lockfile_is_committed_as_its_own_bytes(tmp_path: Path, event: str, headline: str) -> None:
+    dirty = b"pyproject-bumped\npackage==9.9.9\n"
+    result = _run(
+        tmp_path,
+        dirty=dirty.decode("utf-8"),
+        event=event,
+        gh_stdout=json.dumps(SIGNED),
+        relocate_writes=True,
+    )
+    assert result.code == 0, result.combined
+    assert "Signed lockfile commit: https://example.test/commit/abc123" in result.out
+    mutation = _mutation(result)
+    addition = mutation["fileChanges"]["additions"]
+    assert len(addition) == 1
+    assert addition[0]["path"] == "requirements.lock"
+    assert base64.b64decode(addition[0]["contents"]) == dirty
+    assert mutation["expectedHeadOid"] == result.head
+    assert mutation["branch"] == {"repositoryNameWithOwner": REPO_NAME, "branchName": BRANCH}
+    assert mutation["message"]["headline"] == headline
+    assert result.gh.startswith("gh\t")
+    assert "--input" in result.gh
+    assert str(result.body) in result.gh
+
+
+def test_graphql_errors_fail_the_step(tmp_path: Path) -> None:
+    result = _run(
+        tmp_path,
+        dirty="changed\n",
+        gh_stdout=json.dumps({"errors": [{"message": "expectedHeadOid mismatch"}]}),
+        relocate_writes=True,
+    )
+    assert result.code == 1, result.combined
+    assert "createCommitOnBranch failed" in result.combined
+    assert "expectedHeadOid mismatch" in result.combined
+    assert "Signed lockfile commit" not in result.combined
+    assert result.gh.startswith("gh\t")
+
+
+def test_a_failing_gh_does_not_report_a_signed_commit(tmp_path: Path) -> None:
+    result = _run(tmp_path, dirty="changed\n", gh_rc=1, relocate_writes=True)
+    assert result.code != 0, result.combined
+    assert "Signed lockfile commit" not in result.combined
+    assert result.gh.startswith("gh\t")

@@ -66,7 +66,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as an argument does not trip `set -e`, so a failing `base64` would have handed `jq` an empty string and the step
   would have made a signed commit that empties the lockfile. Latent: GNU `base64` does not fail on
   `ubuntu-latest`. The encoding is now its own assignment, which `set -e` does catch, and an empty result fails the
-  step before anything is committed. `.github/workflows/lockfile-update.yml` banner 0.1.2. Found by the Cursor
+  step before anything is committed. `src/tests/regression/test_lockfile_regen_empty_payload.py` runs that step:
+  an empty encode and a failing `base64` exit before `jq` or `gh`; the mutation carries the lockfile's own bytes
+  and the trigger's headline; a GraphQL error and an unchanged lockfile commit nothing.
+  `.github/workflows/lockfile-update.yml` banner 0.1.2. Found by the Cursor
   flood-3 evaluation: juniper-ml `notes/JUNIPER_2026-10-08_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-3-DISPOSITION.md` §4.
 - **`claude.yml`'s header said `ANTHROPIC_API_KEY` is set at the organization level.** Juniper repos are
   user-owned, so no organization secret can reach them; the key is a repository secret here, added 2026-10-10.
