@@ -1,7 +1,7 @@
 # CI/CD Environment Setup
 
-**Last Updated:** 2026-10-26
-**Version:** 0.28.2
+**Last Updated:** 2026-11-04
+**Version:** 0.28.4
 **Status:** Current
 
 ## Table of Contents
@@ -101,6 +101,8 @@ pip install -e .
   Used by `lockfile-update.yml` to push lockfile updates in Dependabot branches with CI retriggering behavior.
 - `ANTHROPIC_API_KEY`:
   Read by `claude.yml` as the only auth input (`anthropic_api_key`). It is a repository secret: Juniper repos are user-owned, so no organization secret can reach them. Bedrock, Vertex, Foundry, and workload-identity inputs are not set.
+- `CODECOV_TOKEN`:
+  Read by `ci.yml` job `unit-tests`, step `Upload Coverage to Codecov`. It is an Actions repository secret. Without it Codecov refuses the upload (`Token required - not valid tokenless upload`) and the step stays green (`fail_ci_if_error: false`). Dependabot's secret store does not hold this token, so a Dependabot pull request's upload stays tokenless. [Upload refused, job still green](CICD_MANUAL.md#upload-refused-job-still-green).
 
 ### Workflow permissions
 
