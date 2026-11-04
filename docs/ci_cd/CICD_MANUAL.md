@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-10-26
-**Version:** 0.27.2
+**Last Updated:** 2026-11-04
+**Version:** 0.27.4
 **Status:** Current
 
 ## Table of Contents
@@ -785,14 +785,75 @@ Lockfile Freshness stays green across a skipped regen whenever the existing lock
 
 ### Runbook: Scheduled security scan
 
-`security-scan.yml` runs weekly and manually:
+`security-scan.yml` runs weekly (Monday `06:00 UTC`) and on `workflow_dispatch`:
 
-1. Installs `bandit[sarif]`, `pip-audit`, and project package (`pip install -e .`)
-2. Runs Bandit with SARIF output and text output
-3. Runs `pip-audit --strict --desc on`
+1. Installs `bandit[sarif]`, `pip-audit`, and the project (`pip install -e ".[dev]"`)
+2. Runs Bandit SARIF (`--exit-zero`) and a medium-confidence, medium-severity text scan
+3. Runs `pip-audit --desc on --skip-editable`. `--strict` treats the editable install as a package missing from PyPI and fails the job
 4. Uploads `reports/security/` artifacts
 
+This workflow does not run gitleaks. The secrets scan is the `ci.yml` `Security Scans` job, below.
+
 Use this runbook after dependency updates to confirm no new vulnerabilities are introduced.
+
+### Runbook: Gitleaks secrets scan
+
+`Security Scans` in `.github/workflows/ci.yml` is the required secrets scan. It runs gitleaks, then Bandit, then pip-audit. Job facts: [Security Scans: Gitleaks](CICD_REFERENCE.md#security-scans-gitleaks).
+
+**Step.** SHA-pinned `gitleaks/gitleaks-action`. The version record is the `# v3.0.0` comment on that `uses:` line. `GITLEAKS_VERSION` is `8.24.3`, the engine that action tag installs by default. Stating it in the step is what keeps a later action SHA from changing the engine. `src/tests/regression/test_gitleaks_config.py` asserts the env value. The step passes no `fail` input. The action exits non-zero when it reports a leak, and that fails the job.
+
+**Config.** `.gitleaks.toml` and `.gitleaksignore` live at the repo root. The action passes no `--config`, so both are auto-discovered. `GITLEAKS_CONFIG` or `GITLEAKS_CONFIG_TOML`, when set, outranks the file in the working tree.
+
+`[extend]` with `useDefault = true` loads gitleaks' built-in ruleset. A v8 config that omits that table loads only the file's own `[[rules]]`. This file's only rule entry merges an allowlist into the built-in `generic-api-key` rule and defines no regex of its own, so an omitted `[extend]` table leaves the step with nothing to fire. The step then exits 0 on every `push`, `pull_request`, and `workflow_dispatch`. That was the config until 2026-10-25 (the same empty-ruleset defect as juniper-ml#2203). Leave the table in place.
+
+gitleaks 8.24.3 does not read a top-level `[[allowlists]]` table or a `targetRules` key. The loader drops both and prints nothing. The global `[allowlist]` is OR-only: `condition` is not read there, so a path in that table skips every rule for the file.
+
+**Scope.** The job checks out with `fetch-depth: 0`.
+
+| Event | What the step does |
+| --- | --- |
+| `push`, `pull_request` | Scans the event's own commits |
+| `workflow_dispatch` | Passes no `--log-opts`, so it scans every commit reachable from every branch and tag in that checkout |
+| `repository_dispatch` | Skipped (`if: github.event_name != 'repository_dispatch'`). The action errors on that event before it scans |
+
+**Allowlists.**
+
+Global `[allowlist].paths` matches `conf/.*\.lock` and `notes/mcp/.*`. Each match skips every rule for those files.
+
+Conda lines of the form `<package>=<version>=<build>` are rewritten under a new commit on every environment refresh, so a `.gitleaksignore` entry cannot name that commit ahead of time. They are an AND-scoped allowlist on `generic-api-key` alone. A finding is dropped only when both of these hold:
+
+- The path ends in `conf/conda_environment*.yaml` or `conf/conda_environment*.yml`, or the file is `conf/requirements-conda.txt`.
+- The captured secret is `<version>=<build>` and the build string is `h<7 hex>_<n>`, `pyh<7 hex>_<n>`, or `py<NNN>h<7 hex>_<n>`.
+
+The same line in any other file still fires. A value of any other shape in a conda file still fires. Every other rule, including `github-pat`, still fires inside those files. The `[[rules]]` entry carries id `generic-api-key` and no `regex` key, which is how gitleaks merges the allowlist into the default rule instead of replacing it.
+
+**Ignore file.** Each `.gitleaksignore` entry is `<40-hex commit>:<file>:<rule>:<line>`. The nearest non-entry line above a group is a comment that names the class. A file-scoped entry (`<file>:<rule>:<line>`) would also hide a later secret written at that line. The regression test rejects that shape, a duplicate, and an entry with no class comment above it.
+
+**Self-test.** After pip-audit, on every event except `repository_dispatch`, the job installs pytest and PyYAML (after the audit, so they are not part of the audited set) and runs:
+
+```bash
+python -m pytest --noconftest -p no:cacheprovider -o addopts="" \
+  -W "ignore::pytest.PytestConfigWarning" \
+  src/tests/regression/test_gitleaks_config.py -v
+```
+
+with `GITLEAKS_PARITY_REQUIRED=1`. `--noconftest` keeps the job off `src/tests/conftest.py`. The unit lane runs the same file, and its real-engine cases skip when no `gitleaks` binary is on `PATH` (`GITLEAKS_BIN` overrides that lookup). In `Security Scans` a missing binary fails the job: a check that did not run is not a pass. The real-engine cases assemble a token at runtime and require the built-in `github-pat` rule to fire through the auto-discovered config.
+
+**Local run.** Use engine 8.24.3 so the allowlist behavior matches CI. From the repo root:
+
+```bash
+gitleaks git --redact
+gitleaks dir --redact .
+```
+
+`gitleaks git` scans committed history. `gitleaks dir` scans the working tree, including gitignored files. Both auto-discover the two files at the repo root.
+
+**Reading a failure**
+
+- The log names a rule, a file, and a line. Treat the finding as a secret until it is classified. A historical false positive is one commit-scoped line in `.gitleaksignore`, under a comment that names its class.
+- A conda refresh fails `generic-api-key` on a `<version>=<build>` line when the build string misses the allowlist regex. Extend that regex on the `generic-api-key` rule. A new global `[allowlist].paths` entry would skip every rule in the file.
+- `test_config_extends_the_default_ruleset` fails when `[extend] useDefault = true` is missing. A green Gitleaks step beside that failure scanned with an empty ruleset.
+- A green `repository_dispatch` run did not execute this step.
 
 ### Runbook: CodeQL analysis
 
@@ -1787,8 +1848,10 @@ Fix by: 2025-11-12
 
 ### `security` fails
 
-- For Bandit: review `reports/security/bandit.txt` and prioritize medium/high findings.
-- For pip-audit: update vulnerable dependencies and regenerate lockfile.
+- For Gitleaks: the step log names the rule, file, and line. Treat the finding as a secret until it is classified. A historical false positive is one commit-scoped line in `.gitleaksignore`. See [Gitleaks secrets scan](#runbook-gitleaks-secrets-scan).
+- `test_gitleaks_config.py` fails in this job when the binary is missing (`GITLEAKS_PARITY_REQUIRED=1`) or when `.gitleaks.toml` no longer extends the default ruleset. The unit lane skips the real-engine cases without a binary. This job must not.
+- For Bandit: review `reports/security/bandit.txt` and prioritize medium/high findings. On a pull request a failed SARIF upload also fails this job. See [CodeQL analysis](#runbook-codeql-analysis).
+- For pip-audit: update vulnerable dependencies and regenerate the lockfile.
 
 ### `Analyze (python)` fails (CodeQL)
 
