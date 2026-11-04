@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Regression tests pin the Bandit SARIF upload gate (#780, #781).** `src/tests/regression/test_bandit_sarif_upload.py`
+  fails if Security Scans installs bare `bandit`, if the upload no longer runs `if: always()` against
+  `reports/security/bandit.sarif`, or if `continue-on-error` is no longer `${{ github.event_name != 'pull_request' }}`.
+  The job's Bandit step is executed against a stub: a formatter failure is recorded and still reaches the upload,
+  findings leave a report without failing the step, and a clean scan writes the file the upload reads. The weekly
+  `security-scan.yml` job must install the same extra and must not swallow a formatter error with `|| true`.
+
 - **juniper-canopy#737: a CI job now notices juniper-data parameter drift against the committed generator-schema
   snapshot.** W1.2's declared-param filter (canopy#733) reads `DECLARED_PARAM_DEFAULTS`, which the unit tests pin to
   `src/tests/fixtures/juniper_data_sequence_generator_schemas.json`, but nothing compared that capture with
