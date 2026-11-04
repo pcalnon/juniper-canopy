@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-10-26
-**Version:** 0.29.0
+**Last Updated:** 2026-11-04
+**Version:** 0.29.1
 **Status:** Current
 
 ## Table of Contents
@@ -368,13 +368,27 @@ env:
 | `unit-tests`        | `pre-commit`      | Ubuntu matrix `3.12/3.13/3.14` + macOS `3.12` | Runs unit + regression markers with coverage gate |
 | `integration-tests` | `unit-tests`      | `3.14`                                         | Runs fast integration subset                      |
 | `build`             | `unit-tests`      | `3.14`                                         | Builds sdist and wheel                            |
-| `security`          | `pre-commit`      | `3.14`                                         | Gitleaks + Bandit + pip-audit                     |
+| `security`          | `pre-commit`      | `3.14`                                         | Gitleaks + Bandit + pip-audit. [Gitleaks contract](#security-scans-gitleaks) |
 | `dependency-docs`   | `build`           | `3.14`                                         | Generates dependency docs via script              |
 | `lockfile-check`    | —                 | `3.14`                                         | Recompiles lockfile with constraints              |
 | `docs`              | —                 | `3.14`                                         | Runs doc-link validation script                   |
 | `docker-build`      | `build`           | docker engine                                  | Builds image + health smoke test                  |
 | `required-checks`   | all core jobs     | n/a                                            | Aggregated merge gate                             |
 | `notify`            | `required-checks` | n/a                                            | Run summary                                       |
+
+### Security Scans: Gitleaks
+
+Operator runbook: [Gitleaks secrets scan](CICD_MANUAL.md#runbook-gitleaks-secrets-scan).
+
+- Action: `gitleaks/gitleaks-action`, SHA-pinned. The version record is the `# v3.0.0` comment on that `uses:` line. Do not copy the SHA into this reference. `GITLEAKS_VERSION` is `"8.24.3"`. `src/tests/regression/test_gitleaks_config.py` asserts that value, and that a later step in the same job runs this file with `GITLEAKS_PARITY_REQUIRED=1`.
+- Checkout is `fetch-depth: 0`. `push` and `pull_request` scan the event's commits. `workflow_dispatch` passes no `--log-opts` and scans every commit reachable from every branch and tag in that checkout. `repository_dispatch` skips the Gitleaks step and the self-test (`github.event_name != 'repository_dispatch'`). The skip is there because gitleaks-action errors on that event before it scans. A green dispatch is not a secrets scan.
+- Config, auto-discovered at the repo root because the action passes no `--config`: `.gitleaks.toml` and `.gitleaksignore`. `GITLEAKS_CONFIG` or `GITLEAKS_CONFIG_TOML` outranks the file.
+- `[extend] useDefault = true` loads the built-in ruleset. Omitting it leaves only this file's `[[rules]]`. That entry merges an allowlist into `generic-api-key` and defines no rule, so the step exits 0.
+- Global `[allowlist].paths` is OR-only and skips every rule for a match: `conf/.*\.lock`, `notes/mcp/.*`.
+- Conda build strings: one `[[rules]]` entry, id `generic-api-key`, no `regex` key (merged into the default rule). Its allowlist is `condition = "AND"`. Paths are `conf/conda_environment*.yaml` / `.yml` and `conf/requirements-conda.txt`. Regexes are tested against the captured secret (`regexTarget` defaults to `secret`): `<version>=<build>` with build string `h<7 hex>_<n>`, `pyh<7 hex>_<n>`, or `py<NNN>h<7 hex>_<n>`.
+- `.gitleaksignore` entries match `<40-hex commit>:<file>:<rule>:<line>` and sit under a class comment.
+- gitleaks 8.24.3 ignores a top-level `[[allowlists]]` table and a `targetRules` key. The loader drops both silently.
+- The self-test installs pytest and PyYAML after pip-audit and runs the regression file with `--noconftest`. A missing binary fails this job. The unit lane skips the real-engine cases when no binary is on `PATH`.
 
 ### Test marker expressions in CI
 
@@ -447,12 +461,13 @@ This catches broken internal file and heading links without requiring sibling re
 
 ### `security-scan.yml`
 
-- Scheduled: Mondays at `06:00 UTC`
-- Installs `bandit[sarif]` and `pip-audit`
+- Scheduled: Mondays at `06:00 UTC`, and `workflow_dispatch`
+- Installs `bandit[sarif]`, `pip-audit`, and `pip install -e ".[dev]"`
 - Runs:
   - `bandit -r src -c .bandit.yml -f sarif ... --exit-zero`
   - `bandit -r src -c .bandit.yml --confidence-level medium --severity-level medium`
-  - `pip-audit --strict --desc on`
+  - `pip-audit --desc on --skip-editable` (`--strict` fails on the editable install)
+- Does not run gitleaks. That scan is `ci.yml` job `Security Scans`: [Security Scans: Gitleaks](#security-scans-gitleaks)
 - Uploads `reports/security/` artifacts
 
 ### `juniper-data-schema-drift.yml`
@@ -591,6 +606,7 @@ The job `if` is not the last gate. The pinned action then applies its own checks
 | CI dependencies             | `pyproject.toml` extras, per `ci.yml` job (not `conf/requirements_ci.txt`, which is `juniper-generate-dep-docs` output) |
 | Image serve-and-version     | `util/check_image_serves.py`, `publish-image.yml` |
 | Security scan excludes      | `.bandit.yml` + workflow commands              |
+| Gitleaks ruleset            | `.gitleaks.toml` (`[extend] useDefault`), `.gitleaksignore`, `ci.yml` `GITLEAKS_VERSION` |
 | CodeQL action pins          | SHA comments on `codeql.yml` + `ci.yml` `upload-sarif` |
 | Claude action pin           | `# vX.Y.Z` comment on the `claude.yml` `uses:` line (ungrouped) |
 | Dependabot action groups    | `.github/dependabot.yml` (`codeql-action` only) |
@@ -826,7 +842,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-10-26
-**Version:** 0.29.0
+**Last Updated:** 2026-11-04
+**Version:** 0.29.1
 **Maintained By:** Development Team
 **Status:** ✅ Current

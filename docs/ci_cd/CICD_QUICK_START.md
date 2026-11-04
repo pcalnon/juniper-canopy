@@ -1,8 +1,8 @@
 # CI/CD Quick Start
 
-**Last Updated:** 2026-10-08  
-**Time to Complete:** ~5 minutes  
-**Version:** 0.27.1  
+**Last Updated:** 2026-11-04
+**Time to Complete:** ~5 minutes
+**Version:** 0.27.4
 **Status:** Current
 
 ## Prerequisites
@@ -116,6 +116,8 @@ Open the PR checks and confirm these gates complete:
   The group pattern `github/codeql-action*` covers `init` / `autobuild` / `analyze` **and** `upload-sarif` (Bandit SARIF). Review both files; keep the SHA comments in lockstep.
 - Waiting only on `Security Scans` (Bandit / pip-audit / Gitleaks) for a SAST signal:
   Semantic CodeQL is `Analyze (python)` from `.github/workflows/codeql.yml`.
+- `Security Scans` is green and the diff touches `.gitleaks.toml` or `.gitleaksignore`:
+  `[extend] useDefault = true` is what loads the built-in ruleset. Without that table the Gitleaks step exits 0 with nothing to fire. `repository_dispatch` skips the step. [Gitleaks secrets scan](CICD_MANUAL.md#runbook-gitleaks-secrets-scan).
 - `@claude` in a pull-request description does nothing, and assigning an issue does not call the model:
   The job `if` in `.github/workflows/claude.yml` is a substring check (GitHub's `contains()` ignores case) on a comment, a submitted review body, or an issue being opened or assigned. The action then requires `@claude` as its own word, and on `assigned` it checks only `assignee_trigger`, which is unset, so an assignment always skips. See [Claude Code workflow](CICD_REFERENCE.md#claude-code-workflow).
 - A `ci: bump anthropics/claude-code-action` pull request looks like a one-line pin move:
