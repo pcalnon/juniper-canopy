@@ -1,8 +1,8 @@
 # CI/CD Quick Start
 
-**Last Updated:** 2026-10-08  
+**Last Updated:** 2026-11-04  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.27.1  
+**Version:** 0.27.6  
 **Status:** Current
 
 ## Prerequisites
@@ -120,6 +120,8 @@ Open the PR checks and confirm these gates complete:
   The job `if` in `.github/workflows/claude.yml` is a substring check (GitHub's `contains()` ignores case) on a comment, a submitted review body, or an issue being opened or assigned. The action then requires `@claude` as its own word, and on `assigned` it checks only `assignee_trigger`, which is unset, so an assignment always skips. See [Claude Code workflow](CICD_REFERENCE.md#claude-code-workflow).
 - A `ci: bump anthropics/claude-code-action` pull request looks like a one-line pin move:
   That action is not in the `codeql-action` group. Confirm `with:` is still only `anthropic_api_key`, and leave the version in the `# vX.Y.Z` comment.
+- An edit to `AGENTS.md` fails `Verify AGENTS.md Last Updated`:
+  Set `**Last Updated**:` to today's UTC date as `YYYY-MM-DD`, with the colon tight against the bold markers. The workflow verifies that line and creates no commit. `Documentation Links` checks the six-field header and that `**Version**:` matches `pyproject.toml` `[project].version`. [AGENTS.md date check](CICD_MANUAL.md#runbook-agentsmd-date-check).
 
 ## Next Steps
 

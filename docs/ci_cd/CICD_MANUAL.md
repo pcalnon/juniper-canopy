@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-10-26
-**Version:** 0.27.2
+**Last Updated:** 2026-11-04
+**Version:** 0.27.6
 **Status:** Current
 
 ## Table of Contents
@@ -833,6 +833,49 @@ Review findings at GitHub Security → Code scanning. The `ci.yml` `Quality Gate
 - Workflow permissions: `actions: read`, `contents: read`, `security-events: write`.
 - Language matrix is Python only.
 - `ci.yml` `upload-sarif` is `continue-on-error` on every event except a pull request. On a PR a failed Bandit SARIF upload fails `Security Scans`, a required check, with the cause in the step log. No ruleset requires the `Bandit` check that code scanning creates from the upload, so before this a failed upload was silent (juniper-canopy#780). On pushes and dispatches a failed upload still does not fail `Security Scans`. A failed CodeQL analyze step **does** fail `Analyze (python)`.
+
+### Runbook: AGENTS.md date check
+
+`.github/workflows/agents-md-touch-up.yml` (workflow name `AGENTS.md Date Check`) runs when a pull request is opened, reopened, or synchronized and the change includes `AGENTS.md`. The job id is `verify-date`. The check name is `Verify AGENTS.md Last Updated`. Permissions are `contents: read`, so fork pull requests run it. The job creates no commit. Concurrency group `agents-md-date-check-<pull request number>` cancels an in-progress run for that pull request.
+
+Checkout is SHA-pinned `actions/checkout` with the `# v7.0.1` comment, `ref` set to the pull request head, and `fetch-depth: 0` so the three-dot diff can see the base. Leave the SHA in the workflow. The version record is the comment.
+
+The step takes the first line matching `**Last Updated**:` (the colon sits against the closing bold markers) and compares the value with today's UTC date from `date -u +%Y-%m-%d`.
+
+| Header state | Result |
+| --- | --- |
+| No matching line | `::warning::`, exit 0 |
+| Value is not `YYYY-MM-DD` | `::error::`, exit 1 |
+| Value is after today UTC | `::error::`, exit 1 |
+| Value equals today UTC | exit 0, including when this pull request's diff does not touch the line |
+| `git diff <base sha>...HEAD -- AGENTS.md` adds a line `+**Last Updated**:` | exit 0, when the value is a `YYYY-MM-DD` date that is not in the future |
+| Anything else | `::error::` quoting the current value and the line to write, exit 1 |
+
+`<base sha>` is `github.event.pull_request.base.sha`. The failure text is:
+
+```text
+**Last Updated**: <today UTC>
+```
+
+A pull request opened on Monday stays green on a Thursday re-run when that added line is still in the three-dot diff. Requiring the value to equal the day CI runs would fail that re-run. A changed line whose date is in the past still passes. A future date fails even when the line changed. String comparison is valid because the date is zero-padded ISO.
+
+The step comment above `juniper-lint-agents-md-header` in `.github/workflows/ci.yml`, and the module docstring of `juniper_ci_tools.lint_agents_md_header` in `juniper-ci-tools` 0.9.1, still say this workflow auto-bumps the date and pushes. The live `run` block verifies and exits. The workflow header records why the rewriter was removed: a runner `git commit` is unsigned, and `required_signatures` rejects it (juniper-ml#1099); a `[skip ci]` head then left every required check at "expected" (juniper-cascor#515). Follow the `run` block.
+
+The workflow header names `tests/test_agents_md_header_schema.py` and `tests/test_agents_md_version_drift.py`. Those paths are absent from this tree. Shape and package version are the `Documentation Links` job (`ci.yml` job `docs`), which installs `juniper-ci-tools>=0.9.0,<0.10.0` and runs both console scripts with no arguments on every CI run, including pull requests that do not touch `AGENTS.md`. The behavior below is `juniper-ci-tools` 0.9.1, the wheel that range resolved to on 2026-11-04.
+
+`juniper-lint-agents-md-header` reads the header as everything before the first line that is `---` or starts with `## `. It exits 0 when that block contains `Project`, `Repository`, `Author`, `License`, `Version`, and `Last Updated` in that relative order, each with a non-empty value, and `Last Updated` matches `YYYY-MM-DD`. Extra bullets may sit between the six. It exits 1 when a required field is missing, empty, out of that order, or the date is not `YYYY-MM-DD`. It exits 2 when it cannot find a directory that holds both `AGENTS.md` and `.github/`, or when `AGENTS.md` is missing.
+
+`juniper-lint-agents-md-version` exits 0 when the single whole-file line `**Version**: <token>` equals `pyproject.toml` `[project].version`. A file with no such line prints `SKIP` and exits 0 (the tool treats that as an opt-out). The header lint still fails that file, because `Version` is one of the six required fields. Two or more `**Version**:` lines, a missing `[project].version`, or a missing file exit 2. Differing versions exit 1. The drift line tells you to bump `AGENTS.md` in the same pull request as the `pyproject.toml` version bump.
+
+When you edit `AGENTS.md`, set the date line to today's UTC date in the form the error prints, and keep `**Version**:` equal to `[project].version`. Reproduce the two lints locally with the same install range:
+
+```bash
+python -m pip install "juniper-ci-tools>=0.9.0,<0.10.0"
+juniper-lint-agents-md-header
+juniper-lint-agents-md-version
+```
+
+The date check has no local console script. It is the workflow step.
 
 ### Runbook: Release publishing
 
@@ -1796,6 +1839,15 @@ Fix by: 2025-11-12
 - Open the workflow log for the `Perform CodeQL Analysis` step, then GitHub Security → Code scanning for alert details.
 - Do not "fix" a red CodeQL pin bump by reverting only `codeql.yml` or only `ci.yml` — Dependabot groups every `github/codeql-action*` use onto one SHA.
 - A green `Quality Gate` with a red `Analyze (python)` is **not** merge-safe.
+
+### `Verify AGENTS.md Last Updated` fails
+
+This check is `.github/workflows/agents-md-touch-up.yml`, and it runs only when the pull request touches `AGENTS.md`. Full contract: [AGENTS.md date check](#runbook-agentsmd-date-check).
+
+- Read the `::error::` annotation. Write `**Last Updated**:` as the UTC date it prints, with the colon tight against the bold markers.
+- A future date fails. A value that is not `YYYY-MM-DD` fails.
+- A missing field warns and this job passes. `Documentation Links` then fails `juniper-lint-agents-md-header`.
+- A `**Version**:` value that differs from `pyproject.toml` `[project].version` fails `juniper-lint-agents-md-version` in that same job, on every CI run.
 
 ## References
 
