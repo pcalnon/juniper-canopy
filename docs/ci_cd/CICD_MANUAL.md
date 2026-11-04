@@ -814,7 +814,7 @@ gitleaks 8.24.3 does not read a top-level `[[allowlists]]` table or a `targetRul
 | --- | --- |
 | `push`, `pull_request` | Scans the event's own commits |
 | `workflow_dispatch` | Passes no `--log-opts`, so it scans every commit reachable from every branch and tag in that checkout |
-| `repository_dispatch` | Skipped (`if: github.event_name != 'repository_dispatch'`). The action errors on that event before it scans |
+| `repository_dispatch` | Skipped. The step `if` keeps the action from running. gitleaks-action errors on that event before it scans, which is why the step is omitted |
 
 **Allowlists.**
 

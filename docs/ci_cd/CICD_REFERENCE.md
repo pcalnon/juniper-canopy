@@ -381,7 +381,7 @@ env:
 Operator runbook: [Gitleaks secrets scan](CICD_MANUAL.md#runbook-gitleaks-secrets-scan).
 
 - Action: `gitleaks/gitleaks-action`, SHA-pinned. The version record is the `# v3.0.0` comment on that `uses:` line. Do not copy the SHA into this reference. `GITLEAKS_VERSION` is `"8.24.3"`. `src/tests/regression/test_gitleaks_config.py` asserts that value, and that a later step in the same job runs this file with `GITLEAKS_PARITY_REQUIRED=1`.
-- Checkout is `fetch-depth: 0`. `push` and `pull_request` scan the event's commits. `workflow_dispatch` passes no `--log-opts` and scans every commit reachable from every branch and tag in that checkout. `repository_dispatch` skips the Gitleaks step and the self-test (`github.event_name != 'repository_dispatch'`). The action errors on `repository_dispatch` before it scans.
+- Checkout is `fetch-depth: 0`. `push` and `pull_request` scan the event's commits. `workflow_dispatch` passes no `--log-opts` and scans every commit reachable from every branch and tag in that checkout. `repository_dispatch` skips the Gitleaks step and the self-test (`github.event_name != 'repository_dispatch'`). The skip is there because gitleaks-action errors on that event before it scans. A green dispatch is not a secrets scan.
 - Config, auto-discovered at the repo root because the action passes no `--config`: `.gitleaks.toml` and `.gitleaksignore`. `GITLEAKS_CONFIG` or `GITLEAKS_CONFIG_TOML` outranks the file.
 - `[extend] useDefault = true` loads the built-in ruleset. Omitting it leaves only this file's `[[rules]]`. That entry merges an allowlist into `generic-api-key` and defines no rule, so the step exits 0.
 - Global `[allowlist].paths` is OR-only and skips every rule for a match: `conf/.*\.lock`, `notes/mcp/.*`.
