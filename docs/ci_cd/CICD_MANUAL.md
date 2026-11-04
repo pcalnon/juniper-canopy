@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-10-26
-**Version:** 0.27.2
+**Last Updated:** 2026-11-04
+**Version:** 0.27.5
 **Status:** Current
 
 ## Table of Contents
@@ -287,6 +287,28 @@ src/demo_mode.py           → src/tests/unit/test_demo_mode.py
 src/config_manager.py      → src/tests/unit/test_config_manager.py
 src/communication/websocket_manager.py → src/tests/unit/test_websocket_manager.py
 ```
+
+#### Which lane runs the file
+
+The required unit job collects by path. The `unit` marker does not put a file on that job. `ci.yml` job `unit-tests` runs:
+
+```bash
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/ src/tests/contract/ src/tests/performance/
+```
+
+`integration-tests` names only `src/tests/integration`. `ui-tests` names only `src/tests/ui`. `scheduled-tests.yml` passes no path, so pytest uses `testpaths = ["src/tests"]` from `pyproject.toml`, and selects `-m "slow or integration"`. That marker drops an unmarked module. `src/tests/conftest.py` does not add a marker by directory.
+
+A `test_*.py` placed directly in `src/tests/` is on none of those path lists. `TestEveryTestDirectoryIsNamedBySomeLane` in `src/tests/regression/test_ci_lane_wiring.py` walks subdirectories only, so it cannot see that file. `TestNoTestModuleSitsAtTheTopOfTheTestTree` in the same module fails the unit lane when one is present.
+
+From #516 (2026-08-25) until 2026-10-29, `test_memory_budget_check.py` sat at the top of `src/tests/`.
+Its 40 tests, the negative controls for `util/memory_budget_check.py`, ran in no lane.
+They now live at `src/tests/unit/test_memory_budget_check.py`.
+The module's `pytestmark = pytest.mark.unit` is for `pytest -m unit` (the quick-start command).
+This job's selector is negative, so the marker is not what runs the file. The path is.
+From that file the repo root is `Path(__file__).parents[3]`.
+A shallower path raises `FileNotFoundError` while the module is collected.
 
 #### Test Naming
 
@@ -985,17 +1007,23 @@ Lines Changed: +45 / -12
 
 #### Troubleshooting Codecov
 
-**Coverage not uploading:**
+##### Upload refused, job still green
 
-```yaml
-# Check GitHub Actions logs
-- name: Upload Coverage to Codecov
-  uses: codecov/codecov-action@v4
-  with:
-    file: ./coverage.xml
-    token: ${{ secrets.CODECOV_TOKEN }}  # Verify secret set
-    fail_ci_if_error: false  # Change to true to debug
-```
+The live step is `Upload Coverage to Codecov` on `ci.yml` job `unit-tests` (juniper-canopy#779, owner ruling 2026-10-29). It is SHA-pinned `codecov/codecov-action`. The version record is the `# v7.1.1` comment on that `uses:` line. The step does not copy a tag into `uses:`.
+
+| Input | Value |
+| ----- | ----- |
+| `if` | `always()` |
+| `token` | `${{ secrets.CODECOV_TOKEN }}`, an Actions repository secret |
+| `files` | `reports/coverage.xml` |
+| `flags` | `unittests` |
+| `fail_ci_if_error` | `false` |
+
+Without the token, Codecov refuses the upload and the step log says `Token required - not valid tokenless upload`. The check stays green because `fail_ci_if_error` is false. A green `Unit Tests + Coverage` check is not proof the report was accepted. Read that step's log.
+
+A Dependabot pull request reads the Dependabot secret store, which does not hold `CODECOV_TOKEN`. That upload stays tokenless, is refused, and still does not fail the job. Leave `fail_ci_if_error` false. Setting it true would turn that expected refusal into a red required check.
+
+Job facts: [Coverage gate](CICD_REFERENCE.md#coverage-gate). The secret is listed in [Required secrets](CICD_ENVIRONMENT_SETUP.md#required-secrets).
 
 **Coverage report missing files:**
 

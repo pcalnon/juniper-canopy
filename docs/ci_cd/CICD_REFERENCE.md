@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-10-26
-**Version:** 0.29.0
+**Last Updated:** 2026-11-04
+**Version:** 0.29.2
 **Status:** Current
 
 ## Table of Contents
@@ -204,6 +204,8 @@ lint:
 
 #### Test Job
 
+The workflow below is an illustration (Conda, Python 3.11, `codecov-action@v4`). It is not `.github/workflows/ci.yml`. The live unit lane is [Test marker expressions in CI](#test-marker-expressions-in-ci) and [Coverage gate](#coverage-gate).
+
 ```yaml
 test:
   name: Test Suite (Python ${{ matrix.python-version }})
@@ -384,6 +386,15 @@ Unit/regression gate:
 -m "not requires_cascor and not requires_server and not slow"
 ```
 
+Those flags are applied to four paths: `src/tests/unit/`, `src/tests/regression/`, `src/tests/contract/`, and `src/tests/performance/`. The job does not collect `src/tests/` itself. `integration-tests` names `src/tests/integration`. `ui-tests` names `src/tests/ui`. `scheduled-tests.yml` passes no path and selects `-m "slow or integration"`, so an unmarked module under `testpaths` (`src/tests`) is deselected. `src/tests/conftest.py` does not mark by directory.
+
+A `test_*.py` directly in `src/tests/` is on no path list.
+`TestEveryTestDirectoryIsNamedBySomeLane` walks subdirectories only.
+`TestNoTestModuleSitsAtTheTopOfTheTestTree` (`src/tests/regression/test_ci_lane_wiring.py`) fails this lane when one appears.
+The 40 memory-budget negative controls live at `src/tests/unit/test_memory_budget_check.py` for that reason.
+`pytestmark = pytest.mark.unit` serves `pytest -m unit`; this job's selector does not read it.
+[Which lane runs the file](CICD_MANUAL.md#which-lane-runs-the-file).
+
 Integration gate:
 
 ```bash
@@ -399,6 +410,15 @@ Unit tests enforce:
 ```
 
 With current `COVERAGE_FAIL_UNDER=80`.
+
+The same job then runs `Upload Coverage to Codecov`.
+The action is SHA-pinned `codecov/codecov-action`. The version record is the `# v7.1.1` comment on the `uses:` line.
+`token` is `${{ secrets.CODECOV_TOKEN }}` (an Actions repository secret).
+`files` is `reports/coverage.xml`, `flags` is `unittests`, `if` is `always()`, and `fail_ci_if_error` is `false`.
+A missing token is refused with `Token required - not valid tokenless upload`, and the check stays green.
+Dependabot's secret store does not hold the token, so that refusal is expected on a Dependabot pull request.
+Leave `fail_ci_if_error` false.
+[Upload refused, job still green](CICD_MANUAL.md#upload-refused-job-still-green).
 
 ### Lockfile freshness behavior
 
@@ -826,7 +846,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-10-26
-**Version:** 0.29.0
+**Last Updated:** 2026-11-04
+**Version:** 0.29.2
 **Maintained By:** Development Team
 **Status:** ✅ Current

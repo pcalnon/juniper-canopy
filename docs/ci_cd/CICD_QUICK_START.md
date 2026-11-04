@@ -1,8 +1,8 @@
 # CI/CD Quick Start
 
-**Last Updated:** 2026-10-08  
+**Last Updated:** 2026-11-04  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.27.1  
+**Version:** 0.27.5  
 **Status:** Current
 
 ## Prerequisites
@@ -112,6 +112,10 @@ Open the PR checks and confirm these gates complete:
   Run `scripts/check_doc_links.py` locally with the same excludes used in CI.
 - Local tests pass but CI fails:
   Re-run on Python `3.14` and use the same marker filters as the workflow.
+- A new `test_*.py` directly in `src/tests/` never runs in CI:
+  The unit job names four subdirectories and does not collect the top of that tree. Put the file in `src/tests/unit/` (or the lane that should run it). [Which lane runs the file](CICD_MANUAL.md#which-lane-runs-the-file).
+- `Unit Tests + Coverage` is green and Codecov has no report for the commit:
+  The upload stays green when Codecov refuses a tokenless upload (`fail_ci_if_error: false`). A Dependabot pull request does not have `CODECOV_TOKEN`. [Upload refused, job still green](CICD_MANUAL.md#upload-refused-job-still-green).
 - Dependabot `ci: bump the codeql-action group` PR looks like a CodeQL-only change but also edits `ci.yml`:
   The group pattern `github/codeql-action*` covers `init` / `autobuild` / `analyze` **and** `upload-sarif` (Bandit SARIF). Review both files; keep the SHA comments in lockstep.
 - Waiting only on `Security Scans` (Bandit / pip-audit / Gitleaks) for a SAST signal:
