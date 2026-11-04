@@ -11,7 +11,7 @@
 # File Path:     JuniperCanopy/juniper_canopy/src/backend/
 #
 # Date Created:  2026-02-26
-# Last Modified: 2026-10-26
+# Last Modified: 2026-11-03
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -405,9 +405,10 @@ class ServiceBackend:
     # juniper-canopy#736: no longer a BLIND pass-through. cascor forwards what it is staged with to
     # juniper-data, so the body is shaped first by the rules the recurrence request uses
     # (``recurrence_request.shape_stage_payload``): for a generator ``DECLARED_PARAM_DEFAULTS`` covers
-    # (flat ``equities``), the registry seed plus what the operator edited, and nothing the generator
-    # does not declare. Every other generator's body is forwarded as staged. Apply Dataset, the live
-    # swap and the restart modal's re-stage all arrive here, so all three are covered.
+    # (flat ``equities``, and ``mnist`` since juniper-canopy#778), the registry seed plus what the
+    # operator edited, and nothing the generator does not declare. Every other generator's body is
+    # forwarded as staged. Apply Dataset, the live swap and the restart modal's re-stage all arrive
+    # here, so all three are covered.
 
     def stage_dataset(self, **canopy_params: Any) -> Dict[str, Any]:
         stage = recurrence_request.shape_stage_payload(canopy_params)

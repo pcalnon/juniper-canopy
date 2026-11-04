@@ -58,7 +58,7 @@ from backend.recurrence_request import (
     train_request_body,
 )
 from backend.recurrence_service_adapter import RecurrenceServiceAdapter, RecurrenceTrainResult
-from dataset_schema import DECLARED_PARAM_DEFAULTS, DECLARED_PARAMS_SOURCE, DECLARED_PARAMS_SOURCES, EQUITIES_DECLARED_PARAMS_SOURCE, FORM_EXCLUDED_FIELDS, PARTIAL_DATA_POLICY_FIELDS, declared_param_defaults, declared_params_source, generator_name_for_type
+from dataset_schema import DECLARED_PARAM_DEFAULTS, DECLARED_PARAMS_SOURCE, DECLARED_PARAMS_SOURCES, EQUITIES_DECLARED_PARAMS_SOURCE, FORM_EXCLUDED_FIELDS, MNIST_DECLARED_PARAMS_SOURCE, PARTIAL_DATA_POLICY_FIELDS, declared_param_defaults, declared_params_source, generator_name_for_type
 from frontend.dashboard_manager import DashboardManager
 from model_registry import DATASET_TYPES, compatible, dataset_default_params, get_model_spec
 
@@ -66,11 +66,11 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXTURE_PATH = REPO_ROOT / "src" / "tests" / "fixtures" / "juniper_data_sequence_generator_schemas.json"
 FIXTURE = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
 # juniper-canopy#736: flat ``equities`` is captured from the PUBLISHED juniper-data wheel into a sibling file of
-# the same shape. The declaration is pinned against both captures together.
+# the same shape, and ``mnist`` joined it in juniper-canopy#778. The declaration is pinned against both captures together.
 TABULAR_FIXTURE_PATH = REPO_ROOT / "src" / "tests" / "fixtures" / "juniper_data_tabular_generator_schemas.json"
 TABULAR_FIXTURE = json.loads(TABULAR_FIXTURE_PATH.read_text(encoding="utf-8"))
 CAPTURED = {entry["name"]: entry for fixture in (FIXTURE, TABULAR_FIXTURE) for entry in fixture["generators"]}
-RECAPTURE = "re-capture with the tool the fixture's _provenance names (util/ad-hoc/2026-10-08_capture_sequence_generator_schemas.py for the sequence generators, util/ad-hoc/2026-10-26_capture_published_generator_schemas.py for equities) and update dataset_schema.DECLARED_PARAM_DEFAULTS from its output"
+RECAPTURE = "re-capture with the tool the fixture's _provenance names (util/ad-hoc/2026-10-08_capture_sequence_generator_schemas.py for the sequence generators, util/ad-hoc/2026-10-26_capture_published_generator_schemas.py for equities and mnist) and update dataset_schema.DECLARED_PARAM_DEFAULTS from its output"
 LOGGER = "juniper_canopy.backend.recurrence_request"
 
 
@@ -140,6 +140,15 @@ class TestTheDeclarationMatchesJuniperData:
         assert CAPTURED["equities"]["version"] == "5.0.0"
         assert not {"n_samples", "noise"} & set(upstream), "flat equities declares n_samples / noise now: the restart modal and the cascor filter withhold them, and must not"
 
+    def test_mnist_declares_every_field_juniper_data_has(self):
+        # juniper-canopy#778: the cascor path filters mnist by this entry too, and the restart modal reads it to decide
+        # which typed fields mnist gets. MnistParams declares n_samples, so Samples stays, and no noise, so Noise goes.
+        upstream = list(CAPTURED["mnist"]["schema"]["properties"])
+        assert len(upstream) == 13, f"the capture holds {len(upstream)} mnist fields; 13 at juniper-data 0.17.1 -- {RECAPTURE}"
+        assert CAPTURED["mnist"]["version"] == "3.0.0"
+        assert "n_samples" in upstream and "noise" not in upstream, "mnist's n_samples / noise moved: the restart modal's Samples and Noise follow them, so re-check both"
+        assert "flatten" in upstream, "the registry seeds flatten for mnist (its rank-2 declaration); an undeclared seed key would be withheld"
+
     def test_the_tabular_capture_names_the_release_it_read(self):
         # Same keys as the sequence capture's provenance, so one comparison covers both files, plus the release.
         provenance = TABULAR_FIXTURE["_provenance"]
@@ -149,6 +158,10 @@ class TestTheDeclarationMatchesJuniperData:
         assert provenance["wheel"] == f"juniper_data-{provenance['version']}-py3-none-any.whl", provenance
         assert (REPO_ROOT / provenance["tool"]).is_file(), f"{provenance['tool']} is not in the repository"
         assert provenance["version"] in EQUITIES_DECLARED_PARAMS_SOURCE and provenance["commit"][:8] in EQUITIES_DECLARED_PARAMS_SOURCE, "the declaration and the capture name different juniper-data releases"
+        # juniper-canopy#778: every generator in this capture has a source naming the same release, mnist included.
+        for entry in TABULAR_FIXTURE["generators"]:
+            source = declared_params_source(entry["name"])
+            assert source and provenance["version"] in source and provenance["commit"][:8] in source, f"{entry['name']}: the declaration and the capture name different juniper-data releases"
 
     def test_no_generator_is_captured_twice(self):
         names = [entry["name"] for fixture in (FIXTURE, TABULAR_FIXTURE) for entry in fixture["generators"]]
@@ -157,6 +170,7 @@ class TestTheDeclarationMatchesJuniperData:
     def test_every_declaration_says_where_it_came_from(self):
         assert set(DECLARED_PARAMS_SOURCES) == set(DECLARED_PARAM_DEFAULTS)
         assert declared_params_source("equities") == EQUITIES_DECLARED_PARAMS_SOURCE
+        assert declared_params_source("mnist") == MNIST_DECLARED_PARAMS_SOURCE
         assert declared_params_source("equities_seq") == DECLARED_PARAMS_SOURCE
         assert declared_params_source("spiral") is None and declared_params_source(None) is None
 
@@ -347,7 +361,12 @@ class TestShapeStartBodyRef:
 # for these three: ``n_points_per_spiral``, ``n_points_per_quadrant``, ``n_samples_per_class``.
 CASCOR_RENAMED_COUNT_GENERATORS = frozenset({"spiral", "xor", "gaussian"})
 EQUITIES_SEED = dataset_default_params("equities")
-UNDECLARED_RANK2 = ("xor", "circles", "moons", "gaussian", "checkerboard", "mnist")
+MNIST_SEED = dataset_default_params("mnist")
+# ``mnist`` left this list in juniper-canopy#778, when it gained a declaration of its own.
+UNDECLARED_RANK2 = ("xor", "circles", "moons", "gaussian", "checkerboard")
+# The typed fields a DECLARED type gets: the generic fields whose parameter its entry names. Only ``mnist``'s names
+# one (``n_samples``, and not ``noise``); every other declared type gets none.
+DECLARED_TYPED_FIELDS = {"mnist": ("nn_dataset_elements",)}
 
 
 @pytest.mark.unit
@@ -371,8 +390,16 @@ class TestStagedTypedFields:
 
     @pytest.mark.parametrize("value", sorted(spec.value for spec in DATASET_TYPES if generator_name_for_type(spec.value) in DECLARED_PARAM_DEFAULTS))
     def test_a_declared_generator_gets_only_what_it_declares(self, value):
-        # Every shipped declaration: none declares n_samples or noise, so none gets a typed field.
-        assert staged_typed_fields(value) == ()
+        # mnist declares n_samples and not noise, so it gets Samples alone (juniper-canopy#778). No other shipped
+        # declaration names n_samples or noise, so none of the others gets a typed field.
+        assert staged_typed_fields(value) == DECLARED_TYPED_FIELDS.get(value, ())
+
+    def test_mnist_gets_samples_and_never_noise(self):
+        # juniper-canopy#778. Without an entry mnist fell under the undeclared rule and kept both generic fields, so the
+        # restart modal rendered Noise, and juniper-data's MnistParams dropped the value it re-staged.
+        assert "mnist" in {spec.value for spec in DATASET_TYPES}, "mnist left the registry: this check would be vacuous"
+        assert staged_typed_fields("mnist") == ("nn_dataset_elements",)
+        assert set(DECLARED_TYPED_FIELDS) <= {spec.value for spec in DATASET_TYPES if generator_name_for_type(spec.value) in DECLARED_PARAM_DEFAULTS}
 
     @pytest.mark.parametrize("value", UNDECLARED_RANK2)
     def test_an_undeclared_generator_keeps_both_generic_fields_and_never_the_spiral_pair(self, value):
@@ -441,13 +468,39 @@ class TestShapeStagePayload:
             {"nn_dataset_type": "spirals", "nn_dataset_elements": 200, "nn_dataset_noise": 0.1, "nn_spiral_rotations": 1.5, "nn_spiral_number": 2, "nn_model": "cascor"},
             {"nn_dataset_type": "xor", "nn_dataset_elements": 300},
             {"nn_dataset_type": "circles", "nn_dataset_params": {"n_samples": 100, "noise": 0.05}},
-            {"nn_dataset_type": "mnist", "nn_dataset_params": {"flatten": True, "n_samples": 5000}},
         ],
         ids=lambda body: body["nn_dataset_type"],
     )
     def test_an_undeclared_generator_is_forwarded_as_staged(self, body):
+        # mnist's case moved to test_a_staged_mnist_body_keeps_its_seed_and_its_sample_count: it is declared since
+        # juniper-canopy#778, so it is shaped.
         stage = shape_stage_payload(body)
         assert stage.payload == body and stage.shaped is None
+
+    def test_a_staged_mnist_body_keeps_its_seed_and_its_sample_count(self):
+        # The body the undeclared case above carried for mnist. It is shaped now, and the shaping leaves it as it was:
+        # the seed, plus a sample count that differs from MnistParams' default of None, which makes it an edit.
+        body = {"nn_dataset_type": "mnist", "nn_dataset_params": {"flatten": True, "n_samples": 5000}}
+        stage = shape_stage_payload(body)
+        assert stage.shaped is not None and stage.payload == body
+        assert stage.shaped.edited == ("n_samples",) and stage.shaped.not_forwarded == () and stage.untouched == ()
+
+    def test_an_untouched_mnist_form_forwards_the_seed_alone(self, manager):
+        # juniper-canopy#778. The form never renders flatten (SHAPE_DETERMINING_FIELDS), so the seed is its one source.
+        form = _untouched_form(manager, "mnist", generators=TABULAR_FIXTURE["generators"])
+        assert "flatten" not in form
+        stage = shape_stage_payload({"nn_dataset_type": "mnist", "nn_dataset_params": {**MNIST_SEED, **form}, "nn_model": "cascor"})
+        assert stage.payload == {"nn_dataset_type": "mnist", "nn_dataset_params": MNIST_SEED, "nn_model": "cascor"}
+        assert stage.untouched, "no rendered field was left out -- this check would be vacuous"
+        assert set(stage.untouched) == set(form) - set(MNIST_SEED)
+        assert stage.shaped.edited == () and stage.shaped.not_forwarded == ()
+
+    def test_mnist_s_noise_is_withheld_and_named_and_its_samples_ride_in_params(self):
+        # juniper-canopy#778: the restart modal's Noise used to reach cascor for mnist, and MnistParams dropped it.
+        stage = shape_stage_payload({"nn_dataset_type": "mnist", "nn_dataset_elements": 500, "nn_dataset_noise": 0.25, "nn_dataset_params": MNIST_SEED, "nn_model": "cascor"})
+        assert stage.payload == {"nn_dataset_type": "mnist", "nn_dataset_params": {**MNIST_SEED, "n_samples": 500}, "nn_model": "cascor"}
+        assert stage.shaped.not_forwarded == ("nn_dataset_noise",) and stage.shaped.edited == ("n_samples",)
+        assert stage.shaped.undeclared == (), "canopy's own typed fields are not snapshot drift"
 
     def test_an_empty_body_still_clears_and_none_values_are_dropped(self):
         # cascor documents an empty body as "clear any prior staging"; shaping must leave it empty.
@@ -484,11 +537,22 @@ class TestShapeStagePayload:
 
 @pytest.mark.unit
 class TestEveryCascorSeedKeyIsDeclared:
-    """The rank-2 counterpart of ``TestEveryRecurrenceSeedIsDeclared``, for the one rank-2 entry."""
+    """The rank-2 counterpart of ``TestEveryRecurrenceSeedIsDeclared``, for the rank-2 entries."""
 
     def test_every_equities_seed_key_is_a_declared_parameter(self):
         # An undeclared seed key would be withheld by the filter that is meant to carry the seed whole.
         assert not set(EQUITIES_SEED) - set(DECLARED_PARAM_DEFAULTS["equities"])
+
+    def test_every_mnist_seed_key_is_a_declared_parameter(self):
+        # juniper-canopy#778. The seed's flatten: True is what keeps mnist rank-2 (canopy#623), so withholding it as
+        # undeclared would stage the rank-3 dataset canopy's ndim=2 declaration forbids.
+        assert MNIST_SEED.get("flatten") is True, "mnist's seed no longer pins flatten -- this check would be vacuous"
+        assert not set(MNIST_SEED) - set(DECLARED_PARAM_DEFAULTS["mnist"])
+
+    def test_every_rank2_entry_has_a_seed_check(self):
+        # A third rank-2 entry needs its own check above, not a silent pass.
+        rank2 = {generator_name_for_type(spec.value) for spec in DATASET_TYPES if spec.ndim == 2}
+        assert rank2 & set(DECLARED_PARAM_DEFAULTS) == {"equities", "mnist"}
 
 
 # ------------------------------------------------------------------------------ the body on the wire

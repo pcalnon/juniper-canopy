@@ -11,7 +11,7 @@
 # File Path:     JuniperCanopy/juniper_canopy/src/backend/
 #
 # Date Created:  2026-10-08
-# Last Modified: 2026-10-26
+# Last Modified: 2026-11-03
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -73,10 +73,11 @@ untouched and is not sent -- which asks juniper-data for exactly the value the f
 
 **The cascor tier (juniper-canopy#736).** cascor forwards what it is staged with, so the rules above
 apply to its staging body too, at the moment it is staged: ``shape_stage_payload`` runs
-``shape_staged_ref`` for a generator ``DECLARED_PARAM_DEFAULTS`` covers (flat ``equities``) and returns any
-other generator's body unchanged. ``ServiceBackend`` calls it for Apply, the live swap and the restart
-modal's re-stage alike, and logs the account. The recurrence backend does NOT: it holds the raw staged
-config and shapes it at Start, where the preview can still name what it withheld.
+``shape_staged_ref`` for a generator ``DECLARED_PARAM_DEFAULTS`` covers (flat ``equities``, and ``mnist``
+since juniper-canopy#778) and returns any other generator's body unchanged. ``ServiceBackend`` calls it
+for Apply, the live swap and the restart modal's re-stage alike, and logs the account. The recurrence
+backend does NOT: it holds the raw staged config and shapes it at Start, where the preview can still
+name what it withheld.
 """
 
 from __future__ import annotations
@@ -96,8 +97,8 @@ logger = logging.getLogger("juniper_canopy.backend.recurrence_request")
 # for a dataset type whose generator has a parameter for them (``staged_typed_fields``,
 # juniper-canopy#735); until then it re-staged them for every type, which is how they reached a sequence
 # generator. They still can, from a tab rendered before that change or from an API caller, so the rule
-# stays. No rank-3 generator declares either parameter, and nor does flat ``equities``
-# (``dataset_schema.DECLARED_PARAM_DEFAULTS``).
+# stays. No rank-3 generator declares either parameter, and nor does flat ``equities``; ``mnist`` declares
+# ``n_samples`` and not ``noise`` (``dataset_schema.DECLARED_PARAM_DEFAULTS``).
 GENERIC_FIELD_PARAMS: Dict[str, str] = {"nn_dataset_elements": "n_samples", "nn_dataset_noise": "noise"}
 
 # Spiral-only typed fields. A spiral is rank-2 and cannot be staged into the recurrence backend, so
@@ -235,13 +236,14 @@ def staged_typed_fields(dataset_type: Optional[str]) -> Tuple[str, ...]:
 
     * ``spirals`` -- all four. They are spiral's own convenience fields (the sidebar's typed block), and cascor
       translates each into a spiral parameter.
-    * a generator ``DECLARED_PARAM_DEFAULTS`` covers -- the generic fields whose parameter it declares. For every
-      shipped entry that is none: no sequence generator declares ``n_samples`` or ``noise``, and nor does flat
+    * a generator ``DECLARED_PARAM_DEFAULTS`` covers -- the generic fields whose parameter it declares. For
+      ``mnist`` that is Samples alone: it declares ``n_samples`` and not ``noise`` (juniper-canopy#778). For every
+      other shipped entry it is none: no sequence generator declares ``n_samples`` or ``noise``, and nor does flat
       ``equities``.
     * any other generator -- both generic fields. canopy holds no declaration to read for it, so this keeps the
       posture ``shape_staged_ref`` takes for an undeclared generator, and cascor's ``_translate_staged_config``
-      gives ``n_samples`` a destination in each. One known gap: ``mnist`` declares no ``noise``, and it keeps the
-      field until it has an entry of its own.
+      gives ``n_samples`` a destination in each. At juniper-data 0.17.1 every such seed (``xor``, ``circles``,
+      ``moons``, ``gaussian``, ``checkerboard``) declares ``noise`` too.
     * no dataset -- none.
 
     The spiral-only pair is never offered for anything but spiral.
@@ -305,8 +307,8 @@ def shape_stage_payload(canopy_params: Mapping[str, Any]) -> StagePayload:
     ``nn_dataset_params`` (generic winning) into juniper-data's create request. So W1.2's protections have to
     be applied before the body reaches it, and they are applied with the recurrence request's own code:
 
-    * a generator with a ``DECLARED_PARAM_DEFAULTS`` entry (flat ``equities``) -- ``nn_dataset_params`` becomes
-      ``shape_staged_ref``'s params: the registry seed, plus every field the operator edited, an edit winning
+    * a generator with a ``DECLARED_PARAM_DEFAULTS`` entry (flat ``equities``, ``mnist``) -- ``nn_dataset_params``
+      becomes ``shape_staged_ref``'s params: the registry seed, plus every field the operator edited, an edit winning
       over the seed. A rendered field still at its default is left out, which asks juniper-data for the value
       the form showed. A parameter the generator does not declare is withheld and named, the generic
       ``n_samples`` / ``noise`` included (F-C3). A generic value that IS forwarded rides in

@@ -9,8 +9,8 @@ Created: 2026-10-26
 Status: ad-hoc — wip (re-run whenever a juniper-data release changes a captured generator's parameters)
 Retire when: juniper-data publishes its generator parameter schemas as a versioned artifact canopy can depend on
 Related: juniper-canopy#736 (flat ``equities`` on the cascor staging path), juniper-canopy#737 (drift detection),
-         util/ad-hoc/2026-10-08_capture_sequence_generator_schemas.py (the source-tree sibling that captured the six
-         sequence generators)
+         juniper-canopy#778 (``mnist`` joins the capture), util/ad-hoc/2026-10-08_capture_sequence_generator_schemas.py
+         (the source-tree sibling that captured the six sequence generators)
 
 Why a published wheel, not a source tree
 ----------------------------------------
@@ -39,6 +39,10 @@ Usage (from the canopy repo root; everything lives under the gitignored ``tmp/``
 
 ``-I`` keeps the interpreter from importing anything from this directory or the user site. On stdout it prints the
 ``DECLARED_PARAM_DEFAULTS`` entries for ``src/dataset_schema.py``.
+
+The tool writes exactly the generators it is given, so a re-capture names every generator the fixture holds; the
+default does. ``[api]`` is enough for ``mnist`` too: juniper-data imports its ``datasets`` dependency lazily, so the
+schema reads without the ``[mnist]`` extra, which only generating ``mnist`` needs (juniper-canopy#778).
 """
 
 from __future__ import annotations
@@ -55,8 +59,8 @@ import subprocess  # nosec B404 -- fixed argv, no shell; reads a local juniper-d
 import sys
 
 # The generators canopy's CASCOR path filters by declaration: rank-2 seeds with a ``DECLARED_PARAM_DEFAULTS`` entry.
-# Only flat ``equities`` today (juniper-canopy#736). Its canopy value IS its juniper-data name.
-DEFAULT_GENERATORS: tuple[str, ...] = ("equities",)
+# Flat ``equities`` (juniper-canopy#736) and ``mnist`` (juniper-canopy#778). Each canopy value IS its juniper-data name.
+DEFAULT_GENERATORS: tuple[str, ...] = ("equities", "mnist")
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 FIXTURE = REPO_ROOT / "src" / "tests" / "fixtures" / "juniper_data_tabular_generator_schemas.json"
