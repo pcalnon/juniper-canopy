@@ -1,7 +1,7 @@
 # Juniper Canopy API Reference
 
-**Version:** 1.4.3
-**Last Updated:** September 5, 2026
+**Version:** 1.5.0
+**Last Updated:** November 7, 2026
 **Base URL:** `http://127.0.0.1:8050`
 
 ---
@@ -1001,6 +1001,65 @@ curl http://127.0.0.1:8050/api/statistics
 **Status Codes:**
 
 - `200 OK` - Request accepted
+
+### POST /api/stage_dataset
+
+**Description:** Stage a dataset-config change for the next start. `POST /api/live_dataset_swap` accepts this same body and, on the cascor service path, runs the same shaping. That route's rejections are not the list below: a cascor refusal there collapses to 502. `nn_model` is a routing field and is removed before the backend is called.
+On the cascor service path the remaining body is not forwarded as posted. `ServiceBackend.stage_dataset` and `swap_dataset_live` run `recurrence_request.shape_stage_payload` first (juniper-canopy#736, `mnist` since #778).
+
+**Body:** Every field is optional. `None` values are omitted.
+
+| Field | Role |
+| --- | --- |
+| `nn_dataset_type` | Canopy dataset value (`"mnist"`, `"spirals"`). Cascor applies its own alias. |
+| `nn_dataset_elements` | Generic Samples. Forwarded for `mnist` as `params.n_samples`. Dropped for `equities`. Kept as a typed field for an undeclared generator. |
+| `nn_dataset_noise` | Generic Noise. Not declared by `mnist` or `equities`, so the service path withholds it and names it at INFO. Kept for an undeclared generator such as `circles` or `spirals`. |
+| `nn_spiral_rotations`, `nn_spiral_number` | Spiral-only. Dropped when the generator has a declared-param entry. |
+| `nn_dataset_params` | Schema fields. For a declared generator, the registry seed plus keys that differ from the value the form showed. |
+| `nn_model` | Optional mirror of the selected model. Absent means a pre-mirror client. Unknown model or an incompatible dataset is `422`. A model other than the server's selection is `409`. |
+
+**What cascor receives for `mnist`:**
+
+An untouched Apply, after shaping:
+
+```json
+{"dataset_type": "mnist", "params": {"flatten": true}}
+```
+
+Samples 500, including a noise value a stale client still sends. Noise is not in the body cascor gets:
+
+```json
+{"dataset_type": "mnist", "params": {"flatten": true, "n_samples": 500}}
+```
+
+**Response Schema:**
+
+```json
+{"status": "success", "data": {"status": "staged", "config": {"dataset_type": "mnist", "params": {"flatten": true}}}}
+```
+
+`data` is the `data` object the backend returned. On the cascor service path that is cascor's envelope `data`, `{"status": "staged", "config": ...}`, and `config` is the body cascor recorded after canopy's shaping (cascor drops `None` fields), so it shows what was forwarded.
+Demo mode and the recurrence backend echo the canopy body they were given instead (`main.py` drops `None` fields and `nn_model` before the call), and recurrence adds `dataset_ref`.
+
+**Status Codes:**
+
+- `200 OK` - Staged. This is not a claim that every posted key was forwarded.
+- `409 Conflict` - The recorded selection is not the backend that is running, or `nn_model` is not the server's selection.
+- `422 Unprocessable Entity` - A field fails request validation (FastAPI's `detail` list, for example a non-integer `nn_dataset_elements`), `nn_model` is unknown, or the dataset is incompatible with that model.
+- `501 Not Implemented` - The active backend has no `stage_dataset`.
+- `502 Bad Gateway` - The backend rejected the dataset. `error` prefixes the backend's string with `Backend rejected dataset:`.
+- `500 Internal Server Error` - `{"error": "Internal server error", "error_id": "<12 hex>"}`. The traceback stays in the log.
+
+**Constraints:**
+
+- Demo mode stores the posted body. It does not run `shape_stage_payload`. The dashboard still omits Noise when it builds an `mnist` re-stage, because `staged_typed_fields("mnist")` is `("nn_dataset_elements",)`.
+- Recurrence holds the raw staged config and shapes it at Start. This route's filter is the cascor service path. Read the recurrence body from `POST /api/recurrence/effective_request`.
+- Do not send `flatten: false` for `mnist`. The form never renders it, and the seed's `true` is what keeps the dataset rank-2.
+- A withheld generic field is INFO (`not forwarded: nn_dataset_noise`), logger `juniper_canopy.backend.recurrence_request`. A key in `nn_dataset_params` that the capture does not list is a WARNING and names `MNIST_DECLARED_PARAMS_SOURCE`.
+
+```bash
+cd src && pytest tests/regression/test_cascor_staging_declared_params.py::TestMnistGetsTheDeclaredParamFilter -q
+```
 
 ### GET /api/train/status
 

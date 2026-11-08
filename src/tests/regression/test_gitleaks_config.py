@@ -89,7 +89,9 @@ def _config() -> dict:
 
 
 def test_config_extends_the_default_ruleset() -> None:
-    # Without this table gitleaks loads only this file's [[rules]]: the zero-rule config that passed every scan.
+    # Without this table gitleaks loads only .gitleaks.toml's own [[rules]]. Its one entry has no regex or path, so
+    # gitleaks 8.24.3 refuses the config ("Failed to load config") and the scan fails. Before 2026-10-25 the file had
+    # no [[rules]] entry either, and that zero-rule config passed every scan.
     assert _config().get("extend", {}).get("useDefault") is True, "[extend] useDefault = true is missing: gitleaks would load no default rule"
 
 
