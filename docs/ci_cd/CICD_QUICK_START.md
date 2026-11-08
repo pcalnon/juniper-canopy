@@ -1,8 +1,8 @@
 # CI/CD Quick Start
 
-**Last Updated:** 2026-10-08  
+**Last Updated:** 2026-11-08  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.27.1  
+**Version:** 0.27.7  
 **Status:** Current
 
 ## Prerequisites
@@ -120,6 +120,10 @@ Open the PR checks and confirm these gates complete:
   The job `if` in `.github/workflows/claude.yml` is a substring check (GitHub's `contains()` ignores case) on a comment, a submitted review body, or an issue being opened or assigned. The action then requires `@claude` as its own word, and on `assigned` it checks only `assignee_trigger`, which is unset, so an assignment always skips. See [Claude Code workflow](CICD_REFERENCE.md#claude-code-workflow).
 - A `ci: bump anthropics/claude-code-action` pull request looks like a one-line pin move:
   That action is not in the `codeql-action` group. Confirm `with:` is still only `anthropic_api_key`, and leave the version in the `# vX.Y.Z` comment.
+- `Security Scans` is red on a pull request and the upload log says `Path does not exist: reports/security/bandit.sarif`:
+  The scan step stays green when the formatter is missing. The install has to be the quoted extra `"bandit[sarif]"`, and the SARIF command has to record `|| BANDIT_EXIT=$?` rather than `|| true`. A push or a manual dispatch tolerates that same failed upload. [Bandit SARIF upload](CICD_MANUAL.md#runbook-bandit-sarif-upload-ciyml).
+- A lockfile regen commit would replace `requirements.lock` with an empty file:
+  The encode is its own assignment, `LOCK_B64=$(base64 -w0 requirements.lock)`, and an empty result exits 1 before `jq`. Putting `base64` back inside a `jq --arg` substitution does not trip `set -e`. [Empty payload](CICD_MANUAL.md#empty-payload).
 
 ## Next Steps
 

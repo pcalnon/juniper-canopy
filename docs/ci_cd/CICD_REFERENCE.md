@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-10-26
-**Version:** 0.29.0
+**Last Updated:** 2026-11-08
+**Version:** 0.29.4
 **Status:** Current
 
 ## Table of Contents
@@ -368,7 +368,7 @@ env:
 | `unit-tests`        | `pre-commit`      | Ubuntu matrix `3.12/3.13/3.14` + macOS `3.12` | Runs unit + regression markers with coverage gate |
 | `integration-tests` | `unit-tests`      | `3.14`                                         | Runs fast integration subset                      |
 | `build`             | `unit-tests`      | `3.14`                                         | Builds sdist and wheel                            |
-| `security`          | `pre-commit`      | `3.14`                                         | Gitleaks + Bandit + pip-audit                     |
+| `security`          | `pre-commit`      | `3.14`                                         | Gitleaks + Bandit SARIF + pip-audit. A failed SARIF upload fails this job on a pull request only. |
 | `dependency-docs`   | `build`           | `3.14`                                         | Generates dependency docs via script              |
 | `lockfile-check`    | —                 | `3.14`                                         | Recompiles lockfile with constraints              |
 | `docs`              | —                 | `3.14`                                         | Runs doc-link validation script                   |
@@ -447,13 +447,16 @@ This catches broken internal file and heading links without requiring sibling re
 
 ### `security-scan.yml`
 
-- Scheduled: Mondays at `06:00 UTC`
-- Installs `bandit[sarif]` and `pip-audit`
+Operator notes: [Scheduled security scan](CICD_MANUAL.md#runbook-scheduled-security-scan). This workflow does not upload SARIF to code scanning. The pull-request upload is [Bandit SARIF upload](CICD_MANUAL.md#runbook-bandit-sarif-upload-ciyml).
+
+- Scheduled: Mondays at `06:00 UTC`, plus `workflow_dispatch`
+- Permissions: `contents: read`
+- Installs quoted `"bandit[sarif]"`, `pip-audit`, and `pip install -e ".[dev]"`
 - Runs:
-  - `bandit -r src -c .bandit.yml -f sarif ... --exit-zero`
-  - `bandit -r src -c .bandit.yml --confidence-level medium --severity-level medium`
-  - `pip-audit --strict --desc on`
-- Uploads `reports/security/` artifacts
+  - `bandit -r src -c .bandit.yml -f sarif -o reports/security/bandit.sarif --exit-zero` (no `|| true` on this line)
+  - `bandit -r src -c .bandit.yml --confidence-level medium --severity-level medium` (no `--exit-zero`; findings fail the job)
+  - `pip-audit --desc on --skip-editable` (`--strict` is omitted; the editable install is not a PyPI release)
+- Uploads `reports/security/` as artifact `security-reports` with `if: always()` and `retention-days: 30`
 
 ### `juniper-data-schema-drift.yml`
 
@@ -490,6 +493,7 @@ uv pip compile pyproject.toml \
 
 - The compiler input is `pyproject.toml`. Dependabot's pip floor edits land in `conf/requirements_ci.txt` (repo-root `requirements.txt` resolves to that file through the `conf/requirements.txt` symlink). A package absent from `pyproject.toml` stays out of `requirements.lock`. `--upgrade` can still move other pins in the same commit.
 - Commit, only when `requirements.lock` changed, via `createCommitOnBranch` (`expectedHeadOid` is the checked-out HEAD). Push subjects: `[dependabot skip] Update requirements.lock` on `push`, `chore(deps): auto-regenerate requirements.lock after pyproject change` on `pull_request`.
+- The encode is `LOCK_B64=$(base64 -w0 requirements.lock)` under `set -euo pipefail`, ahead of `jq`. An empty payload, a failing `base64`, or a missing lockfile exits before `jq` and `gh` and commits nothing. An empty file encodes to an empty string and exits 0, so the emptiness check is the refusal. Do not pass `base64` through a command substitution used as a `jq --arg`: that failure does not trip `set -e`. The addition's `contents` are the lockfile's own bytes. A GraphQL result with `.errors` exits 1 and does not print a signed-commit URL. Detail: [Empty payload](CICD_MANUAL.md#empty-payload).
 - Lockfile Freshness (`ci.yml` job `lockfile-check`) is a separate `--constraint` compile. A skipped regen stays green while the current pins still satisfy `pyproject.toml`.
 
 ### `publish.yml`
@@ -826,7 +830,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-10-26
-**Version:** 0.29.0
+**Last Updated:** 2026-11-08
+**Version:** 0.29.4
 **Maintained By:** Development Team
 **Status:** ✅ Current
