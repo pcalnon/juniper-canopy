@@ -1,8 +1,8 @@
 # CI/CD Quick Start
 
-**Last Updated:** 2026-10-08  
+**Last Updated:** 2026-11-07  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.27.1  
+**Version:** 0.27.2  
 **Status:** Current
 
 ## Prerequisites
@@ -112,14 +112,22 @@ Open the PR checks and confirm these gates complete:
   Run `scripts/check_doc_links.py` locally with the same excludes used in CI.
 - Local tests pass but CI fails:
   Re-run on Python `3.14` and use the same marker filters as the workflow.
+- A new `test_*.py` directly in `src/tests/` fails `Unit Tests + Coverage`, and its own tests run in no pull-request lane:
+  `TestNoTestModuleSitsAtTheTopOfTheTestTree` fails the unit lane, because the unit job names four subdirectories and does not collect the top of that tree. Put the file in `src/tests/unit/` (or the lane that should run it). [Which lane runs the file](CICD_MANUAL.md#which-lane-runs-the-file).
+- `Unit Tests + Coverage` is green and Codecov has no report for the commit:
+  The upload stays green when Codecov refuses a tokenless upload (`fail_ci_if_error: false`). Both the Actions and the Dependabot secret stores hold `CODECOV_TOKEN`, so a refusal is a token problem on a pull request from a branch of this repository, Dependabot's included (a fork's pull request gets no secrets, so its upload is tokenless). [Upload refused, job still green](CICD_MANUAL.md#upload-refused-job-still-green).
 - Dependabot `ci: bump the codeql-action group` PR looks like a CodeQL-only change but also edits `ci.yml`:
   The group pattern `github/codeql-action*` covers `init` / `autobuild` / `analyze` **and** `upload-sarif` (Bandit SARIF). Review both files; keep the SHA comments in lockstep.
 - Waiting only on `Security Scans` (Bandit / pip-audit / Gitleaks) for a SAST signal:
   Semantic CodeQL is `Analyze (python)` from `.github/workflows/codeql.yml`.
+- `Security Scans` is green and the diff touches `.gitleaks.toml` or `.gitleaksignore`:
+  `[extend] useDefault = true` is what loads the built-in ruleset. Removing that table alone turns the Gitleaks step red (`Failed to load config`: the `generic-api-key` entry has no `regex` or `path`). A green step with the table gone means the `[[rules]]` entry went too, and gitleaks ran with zero rules. `repository_dispatch` skips the step. [Gitleaks secrets scan](CICD_MANUAL.md#runbook-gitleaks-secrets-scan).
 - `@claude` in a pull-request description does nothing, and assigning an issue does not call the model:
   The job `if` in `.github/workflows/claude.yml` is a substring check (GitHub's `contains()` ignores case) on a comment, a submitted review body, or an issue being opened or assigned. The action then requires `@claude` as its own word, and on `assigned` it checks only `assignee_trigger`, which is unset, so an assignment always skips. See [Claude Code workflow](CICD_REFERENCE.md#claude-code-workflow).
 - A `ci: bump anthropics/claude-code-action` pull request looks like a one-line pin move:
   That action is not in the `codeql-action` group. Confirm `with:` is still only `anthropic_api_key`, and leave the version in the `# vX.Y.Z` comment.
+- An edit to `AGENTS.md` fails `Verify AGENTS.md Last Updated`:
+  Set `**Last Updated**:` to today's UTC date as `YYYY-MM-DD`, with the colon tight against the bold markers. The workflow verifies that line and creates no commit. `Documentation Links` checks the six-field header and that `**Version**:` matches `pyproject.toml` `[project].version`. [AGENTS.md date check](CICD_MANUAL.md#runbook-agentsmd-date-check).
 
 ## Next Steps
 
