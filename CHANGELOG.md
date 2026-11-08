@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The schema-drift check's JSON equality holds inside arrays, where Python's `==` would hide a boolean.**
+  `util/check_juniper_data_generator_schemas.py` already says `true` is not `1` and `NaN` equals `NaN`, and the
+  tests pinned that only for a bare value. `diff_json` walks objects and then hands every other value, including
+  an `enum` or an `anyOf`, to `json_equal`. Python's `==` says `[0, 1] == [false, true]` and
+  `[{"minimum": 1}] == [{"minimum": true}]`, and says `[NaN] != [NaN]`. A list comparison that used `==` would
+  miss the first two — the drift this job exists to catch, now inside the array shapes the committed snapshots
+  actually carry — and would fail the daily job on a matching `NaN` inside an array. The scalar tests would stay
+  green either way. `src/tests/unit/test_schema_drift_nested_equality.py` pins both directions through `json_equal`
+  and through the drift report. The comparison is unchanged.
+
 - **juniper-canopy#737: a CI job now notices juniper-data parameter drift against the committed generator-schema
   snapshot.** W1.2's declared-param filter (canopy#733) reads `DECLARED_PARAM_DEFAULTS`, which the unit tests pin to
   `src/tests/fixtures/juniper_data_sequence_generator_schemas.json`, but nothing compared that capture with
