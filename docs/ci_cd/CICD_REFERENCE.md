@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-10-26
-**Version:** 0.29.0
+**Last Updated:** 2026-11-07
+**Version:** 0.30.0
 **Status:** Current
 
 ## Table of Contents
@@ -188,7 +188,7 @@ lint:
 | `.github/workflows/pr-base-branch-guard.yml` | `pull_request` + `merge_group`                                       | Fail if PR base is not the default branch            |
 | `.github/workflows/scheduled-tests.yml`     | daily cron + manual                                                  | Slow / integration tests                             |
 | `.github/workflows/juniper-data-schema-drift.yml` | daily cron, manual, `repository_dispatch` `juniper-data-published`, path-filtered PR | Generator-schema snapshots vs the released juniper-data. See [`juniper-data-schema-drift.yml`](#juniper-data-schema-driftyml) |
-| `.github/workflows/agents-md-touch-up.yml`  | PR paths `AGENTS.md`                                                 | Verify `Last Updated` date (does not rewrite)        |
+| `.github/workflows/agents-md-touch-up.yml`  | PR paths `AGENTS.md`                                                 | Verify `Last Updated`. [Runbook](CICD_MANUAL.md#runbook-agentsmd-date-check) |
 | `.github/workflows/claude.yml`              | comment, submitted review, or new/assigned issue with `@claude`      | Optional assistant; not a merge gate. See [Claude Code workflow](#claude-code-workflow) |
 
 ## Main CI Workflow (`ci.yml`)
@@ -203,6 +203,8 @@ lint:
 ```
 
 #### Test Job
+
+The workflow below is an illustration (Conda, Python 3.11, `codecov-action@v4`). It is not `.github/workflows/ci.yml`. The live unit lane is [Test marker expressions in CI](#test-marker-expressions-in-ci) and [Coverage gate](#coverage-gate).
 
 ```yaml
 test:
@@ -368,13 +370,27 @@ env:
 | `unit-tests`        | `pre-commit`      | Ubuntu matrix `3.12/3.13/3.14` + macOS `3.12` | Runs unit + regression markers with coverage gate |
 | `integration-tests` | `unit-tests`      | `3.14`                                         | Runs fast integration subset                      |
 | `build`             | `unit-tests`      | `3.14`                                         | Builds sdist and wheel                            |
-| `security`          | `pre-commit`      | `3.14`                                         | Gitleaks + Bandit + pip-audit                     |
+| `security`          | `pre-commit`      | `3.14`                                         | Gitleaks + Bandit + pip-audit. [Gitleaks contract](#security-scans-gitleaks) |
 | `dependency-docs`   | `build`           | `3.14`                                         | Generates dependency docs via script              |
 | `lockfile-check`    | —                 | `3.14`                                         | Recompiles lockfile with constraints              |
 | `docs`              | —                 | `3.14`                                         | Runs doc-link validation script                   |
 | `docker-build`      | `build`           | docker engine                                  | Builds image + health smoke test                  |
 | `required-checks`   | all core jobs     | n/a                                            | Aggregated merge gate                             |
 | `notify`            | `required-checks` | n/a                                            | Run summary                                       |
+
+### Security Scans: Gitleaks
+
+Operator runbook: [Gitleaks secrets scan](CICD_MANUAL.md#runbook-gitleaks-secrets-scan).
+
+- Action: `gitleaks/gitleaks-action`, SHA-pinned. The version record is the `# v3.0.0` comment on that `uses:` line. Do not copy the SHA into this reference. `GITLEAKS_VERSION` is `"8.24.3"`. `src/tests/regression/test_gitleaks_config.py` asserts that value, and that a later step in the same job runs this file with `GITLEAKS_PARITY_REQUIRED=1`.
+- Checkout is `fetch-depth: 0`. `push` and `pull_request` scan the event's commits. `workflow_dispatch` passes no `--log-opts` and scans every commit reachable from every branch and tag in that checkout. `repository_dispatch` skips the Gitleaks step and the self-test (`github.event_name != 'repository_dispatch'`). The skip is there because gitleaks-action errors on that event before it scans. A green dispatch is not a secrets scan.
+- Config, auto-discovered at the repo root because the action passes no `--config`: `.gitleaks.toml` and `.gitleaksignore`. `GITLEAKS_CONFIG` or `GITLEAKS_CONFIG_TOML` outranks the file.
+- `[extend] useDefault = true` loads the built-in ruleset. Omitting it leaves only this file's `[[rules]]`. That entry merges an allowlist into `generic-api-key` and has no `regex` or `path`, so gitleaks 8.24.3 refuses the config (`Failed to load config`) and the step fails with `Unexpected exit code [1]`. Only a file with no `[[rules]]` either, as before 2026-10-25, loads zero rules and exits 0.
+- Global `[allowlist].paths` is OR-only and skips every rule for a match: `conf/.*\.lock`, `notes/mcp/.*`.
+- Conda build strings: one `[[rules]]` entry, id `generic-api-key`, no `regex` key (merged into the default rule). Its allowlist is `condition = "AND"`. Paths are `conf/conda_environment*.yaml` / `.yml` and `conf/requirements-conda.txt`. Regexes are tested against the captured secret (`regexTarget` defaults to `secret`): `<version>=<build>` with build string `h<7 hex>_<n>`, `pyh<7 hex>_<n>`, or `py<NNN>h<7 hex>_<n>`.
+- `.gitleaksignore` entries match `<40-hex commit>:<file>:<rule>:<line>` and sit under a class comment.
+- gitleaks 8.24.3 ignores a top-level `[[allowlists]]` table and a `targetRules` key. The loader drops both silently.
+- The self-test installs pytest and PyYAML after pip-audit and runs the regression file with `--noconftest`. A missing binary fails this job. The unit lane skips the real-engine cases when no binary is on `PATH`.
 
 ### Test marker expressions in CI
 
@@ -383,6 +399,15 @@ Unit/regression gate:
 ```bash
 -m "not requires_cascor and not requires_server and not slow"
 ```
+
+Those flags are applied to four paths: `src/tests/unit/`, `src/tests/regression/`, `src/tests/contract/`, and `src/tests/performance/`. The job does not collect `src/tests/` itself. `integration-tests` names `src/tests/integration`. `ui-tests` names `src/tests/ui`. `scheduled-tests.yml` passes no path and selects `-m "slow or integration"`, so an unmarked module under `testpaths` (`src/tests`) is deselected. `src/tests/conftest.py` does not mark by directory.
+
+A `test_*.py` directly in `src/tests/` is on none of the pull-request lanes' path lists; the scheduled lane reaches it only when it is marked `slow` or `integration`.
+`TestEveryTestDirectoryIsNamedBySomeLane` walks subdirectories only.
+`TestNoTestModuleSitsAtTheTopOfTheTestTree` (`src/tests/regression/test_ci_lane_wiring.py`) fails this lane when one appears.
+The 40 memory-budget negative controls live at `src/tests/unit/test_memory_budget_check.py` for that reason.
+`pytestmark = pytest.mark.unit` serves `pytest -m unit`; this job's selector does not read it.
+[Which lane runs the file](CICD_MANUAL.md#which-lane-runs-the-file).
 
 Integration gate:
 
@@ -399,6 +424,15 @@ Unit tests enforce:
 ```
 
 With current `COVERAGE_FAIL_UNDER=80`.
+
+The same job then runs `Upload Coverage to Codecov`.
+The action is SHA-pinned `codecov/codecov-action`. The version record is the `# v7.1.1` comment on the `uses:` line.
+`token` is `${{ secrets.CODECOV_TOKEN }}` (an Actions repository secret).
+`files` is `reports/coverage.xml`, `flags` is `unittests`, `if` is `always()`, and `fail_ci_if_error` is `false`.
+A missing token is refused with `Token required - not valid tokenless upload`, and the check stays green.
+Dependabot's secret store has held the token too since 2026-11-04, so a refusal on a Dependabot pull request is not expected either.
+Leave `fail_ci_if_error` false.
+[Upload refused, job still green](CICD_MANUAL.md#upload-refused-job-still-green).
 
 ### Lockfile freshness behavior
 
@@ -447,12 +481,13 @@ This catches broken internal file and heading links without requiring sibling re
 
 ### `security-scan.yml`
 
-- Scheduled: Mondays at `06:00 UTC`
-- Installs `bandit[sarif]` and `pip-audit`
+- Scheduled: Mondays at `06:00 UTC`, and `workflow_dispatch`
+- Installs `bandit[sarif]`, `pip-audit`, and `pip install -e ".[dev]"`
 - Runs:
   - `bandit -r src -c .bandit.yml -f sarif ... --exit-zero`
   - `bandit -r src -c .bandit.yml --confidence-level medium --severity-level medium`
-  - `pip-audit --strict --desc on`
+  - `pip-audit --desc on --skip-editable` (`--strict` fails on the editable install)
+- Does not run gitleaks. That scan is `ci.yml` job `Security Scans`: [Security Scans: Gitleaks](#security-scans-gitleaks)
 - Uploads `reports/security/` artifacts
 
 ### `juniper-data-schema-drift.yml`
@@ -491,6 +526,19 @@ uv pip compile pyproject.toml \
 - The compiler input is `pyproject.toml`. Dependabot's pip floor edits land in `conf/requirements_ci.txt` (repo-root `requirements.txt` resolves to that file through the `conf/requirements.txt` symlink). A package absent from `pyproject.toml` stays out of `requirements.lock`. `--upgrade` can still move other pins in the same commit.
 - Commit, only when `requirements.lock` changed, via `createCommitOnBranch` (`expectedHeadOid` is the checked-out HEAD). Push subjects: `[dependabot skip] Update requirements.lock` on `push`, `chore(deps): auto-regenerate requirements.lock after pyproject change` on `pull_request`.
 - Lockfile Freshness (`ci.yml` job `lockfile-check`) is a separate `--constraint` compile. A skipped regen stays green while the current pins still satisfy `pyproject.toml`.
+
+### `agents-md-touch-up.yml`
+
+Operator runbook: [AGENTS.md date check](CICD_MANUAL.md#runbook-agentsmd-date-check).
+
+- Workflow name `AGENTS.md Date Check`. Job id `verify-date`, check name `Verify AGENTS.md Last Updated`.
+- Triggers: `pull_request` types `opened`, `reopened`, `synchronize`, paths `AGENTS.md`. Concurrency group `agents-md-date-check-<pull request number>` cancels the in-progress run.
+- Permissions `contents: read`. Fork pull requests run. The job has no secret and creates no commit.
+- Checkout is SHA-pinned with comment `# v7.0.1`, `fetch-depth: 0`, `ref` the pull request head SHA. Leave the SHA in the workflow file.
+- The step passes when the first `**Last Updated**:` value equals today's UTC date, or when `git diff <base sha>...HEAD -- AGENTS.md` adds a `**Last Updated**:` line whose value is a `YYYY-MM-DD` date that is not in the future. `<base sha>` is `github.event.pull_request.base.sha`. A missing field warns and passes. A malformed or future value fails.
+- `ci.yml` job `docs` (`Documentation Links`) runs `juniper-lint-agents-md-header` and `juniper-lint-agents-md-version` from `juniper-ci-tools>=0.9.0,<0.10.0` with no arguments, on every CI run.
+  Header schema (0.9.1): the block before the first `---` line or H2 heading holds `Project`, `Repository`, `Author`, `License`, `Version`, and `Last Updated` in that relative order, each non-empty, date `YYYY-MM-DD`. Extra bullets may sit between them. Version lint: one whole-file `**Version**: <token>` equals `[project].version`.
+  A missing version line is a skip (exit 0) from that lint; the header lint still fails it. Two version lines exit 2.
 
 ### `publish.yml`
 
@@ -591,6 +639,7 @@ The job `if` is not the last gate. The pinned action then applies its own checks
 | CI dependencies             | `pyproject.toml` extras, per `ci.yml` job (not `conf/requirements_ci.txt`, which is `juniper-generate-dep-docs` output) |
 | Image serve-and-version     | `util/check_image_serves.py`, `publish-image.yml` |
 | Security scan excludes      | `.bandit.yml` + workflow commands              |
+| Gitleaks ruleset            | `.gitleaks.toml` (`[extend] useDefault`), `.gitleaksignore`, `ci.yml` `GITLEAKS_VERSION` |
 | CodeQL action pins          | SHA comments on `codeql.yml` + `ci.yml` `upload-sarif` |
 | Claude action pin           | `# vX.Y.Z` comment on the `claude.yml` `uses:` line (ungrouped) |
 | Dependabot action groups    | `.github/dependabot.yml` (`codeql-action` only) |
@@ -826,7 +875,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-10-26
-**Version:** 0.29.0
+**Last Updated:** 2026-11-07
+**Version:** 0.30.0
 **Maintained By:** Development Team
 **Status:** ✅ Current

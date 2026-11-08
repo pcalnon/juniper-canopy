@@ -23,7 +23,10 @@
 #   gitleaks dir --redact .        # the working tree, INCLUDING gitignored files
 
 # Load gitleaks' built-in rules; the allowlists below EXTEND them.
-# Removing this table silently empties the ruleset again (see the header).
+# Removing this table no longer passes silently: the [[rules]] entry below has no regex or
+# path of its own, so gitleaks 8.24.3 refuses the config ("Failed to load config ... both
+# |regex| and |path| are empty") and the Gitleaks step fails. Removing that entry too would
+# bring back the zero-rule pass the header describes.
 [extend]
 useDefault = true
 

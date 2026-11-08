@@ -36,6 +36,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-c commit.gpgsign=false -c tag.gpgsign=false`, and they and the step it runs set `GIT_CONFIG_GLOBAL` to the
   null device and `GIT_CONFIG_NOSYSTEM=1`. Test-only.
 
+- **Documentation harvested from the Cursor flood-4 docs PRs** (canopy#790, #791, #793, #796). The CI/CD set
+  (`docs/ci_cd/CICD_MANUAL.md`, `CICD_QUICK_START.md`, `CICD_REFERENCE.md`, `CICD_ENVIRONMENT_SETUP.md`) gains the
+  Gitleaks ruleset contract (`.gitleaks.toml`'s `[extend] useDefault = true`, the AND-scoped `generic-api-key`
+  allowlist for conda build strings, the pinned 8.24.3 binary and its `GITLEAKS_PARITY_REQUIRED` self-test), and its
+  weekly-scan runbook now matches `security-scan.yml` (`pip install -e ".[dev]"`, then
+  `pip-audit --desc on --skip-editable`, where it said `pip install -e .` and `pip-audit --strict --desc on`) and
+  says that workflow runs no Gitleaks (#790). It documents the unit lane's Codecov upload as `ci.yml` runs it
+  (`token: ${{ secrets.CODECOV_TOKEN }}`, `files: reports/coverage.xml`) in place of a stale `codecov-action@v4`
+  example, and that a test module must sit in a directory some lane names, never at the top of `src/tests/` (#791).
+  It documents the verify-only AGENTS.md date check (`agents-md-touch-up.yml`) and its header states, and the
+  `Documentation Links` job's header and version lints (#793). The product docs (`docs/DEVELOPER_CHEATSHEET.md`,
+  `QUICK_START.md`, `REFERENCE.md`, `USER_MANUAL.md`, `api/API_REFERENCE.md`) describe the mnist declared-param
+  filter canopy#778 landed: the restart modal renders Samples alone, and on the cascor service path a posted Noise
+  is withheld and named at INFO (#796). Claims were re-checked against `main`, and four the drafts got wrong are
+  corrected. Removing `[extend]` alone makes gitleaks 8.24.3 refuse this config, so the Gitleaks step fails; only a
+  file with no `[[rules]]` either, as before 2026-10-25, passes with zero rules. The Dependabot secret store has
+  held `CODECOV_TOKEN` since 2026-11-04, so a Dependabot pull request's upload carries it. `POST /api/stage_dataset`
+  echoes the staged config in `data`. A test module directly in `src/tests/` fails the unit lane
+  (`TestNoTestModuleSitsAtTheTopOfTheTestTree`) rather than silently never running. The first two false claims
+  are also corrected in comments on `main` (`.gitleaks.toml`, `.github/workflows/ci.yml`,
+  `src/tests/regression/test_gitleaks_config.py`), with no logic change. The drafts' version stamps are dropped and
+  each file is bumped once (minor where it gains a section, as `docs/DOCUMENTATION_OVERVIEW.md` prescribes); the
+  eight lines over markdownlint's 512-character limit are wrapped (#790 one, #793 four, #796 three); #790's loss of `CICD_QUICK_START.md`'s header hard breaks is
+  not carried; and #793's two code spans of `##` plus a trailing space, which markdownlint's `--fix` rewrites to
+  bare `##`, are reworded. Docs and comments only.
+
 - **juniper-canopy#737: a CI job now notices juniper-data parameter drift against the committed generator-schema
   snapshot.** W1.2's declared-param filter (canopy#733) reads `DECLARED_PARAM_DEFAULTS`, which the unit tests pin to
   `src/tests/fixtures/juniper_data_sequence_generator_schemas.json`, but nothing compared that capture with

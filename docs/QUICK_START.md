@@ -2,9 +2,9 @@
 
 ## Get Juniper Canopy running in 5 minutes
 
-**Version:** 0.25.4
+**Version:** 0.26.0
 **Status:** ✅ Production Ready
-**Last Updated:** October 8, 2026
+**Last Updated:** November 7, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -628,6 +628,8 @@ A cascor that does not send the marker will not show this alert. It used to cons
 cd src && pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py -v
 ```
 
+Confirm re-stages only the dataset fields the modal shows for that type. For MNIST that is Samples, not Noise. See [Issue 15](#issue-15-mnist-noise-never-arrives).
+
 **See:** [AGENTS_REFERENCE.md § Start-fresh refusal](AGENTS_REFERENCE.md#start-fresh-refusal-f1-f2)
 
 ---
@@ -648,6 +650,23 @@ cd src && pytest tests/regression/test_selection_reachability_guardrails.py -k X
 
 **See:** [AGENTS_REFERENCE.md § Sidebar model summary](AGENTS_REFERENCE.md#sidebar-model-summary-x11)
 
+---
+
+### Issue 15: MNIST Noise Never Arrives
+
+**Symptom:** Noise for MNIST does not change the staged digits. The restart modal shows Samples and no Noise field. A script that posts `nn_dataset_noise` sees the same result.
+
+**Cause:** juniper-data 0.17.1 `MnistParams` (generator `3.0.0`) declares `n_samples` and does not declare `noise`. Canopy's `DECLARED_PARAM_DEFAULTS["mnist"]` entry (juniper-canopy#778) makes the modal render Samples alone. On the cascor service path, `ServiceBackend` shapes Apply, the live swap, and the restart re-stage before cascor sees them.
+An Apply you do not edit reaches cascor as `params: {"flatten": true}`. Samples becomes `params.n_samples`. A posted noise is withheld and named at INFO (`not forwarded: nn_dataset_noise`). There is no WARNING. `flatten` is not on the form; `false` would stage rank-3 images.
+
+**What to do:** Change Samples. Leave `flatten` at the seed's `true`. Equities still shows neither Samples nor Noise, and an untouched Apply sends its three-key registry seed. Spiral still shows all four typed fields and is not shaped. Demo mode stores the body the dashboard posts and does not run this filter. The modal still omits Noise.
+
+```bash
+cd src && pytest tests/regression/test_cascor_staging_declared_params.py::TestMnistGetsTheDeclaredParamFilter tests/regression/test_restart_modal_restages_what_it_shows.py -q
+```
+
+**See:** [USER_MANUAL.md § What Apply sends](USER_MANUAL.md#what-apply-sends-for-a-declared-generator) and [REFERENCE.md § Declared-param staging](REFERENCE.md#declared-param-staging-mnist)
+
 ## Next Steps
 
 ### Learn More
@@ -661,6 +680,7 @@ cd src && pytest tests/regression/test_selection_reachability_guardrails.py -k X
 - **[Recurrence fit refusal and in-sample scores](AGENTS_REFERENCE.md#recurrence-fit-refusal-and-in-sample-scores)** - Where a 4xx `detail` goes, and why the regression card is a training-split score
 - **[Recurrence key, restored model, and service version](AGENTS_REFERENCE.md#recurrence-key-restored-model-and-service-version)** - What a 401, a 429, a restored snapshot, and a blank model version mean
 - **[Start-fresh refusal (F1, F2)](AGENTS_REFERENCE.md#start-fresh-refusal-f1-f2)** - What to do when Start says the staged dataset is wider than the network
+- **[Declared-param staging (mnist)](REFERENCE.md#declared-param-staging-mnist)** - Why MNIST Noise is not staged, and what an untouched Apply sends
 - **[CI/CD Guide](ci_cd/CICD_QUICK_START.md)** - Testing and CI/CD workflows
 
 ### Start Developing
@@ -921,8 +941,8 @@ conda list | grep -E "(fastapi|dash|uvicorn)"
 
 ---
 
-**Last Updated:** October 8, 2026  
-**Version:** 0.25.4  
+**Last Updated:** November 7, 2026  
+**Version:** 0.26.0  
 **Status:** ✅ Production Ready
 
-**Last Updated:** 2026-10-08
+**Last Updated:** 2026-11-07

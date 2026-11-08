@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.4
+**Version:** 0.26.0
 **Status:** Active
-**Last Updated:** October 8, 2026
+**Last Updated:** November 7, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -27,6 +27,7 @@
 - [Recurrence fit refusal and in-sample scores](#recurrence-fit-refusal-and-in-sample-scores)
 - [Recurrence key, restored model, and service version](#recurrence-key-restored-model-and-service-version)
 - [Start-fresh refusal (F1, F2)](#start-fresh-refusal-f1-f2)
+- [Declared-param staging (mnist)](#declared-param-staging-mnist)
 - [CI/CD Reference](#cicd-reference)
 - [CasCor Backend Reference](#cascor-backend-reference)
 - [Demo Mode Reference](#demo-mode-reference)
@@ -321,6 +322,37 @@ cd src && pytest tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py 
 
 ---
 
+## Declared-param staging (mnist)
+
+`mnist` joins flat `equities` in `dataset_schema.DECLARED_PARAM_DEFAULTS` (juniper-canopy#778). juniper-data 0.17.1 `MnistParams` (generator `3.0.0`, 13 properties) declares `n_samples` and does not declare `noise`. Before this entry the restart modal rendered Noise, cascor forwarded it, and juniper-data dropped the key without a word.
+
+On the cascor service path, `ServiceBackend.stage_dataset` and `swap_dataset_live` call `recurrence_request.shape_stage_payload` for Apply, the live swap, and the restart re-stage. A generator with an entry is forwarded as its registry seed plus the fields the operator edited. Every other generator's body is forwarded as staged. `spiral`, `xor`, and `gaussian` stay undeclared: cascor renames their sample counts, so an entry would be unsafe (`TestNoCascorRenamedGeneratorIsDeclared`).
+
+| Case | Body cascor receives |
+| --- | --- |
+| Untouched MNIST Apply | `{"dataset_type": "mnist", "params": {"flatten": true}}` |
+| Restart re-stage with Samples 500 | `{"dataset_type": "mnist", "params": {"flatten": true, "n_samples": 500}}` |
+| Edit `dataset` to `fashion_mnist` | `{"flatten": true, "dataset": "fashion_mnist"}` inside `params`. Untouched `normalize` and `one_hot_labels` are absent. |
+| Stale client posts `nn_dataset_noise: 0.25` with Samples 500 | Same as the Samples row. INFO names `not forwarded: nn_dataset_noise`. No WARNING. |
+
+The registry seed is `{"flatten": true}` (`model_registry`). The form never renders `flatten` (`SHAPE_DETERMINING_FIELDS`). The restart modal renders Samples alone (`staged_typed_fields`). When the hidden Noise value is set, Confirm's plan names it on the `Not sent:` line.
+
+The `[mnist]` extra gates generation, not the schema read. `_UNAVAILABLE_REASONS["mnist"]` stays "needs juniper-data's optional dataset extra". Demo mode records the posted body and does not shape it.
+
+The capture is `MNIST_DECLARED_PARAMS_SOURCE`: juniper-data 0.17.1, published wheel, release tag `v0.17.1`, captured 2026-11-03, in `src/tests/fixtures/juniper_data_tabular_generator_schemas.json`. `equities` in that fixture is unchanged apart from the capture date. The drift check is `util/check_juniper_data_generator_schemas.py`.
+
+| Document | Purpose |
+| --- | --- |
+| [USER_MANUAL.md § What Apply sends](USER_MANUAL.md#what-apply-sends-for-a-declared-generator) | What the operator sees and what cascor receives |
+| [AGENTS_REFERENCE.md § Restart modal](AGENTS_REFERENCE.md#restart-modal-f2) | Which typed fields render, and the confirm order |
+| [API_REFERENCE.md § POST /api/stage_dataset](api/API_REFERENCE.md#post-apistage_dataset) | Request fields and the service-path shaping |
+
+```bash
+cd src && pytest tests/regression/test_cascor_staging_declared_params.py::TestMnistGetsTheDeclaredParamFilter tests/unit/test_recurrence_request.py -q -k mnist
+```
+
+---
+
 ## CI/CD Reference
 
 Pipeline configuration, hooks, and workflow reference.
@@ -420,6 +452,6 @@ The most commonly used environment variables for juniper-canopy configuration. F
 
 ---
 
-**Last Updated:** October 8, 2026
-**Version:** 0.25.4
+**Last Updated:** November 7, 2026
+**Version:** 0.26.0
 **Maintainer:** Paul Calnon

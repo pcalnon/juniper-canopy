@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-10-26
-**Version:** 0.27.2
+**Last Updated:** 2026-11-07
+**Version:** 0.28.0
 **Status:** Current
 
 ## Table of Contents
@@ -287,6 +287,28 @@ src/demo_mode.py           → src/tests/unit/test_demo_mode.py
 src/config_manager.py      → src/tests/unit/test_config_manager.py
 src/communication/websocket_manager.py → src/tests/unit/test_websocket_manager.py
 ```
+
+#### Which lane runs the file
+
+The required unit job collects by path. The `unit` marker does not put a file on that job. `ci.yml` job `unit-tests` runs:
+
+```bash
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/ src/tests/contract/ src/tests/performance/
+```
+
+`integration-tests` names only `src/tests/integration`. `ui-tests` names only `src/tests/ui`. `scheduled-tests.yml` passes no path, so pytest uses `testpaths = ["src/tests"]` from `pyproject.toml`, and selects `-m "slow or integration"`. That marker drops an unmarked module. `src/tests/conftest.py` does not add a marker by directory.
+
+A `test_*.py` placed directly in `src/tests/` is on none of those path lists. `TestEveryTestDirectoryIsNamedBySomeLane` in `src/tests/regression/test_ci_lane_wiring.py` walks subdirectories only, so it cannot see that file. `TestNoTestModuleSitsAtTheTopOfTheTestTree` in the same module fails the unit lane when one is present.
+
+From #516 (2026-08-25) until 2026-10-29, `test_memory_budget_check.py` sat at the top of `src/tests/`.
+Its 40 tests, the negative controls for `util/memory_budget_check.py`, ran in no lane.
+They now live at `src/tests/unit/test_memory_budget_check.py`.
+The module's `pytestmark = pytest.mark.unit` is for `pytest -m unit` (the quick-start command).
+This job's selector is negative, so the marker is not what runs the file. The path is.
+From that file the repo root is `Path(__file__).parents[3]`.
+A shallower path raises `FileNotFoundError` while the module is collected.
 
 #### Test Naming
 
@@ -785,14 +807,77 @@ Lockfile Freshness stays green across a skipped regen whenever the existing lock
 
 ### Runbook: Scheduled security scan
 
-`security-scan.yml` runs weekly and manually:
+`security-scan.yml` runs weekly (Monday `06:00 UTC`) and on `workflow_dispatch`:
 
-1. Installs `bandit[sarif]`, `pip-audit`, and project package (`pip install -e .`)
-2. Runs Bandit with SARIF output and text output
-3. Runs `pip-audit --strict --desc on`
+1. Installs `bandit[sarif]`, `pip-audit`, and the project (`pip install -e ".[dev]"`)
+2. Runs Bandit SARIF (`--exit-zero`) and a medium-confidence, medium-severity text scan
+3. Runs `pip-audit --desc on --skip-editable`. `--strict` treats the editable install as a package missing from PyPI and fails the job
 4. Uploads `reports/security/` artifacts
 
+This workflow does not run gitleaks. The secrets scan is the `ci.yml` `Security Scans` job, below.
+
 Use this runbook after dependency updates to confirm no new vulnerabilities are introduced.
+
+### Runbook: Gitleaks secrets scan
+
+`Security Scans` in `.github/workflows/ci.yml` is the required secrets scan. It runs gitleaks, then Bandit, then pip-audit. Job facts: [Security Scans: Gitleaks](CICD_REFERENCE.md#security-scans-gitleaks).
+
+**Step.** SHA-pinned `gitleaks/gitleaks-action`. The version record is the `# v3.0.0` comment on that `uses:` line. `GITLEAKS_VERSION` is `8.24.3`, the engine that action tag installs by default. Stating it in the step is what keeps a later action SHA from changing the engine. `src/tests/regression/test_gitleaks_config.py` asserts the env value. The step passes no `fail` input. The action exits non-zero when it reports a leak, and that fails the job.
+
+**Config.** `.gitleaks.toml` and `.gitleaksignore` live at the repo root. The action passes no `--config`, so both are auto-discovered. `GITLEAKS_CONFIG` or `GITLEAKS_CONFIG_TOML`, when set, outranks the file in the working tree.
+
+`[extend]` with `useDefault = true` loads gitleaks' built-in ruleset. A v8 config that omits that table loads only the file's own `[[rules]]`. This file's only rule entry merges an allowlist into the built-in `generic-api-key` rule and has no `regex` or `path` of its own.
+Without `[extend]`, gitleaks 8.24.3 therefore refuses the config (`Failed to load config`: `generic-api-key: both |regex| and |path| are empty`) and exits 1, and the Gitleaks step fails with `Unexpected exit code [1]`.
+The silent pass needs the `[[rules]]` entry gone as well: a file with neither loads zero rules and exits 0 on every `push`, `pull_request`, and `workflow_dispatch`. That was the file until 2026-10-25, which held only an `[allowlist]` (the same empty-ruleset defect as juniper-ml#2203). Leave the table in place.
+
+gitleaks 8.24.3 does not read a top-level `[[allowlists]]` table or a `targetRules` key. The loader drops both and prints nothing. The global `[allowlist]` is OR-only: `condition` is not read there, so a path in that table skips every rule for the file.
+
+**Scope.** The job checks out with `fetch-depth: 0`.
+
+| Event | What the step does |
+| --- | --- |
+| `push`, `pull_request` | Scans the event's own commits |
+| `workflow_dispatch` | Passes no `--log-opts`, so it scans every commit reachable from every branch and tag in that checkout |
+| `repository_dispatch` | Skipped. The step `if` keeps the action from running. gitleaks-action errors on that event before it scans, which is why the step is omitted |
+
+**Allowlists.**
+
+Global `[allowlist].paths` matches `conf/.*\.lock` and `notes/mcp/.*`. Each match skips every rule for those files.
+
+Conda lines of the form `<package>=<version>=<build>` are rewritten under a new commit on every environment refresh, so a `.gitleaksignore` entry cannot name that commit ahead of time. They are an AND-scoped allowlist on `generic-api-key` alone. A finding is dropped only when both of these hold:
+
+- The path ends in `conf/conda_environment*.yaml` or `conf/conda_environment*.yml`, or the file is `conf/requirements-conda.txt`.
+- The captured secret is `<version>=<build>` and the build string is `h<7 hex>_<n>`, `pyh<7 hex>_<n>`, or `py<NNN>h<7 hex>_<n>`.
+
+The same line in any other file still fires. A value of any other shape in a conda file still fires. Every other rule, including `github-pat`, still fires inside those files. The `[[rules]]` entry carries id `generic-api-key` and no `regex` key, which is how gitleaks merges the allowlist into the default rule instead of replacing it.
+
+**Ignore file.** Each `.gitleaksignore` entry is `<40-hex commit>:<file>:<rule>:<line>`. The nearest non-entry line above a group is a comment that names the class. A file-scoped entry (`<file>:<rule>:<line>`) would also hide a later secret written at that line. The regression test rejects that shape, a duplicate, and an entry with no class comment above it.
+
+**Self-test.** After pip-audit, on every event except `repository_dispatch`, the job installs pytest and PyYAML (after the audit, so they are not part of the audited set) and runs:
+
+```bash
+python -m pytest --noconftest -p no:cacheprovider -o addopts="" \
+  -W "ignore::pytest.PytestConfigWarning" \
+  src/tests/regression/test_gitleaks_config.py -v
+```
+
+with `GITLEAKS_PARITY_REQUIRED=1`. `--noconftest` keeps the job off `src/tests/conftest.py`. The unit lane runs the same file, and its real-engine cases skip when no `gitleaks` binary is on `PATH` (`GITLEAKS_BIN` overrides that lookup). In `Security Scans` a missing binary fails the job: a check that did not run is not a pass. The real-engine cases assemble a token at runtime and require the built-in `github-pat` rule to fire through the auto-discovered config.
+
+**Local run.** Use engine 8.24.3 so the allowlist behavior matches CI. From the repo root:
+
+```bash
+gitleaks git --redact
+gitleaks dir --redact .
+```
+
+`gitleaks git` scans committed history. `gitleaks dir` scans the working tree, including gitignored files. Both auto-discover the two files at the repo root.
+
+**Reading a failure**
+
+- The log names a rule, a file, and a line. Treat the finding as a secret until it is classified. A historical false positive is one commit-scoped line in `.gitleaksignore`, under a comment that names its class.
+- A conda refresh fails `generic-api-key` on a `<version>=<build>` line when the build string misses the allowlist regex. Extend that regex on the `generic-api-key` rule. A new global `[allowlist].paths` entry would skip every rule in the file.
+- `test_config_extends_the_default_ruleset` fails when `[extend] useDefault = true` is missing. The Gitleaks step in the same run then fails too (`Failed to load config`), because the `generic-api-key` entry has nothing to extend. A green Gitleaks step beside that failure means the `[[rules]]` entry was removed as well, and the step ran with zero rules.
+- A green `repository_dispatch` run did not execute this step.
 
 ### Runbook: CodeQL analysis
 
@@ -833,6 +918,52 @@ Review findings at GitHub Security → Code scanning. The `ci.yml` `Quality Gate
 - Workflow permissions: `actions: read`, `contents: read`, `security-events: write`.
 - Language matrix is Python only.
 - `ci.yml` `upload-sarif` is `continue-on-error` on every event except a pull request. On a PR a failed Bandit SARIF upload fails `Security Scans`, a required check, with the cause in the step log. No ruleset requires the `Bandit` check that code scanning creates from the upload, so before this a failed upload was silent (juniper-canopy#780). On pushes and dispatches a failed upload still does not fail `Security Scans`. A failed CodeQL analyze step **does** fail `Analyze (python)`.
+
+### Runbook: AGENTS.md date check
+
+`.github/workflows/agents-md-touch-up.yml` (workflow name `AGENTS.md Date Check`) runs when a pull request is opened, reopened, or synchronized and the change includes `AGENTS.md`. The job id is `verify-date`. The check name is `Verify AGENTS.md Last Updated`. Permissions are `contents: read`, so fork pull requests run it. The job creates no commit. Concurrency group `agents-md-date-check-<pull request number>` cancels an in-progress run for that pull request.
+
+Checkout is SHA-pinned `actions/checkout` with the `# v7.0.1` comment, `ref` set to the pull request head, and `fetch-depth: 0` so the three-dot diff can see the base. Leave the SHA in the workflow. The version record is the comment.
+
+The step takes the first line matching `**Last Updated**:` (the colon sits against the closing bold markers) and compares the value with today's UTC date from `date -u +%Y-%m-%d`.
+
+| Header state | Result |
+| --- | --- |
+| No matching line | `::warning::`, exit 0 |
+| Value is not `YYYY-MM-DD` | `::error::`, exit 1 |
+| Value is after today UTC | `::error::`, exit 1 |
+| Value equals today UTC | exit 0, including when this pull request's diff does not touch the line |
+| `git diff <base sha>...HEAD -- AGENTS.md` adds a line `+**Last Updated**:` | exit 0, when the value is a `YYYY-MM-DD` date that is not in the future |
+| Anything else | `::error::` quoting the current value and the line to write, exit 1 |
+
+`<base sha>` is `github.event.pull_request.base.sha`. The failure text is:
+
+```text
+**Last Updated**: <today UTC>
+```
+
+A pull request opened on Monday stays green on a Thursday re-run when that added line is still in the three-dot diff. Requiring the value to equal the day CI runs would fail that re-run. A changed line whose date is in the past still passes. A future date fails even when the line changed. String comparison is valid because the date is zero-padded ISO.
+
+The step comment above `juniper-lint-agents-md-header` in `.github/workflows/ci.yml`, and the module docstring of `juniper_ci_tools.lint_agents_md_header` in `juniper-ci-tools` 0.9.1, still say this workflow auto-bumps the date and pushes. The live `run` block verifies and exits.
+The workflow header records why the rewriter was removed: a runner `git commit` is unsigned, and `required_signatures` rejects it (juniper-ml#1099); a `[skip ci]` head then left every required check at "expected" (juniper-cascor#515). Follow the `run` block.
+
+The workflow header names `tests/test_agents_md_header_schema.py` and `tests/test_agents_md_version_drift.py`. Those paths are absent from this tree. Shape and package version are the `Documentation Links` job (`ci.yml` job `docs`), which installs `juniper-ci-tools>=0.9.0,<0.10.0` and runs both console scripts with no arguments on every CI run, including pull requests that do not touch `AGENTS.md`. The behavior below is `juniper-ci-tools` 0.9.1, the wheel that range resolved to on 2026-11-04.
+
+`juniper-lint-agents-md-header` reads the header as everything before the first line that is `---` or that starts an H2 heading (`##` followed by a space). It exits 0 when that block contains `Project`, `Repository`, `Author`, `License`, `Version`, and `Last Updated` in that relative order, each with a non-empty value, and `Last Updated` matches `YYYY-MM-DD`. Extra bullets may sit between the six.
+It exits 1 when a required field is missing, empty, out of that order, or the date is not `YYYY-MM-DD`. It exits 2 when it cannot find a directory that holds both `AGENTS.md` and `.github/`, or when `AGENTS.md` is missing.
+
+`juniper-lint-agents-md-version` exits 0 when the single whole-file line `**Version**: <token>` equals `pyproject.toml` `[project].version`. A file with no such line prints `SKIP` and exits 0 (the tool treats that as an opt-out). The header lint still fails that file, because `Version` is one of the six required fields.
+Two or more `**Version**:` lines, a missing `[project].version`, or a missing file exit 2. Differing versions exit 1. The drift line tells you to bump `AGENTS.md` in the same pull request as the `pyproject.toml` version bump.
+
+When you edit `AGENTS.md`, set the date line to today's UTC date in the form the error prints, and keep `**Version**:` equal to `[project].version`. Reproduce the two lints locally with the same install range:
+
+```bash
+python -m pip install "juniper-ci-tools>=0.9.0,<0.10.0"
+juniper-lint-agents-md-header
+juniper-lint-agents-md-version
+```
+
+The date check has no local console script. It is the workflow step.
 
 ### Runbook: Release publishing
 
@@ -985,19 +1116,27 @@ Lines Changed: +45 / -12
 
 #### Troubleshooting Codecov
 
-**Coverage not uploading:**
+##### Upload refused, job still green
 
-```yaml
-# Check GitHub Actions logs
-- name: Upload Coverage to Codecov
-  uses: codecov/codecov-action@v4
-  with:
-    file: ./coverage.xml
-    token: ${{ secrets.CODECOV_TOKEN }}  # Verify secret set
-    fail_ci_if_error: false  # Change to true to debug
-```
+The live step is `Upload Coverage to Codecov` on `ci.yml` job `unit-tests` (juniper-canopy#779, owner ruling 2026-10-29). It is SHA-pinned `codecov/codecov-action`. The version record is the `# v7.1.1` comment on that `uses:` line. The step does not copy a tag into `uses:`.
 
-**Coverage report missing files:**
+| Input | Value |
+| ----- | ----- |
+| `if` | `always()` |
+| `token` | `${{ secrets.CODECOV_TOKEN }}`, an Actions repository secret |
+| `files` | `reports/coverage.xml` |
+| `flags` | `unittests` |
+| `fail_ci_if_error` | `false` |
+
+Without the token, Codecov refuses the upload and the step log says `Token required - not valid tokenless upload`. The check stays green because `fail_ci_if_error` is false. A green `Unit Tests + Coverage` check is not proof the report was accepted. Read that step's log.
+
+Both secret stores hold `CODECOV_TOKEN`: the Actions store, and since 2026-11-04 the Dependabot store, which a Dependabot pull request reads.
+A refused upload on a pull request from a branch of this repository, Dependabot's included, is therefore a token problem to investigate, not an expected refusal. A pull request from a fork gets no secrets, so its upload is tokenless by design.
+Leave `fail_ci_if_error` false: coverage is gated inside the job by `--cov-fail-under`, and the upload only reports it, so a Codecov outage should not turn a required check red.
+
+Job facts: [Coverage gate](CICD_REFERENCE.md#coverage-gate). The secret is listed in [Required secrets](CICD_ENVIRONMENT_SETUP.md#required-secrets).
+
+##### Coverage report missing files
 
 ```yaml
 # Check .codecov.yml ignore section
@@ -1787,8 +1926,10 @@ Fix by: 2025-11-12
 
 ### `security` fails
 
-- For Bandit: review `reports/security/bandit.txt` and prioritize medium/high findings.
-- For pip-audit: update vulnerable dependencies and regenerate lockfile.
+- For Gitleaks: the step log names the rule, file, and line. Treat the finding as a secret until it is classified. A historical false positive is one commit-scoped line in `.gitleaksignore`. See [Gitleaks secrets scan](#runbook-gitleaks-secrets-scan).
+- `test_gitleaks_config.py` fails in this job when the binary is missing (`GITLEAKS_PARITY_REQUIRED=1`) or when `.gitleaks.toml` no longer extends the default ruleset. The unit lane skips the real-engine cases without a binary. This job must not.
+- For Bandit: review `reports/security/bandit.txt` and prioritize medium/high findings. On a pull request a failed SARIF upload also fails this job. See [CodeQL analysis](#runbook-codeql-analysis).
+- For pip-audit: update vulnerable dependencies and regenerate the lockfile.
 
 ### `Analyze (python)` fails (CodeQL)
 
@@ -1796,6 +1937,15 @@ Fix by: 2025-11-12
 - Open the workflow log for the `Perform CodeQL Analysis` step, then GitHub Security → Code scanning for alert details.
 - Do not "fix" a red CodeQL pin bump by reverting only `codeql.yml` or only `ci.yml` — Dependabot groups every `github/codeql-action*` use onto one SHA.
 - A green `Quality Gate` with a red `Analyze (python)` is **not** merge-safe.
+
+### `Verify AGENTS.md Last Updated` fails
+
+This check is `.github/workflows/agents-md-touch-up.yml`, and it runs only when the pull request touches `AGENTS.md`. Full contract: [AGENTS.md date check](#runbook-agentsmd-date-check).
+
+- Read the `::error::` annotation. Write `**Last Updated**:` as the UTC date it prints, with the colon tight against the bold markers.
+- A future date fails. A value that is not `YYYY-MM-DD` fails.
+- A missing field warns and this job passes. `Documentation Links` then fails `juniper-lint-agents-md-header`.
+- A `**Version**:` value that differs from `pyproject.toml` `[project].version` fails `juniper-lint-agents-md-version` in that same job, on every CI run.
 
 ## References
 
