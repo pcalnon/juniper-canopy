@@ -1,8 +1,8 @@
 # CI/CD Quick Start
 
-**Last Updated:** 2026-10-08  
+**Last Updated:** 2026-11-08  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.27.1  
+**Version:** 0.27.7  
 **Status:** Current
 
 ## Prerequisites
@@ -106,6 +106,10 @@ Open the PR checks and confirm these gates complete:
 
 - `Lockfile Freshness` fails after a `pyproject.toml` change:
   Recompile with the three extras and `--upgrade`, then commit `requirements.lock`. The freshness job itself uses `--constraint` and stays green when newer wheels exist and the current pins still satisfy `pyproject.toml`.
+- `lockfile-update` reports `base64 produced an empty payload -- lockfile NOT committed`:
+  The regen refused to sign a commit. An empty encode used to become an empty `requirements.lock`. The step exits 1 before `jq` and `gh`. [Dependabot lockfile automation](CICD_MANUAL.md#runbook-dependabot-lockfile-automation).
+- `Security Scans` is red on the SARIF upload and the Bandit step is green:
+  The upload reads `reports/security/bandit.sarif` with `if: always()`. A missing file fails a pull request. Findings do not fail the scan step. [Bandit SARIF on Security Scans](CICD_MANUAL.md#runbook-bandit-sarif-on-security-scans).
 - A Dependabot `deps:` lock diff names packages the requirements diff did not:
   The floor edit is `conf/requirements_ci.txt` (repo-root `requirements.txt` resolves there through the `conf/requirements.txt` symlink). The lock commit compiles `pyproject.toml` with `--upgrade`. Review both. [Dependabot lockfile automation](CICD_MANUAL.md#runbook-dependabot-lockfile-automation).
 - Docs-only change fails CI:

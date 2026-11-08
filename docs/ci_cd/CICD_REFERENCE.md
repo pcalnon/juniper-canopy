@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-10-26
-**Version:** 0.29.0
+**Last Updated:** 2026-11-08
+**Version:** 0.29.4
 **Status:** Current
 
 ## Table of Contents
@@ -368,13 +368,21 @@ env:
 | `unit-tests`        | `pre-commit`      | Ubuntu matrix `3.12/3.13/3.14` + macOS `3.12` | Runs unit + regression markers with coverage gate |
 | `integration-tests` | `unit-tests`      | `3.14`                                         | Runs fast integration subset                      |
 | `build`             | `unit-tests`      | `3.14`                                         | Builds sdist and wheel                            |
-| `security`          | `pre-commit`      | `3.14`                                         | Gitleaks + Bandit + pip-audit                     |
+| `security`          | `pre-commit`      | `3.14`                                         | Gitleaks + Bandit SARIF + pip-audit. See [Bandit SARIF on the security job](#bandit-sarif-on-the-security-job) |
 | `dependency-docs`   | `build`           | `3.14`                                         | Generates dependency docs via script              |
 | `lockfile-check`    | —                 | `3.14`                                         | Recompiles lockfile with constraints              |
 | `docs`              | —                 | `3.14`                                         | Runs doc-link validation script                   |
 | `docker-build`      | `build`           | docker engine                                  | Builds image + health smoke test                  |
 | `required-checks`   | all core jobs     | n/a                                            | Aggregated merge gate                             |
 | `notify`            | `required-checks` | n/a                                            | Run summary                                       |
+
+### Bandit SARIF on the security job
+
+Operator runbook: [Bandit SARIF on Security Scans](CICD_MANUAL.md#runbook-bandit-sarif-on-security-scans).
+
+- Install is the quoted extra `"bandit[sarif]"`, in the step `Install security tools`. Bare `bandit` has no `-f sarif` formatter (`invalid choice: 'sarif'`).
+- SARIF line: `bandit -r src -f sarif -o reports/security/bandit.sarif -c .bandit.yml`, then `|| BANDIT_EXIT=$?`. The text-report line uses `|| true`. The scan step `Run Bandit (SAST) -> SARIF` exits 0 for a clean scan, for findings, and when the formatter is missing. A non-zero SARIF exit sets `bandit_found_issues=true`. When the formatter is missing, that step writes no file and the upload still runs.
+- Upload step `Upload Bandit SARIF to GitHub Security`: SHA-pinned `github/codeql-action/upload-sarif`, `if: always()`, `sarif_file: reports/security/bandit.sarif`, `continue-on-error: ${{ github.event_name != 'pull_request' }}`. A pull request with no report fails `Security Scans` (`Path does not exist: reports/security/bandit.sarif`). `push` and `workflow_dispatch` tolerate that upload failure. The code-scanning check named `Bandit` is not a required check.
 
 ### Test marker expressions in CI
 
@@ -447,13 +455,13 @@ This catches broken internal file and heading links without requiring sibling re
 
 ### `security-scan.yml`
 
-- Scheduled: Mondays at `06:00 UTC`
-- Installs `bandit[sarif]` and `pip-audit`
+- Scheduled: Mondays at `06:00 UTC`, plus `workflow_dispatch`. Permissions `contents: read`. No code-scanning upload.
+- Installs the quoted extra `"bandit[sarif]"`, `pip-audit`, and `pip install -e ".[dev]"`.
 - Runs:
-  - `bandit -r src -c .bandit.yml -f sarif ... --exit-zero`
-  - `bandit -r src -c .bandit.yml --confidence-level medium --severity-level medium`
-  - `pip-audit --strict --desc on`
-- Uploads `reports/security/` artifacts
+  - `bandit -r src -c .bandit.yml -f sarif -o reports/security/bandit.sarif --exit-zero` with no `|| true`. `--exit-zero` keeps findings from failing that line. A missing formatter still fails the job.
+  - `bandit -r src -c .bandit.yml --confidence-level medium --severity-level medium` with no `--exit-zero`. Findings on this invocation fail the job.
+  - `pip-audit --desc on --skip-editable` (`--strict` is not used; the editable install is not on PyPI)
+- Uploads `reports/security/` with `if: always()` and `retention-days: 30`.
 
 ### `juniper-data-schema-drift.yml`
 
@@ -489,7 +497,8 @@ uv pip compile pyproject.toml \
 ```
 
 - The compiler input is `pyproject.toml`. Dependabot's pip floor edits land in `conf/requirements_ci.txt` (repo-root `requirements.txt` resolves to that file through the `conf/requirements.txt` symlink). A package absent from `pyproject.toml` stays out of `requirements.lock`. `--upgrade` can still move other pins in the same commit.
-- Commit, only when `requirements.lock` changed, via `createCommitOnBranch` (`expectedHeadOid` is the checked-out HEAD). Push subjects: `[dependabot skip] Update requirements.lock` on `push`, `chore(deps): auto-regenerate requirements.lock after pyproject change` on `pull_request`.
+- Commit, only when `requirements.lock` changed, via `createCommitOnBranch` (`expectedHeadOid` is the checked-out HEAD). Push subjects: `[dependabot skip] Update requirements.lock` on `push`, `chore(deps): auto-regenerate requirements.lock after pyproject change` on `pull_request`. The step runs only when `steps.gate.outputs.proceed == 'true'`.
+- Encode is its own assignment, `LOCK_B64=$(base64 -w0 requirements.lock)`, under `set -euo pipefail`. An empty result exits 1 with `base64 produced an empty payload -- lockfile NOT committed` before `jq` writes `/tmp/lockfile-commit.json` or `gh api graphql` runs. An empty file encodes to an empty string and `base64` exits 0, so `set -e` does not catch it. A non-zero `base64` fails the assignment, including when it printed bytes. A GraphQL body with `.errors` exits 1 with `createCommitOnBranch failed — lockfile NOT committed:` and does not print `Signed lockfile commit`. An unchanged lock exits 0 with `Lockfile already up to date — no commit needed` and does not encode.
 - Lockfile Freshness (`ci.yml` job `lockfile-check`) is a separate `--constraint` compile. A skipped regen stays green while the current pins still satisfy `pyproject.toml`.
 
 ### `publish.yml`
@@ -826,7 +835,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-10-26
-**Version:** 0.29.0
+**Last Updated:** 2026-11-08
+**Version:** 0.29.4
 **Maintained By:** Development Team
 **Status:** ✅ Current

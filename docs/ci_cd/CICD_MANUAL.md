@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-10-26
-**Version:** 0.27.2
+**Last Updated:** 2026-11-08
+**Version:** 0.27.7
 **Status:** Current
 
 ## Table of Contents
@@ -781,18 +781,56 @@ Lockfile Freshness stays green across a skipped regen whenever the existing lock
 
 **Signed commit.** The lock commit is the GitHub `createCommitOnBranch` mutation, with `expectedHeadOid` set to the checked-out HEAD. The mutation authenticates as `CROSS_REPO_DISPATCH_TOKEN`, so the new commit re-triggers CI. A local `git commit` on the runner is unsigned, and `required_signatures` would leave the PR unmergeable. If the branch moved after checkout, the mutation fails instead of overwriting the new tip. An unchanged `requirements.lock` produces no commit.
 
+**Empty encode.** The commit step encodes the lock on its own line, then refuses an empty result before `jq` or `gh`. The step is `Commit updated lockfile (GitHub-signed, via API)`, and it runs only when `steps.gate.outputs.proceed == 'true'`.
+
+```bash
+LOCK_B64=$(base64 -w0 requirements.lock)
+if [ -z "${LOCK_B64}" ]; then
+  echo "::error::base64 produced an empty payload -- lockfile NOT committed"
+  exit 1
+fi
+```
+
+The job runs on `ubuntu-latest`. That `base64 -w0 FILE` form is coreutils. An empty `requirements.lock` encodes to an empty string and exits 0, so `set -e` does not stop it. The emptiness check does. A `base64` that exits non-zero is a different failure: `set -euo pipefail` fails the assignment, including when the command printed bytes and then exited non-zero. Those bytes must not become the commit's `contents`. A missing `requirements.lock` fails the same way. None of these write `/tmp/lockfile-commit.json` or call `gh api graphql`.
+
+A GraphQL body that contains `.errors` exits 1 with `createCommitOnBranch failed — lockfile NOT committed:` and does not print `Signed lockfile commit`. An unchanged lock still exits 0 with `Lockfile already up to date — no commit needed` and does not encode.
+
+The guard exists because an encode inside a `jq --arg` substitution does not trip `set -e` when `base64` fails. `createCommitOnBranch` would then sign a commit that adds an empty `requirements.lock` (juniper-canopy#775).
+
 **Review.** Confirm the expected floor is in `conf/requirements_ci.txt`. Treat every other pin in the lock diff as an `--upgrade` of `pyproject.toml`. Recompile locally with the three extras and `--upgrade` before changing those pins by hand.
 
 ### Runbook: Scheduled security scan
 
-`security-scan.yml` runs weekly and manually:
+`security-scan.yml` runs weekly (Monday `06:00 UTC`) and on `workflow_dispatch`. It does not upload to code scanning. Permissions are `contents: read`.
 
-1. Installs `bandit[sarif]`, `pip-audit`, and project package (`pip install -e .`)
-2. Runs Bandit with SARIF output and text output
-3. Runs `pip-audit --strict --desc on`
-4. Uploads `reports/security/` artifacts
+1. Installs the quoted extra `"bandit[sarif]"`, `pip-audit`, and `pip install -e ".[dev]"`. Bare `bandit` has no SARIF formatter.
+2. Writes SARIF with `bandit -r src -c .bandit.yml -f sarif -o reports/security/bandit.sarif --exit-zero`. `--exit-zero` keeps findings from failing that line. The line has no `|| true`. A missing formatter (`invalid choice: 'sarif'`) still exits non-zero and fails the job, because this workflow has no code-scanning upload to notice a report that was never written.
+3. Runs `bandit -r src -c .bandit.yml --confidence-level medium --severity-level medium` with no `--exit-zero` and no `|| true`. Findings on this invocation fail the job.
+4. Runs `pip-audit --desc on --skip-editable`. `--strict` is not used. The editable install is not a PyPI release, and pip-audit would treat it as a missing dependency.
+5. Uploads the `reports/security/` artifact with `if: always()` and `retention-days: 30`.
 
-Use this runbook after dependency updates to confirm no new vulnerabilities are introduced.
+Use this runbook after dependency updates to confirm no new vulnerabilities are introduced. Pull-request SARIF upload is a different job: [Bandit SARIF on Security Scans](#runbook-bandit-sarif-on-security-scans).
+
+### Runbook: Bandit SARIF on Security Scans
+
+`ci.yml` job `security` (check name `Security Scans`) installs the quoted extra `"bandit[sarif]"` in the step `Install security tools`. The SARIF formatter ships in that extra. Bare `bandit` answers `-f sarif` with `invalid choice: 'sarif'` and writes no file (juniper-canopy#780, main run 40942351409).
+
+The step `Run Bandit (SAST) -> SARIF` exits 0 for a clean scan, for findings, and for a missing formatter. It records the SARIF invocation instead of swallowing it:
+
+```bash
+bandit -r src -f sarif -o reports/security/bandit.sarif -c .bandit.yml 2>&1 || BANDIT_EXIT=$?
+bandit -r src -f txt -o reports/security/bandit.txt -c .bandit.yml 2>&1 || true
+```
+
+| SARIF invocation | Step exit | `bandit_found_issues` | `reports/security/bandit.sarif` |
+| --- | --- | --- | --- |
+| Exit 0 | 0 | `false` | Written |
+| Exit 1 (findings) | 0 | `true`, warning `Bandit found security issues` | Written |
+| Exit 2 (no formatter) | 0 | `true`, same warning | Not written |
+
+`|| true` on the SARIF line would record a missing formatter as a clean scan (`bandit_found_issues=false`). The text-report line is the one that uses `|| true`. Findings do not fail this step.
+
+`Upload Bandit SARIF to GitHub Security` uses SHA-pinned `github/codeql-action/upload-sarif` (the same Dependabot `codeql-action` group as `codeql.yml`), `if: always()`, and `sarif_file: reports/security/bandit.sarif`. The missing-formatter case reaches this step because the scan step exits 0. `if: always()` still runs the upload if that scan step itself fails. On a pull request `continue-on-error` is `${{ github.event_name != 'pull_request' }}`, which is false, so a missing report fails required `Security Scans`. The step log says `Path does not exist: reports/security/bandit.sarif`. On `push` and `workflow_dispatch` that upload failure does not fail the job. No ruleset requires the code-scanning check named `Bandit` that a successful upload creates, so a green upload is not itself a merge gate (juniper-canopy#781). A failed CodeQL analyze step does fail `Analyze (python)`. See [CodeQL analysis](#runbook-codeql-analysis).
 
 ### Runbook: CodeQL analysis
 
@@ -832,7 +870,7 @@ Review findings at GitHub Security → Code scanning. The `ci.yml` `Quality Gate
 
 - Workflow permissions: `actions: read`, `contents: read`, `security-events: write`.
 - Language matrix is Python only.
-- `ci.yml` `upload-sarif` is `continue-on-error` on every event except a pull request. On a PR a failed Bandit SARIF upload fails `Security Scans`, a required check, with the cause in the step log. No ruleset requires the `Bandit` check that code scanning creates from the upload, so before this a failed upload was silent (juniper-canopy#780). On pushes and dispatches a failed upload still does not fail `Security Scans`. A failed CodeQL analyze step **does** fail `Analyze (python)`.
+- `ci.yml` `upload-sarif` is `continue-on-error` on every event except a pull request. On a PR a failed Bandit SARIF upload fails `Security Scans`, a required check, with the cause in the step log. No ruleset requires the `Bandit` check that code scanning creates from the upload, so before this a failed upload was silent (juniper-canopy#780). On pushes and dispatches a failed upload still does not fail `Security Scans`. The scan step itself stays green when the formatter is missing. That contract is [Bandit SARIF on Security Scans](#runbook-bandit-sarif-on-security-scans). A failed CodeQL analyze step **does** fail `Analyze (python)`.
 
 ### Runbook: Release publishing
 
@@ -1787,8 +1825,18 @@ Fix by: 2025-11-12
 
 ### `security` fails
 
-- For Bandit: review `reports/security/bandit.txt` and prioritize medium/high findings.
-- For pip-audit: update vulnerable dependencies and regenerate lockfile.
+- A red `Upload Bandit SARIF to GitHub Security` step with `Path does not exist: reports/security/bandit.sarif` means the report was never written. The scan step can still be green. Confirm the install is the quoted `"bandit[sarif]"` and the SARIF line records `|| BANDIT_EXIT=$?` rather than `|| true`. [Bandit SARIF on Security Scans](#runbook-bandit-sarif-on-security-scans).
+- Bandit findings are a warning on that scan step (`bandit_found_issues=true`). They do not by themselves fail `Security Scans`. Read `reports/security/bandit.txt` and the SARIF.
+- A red `Run pip-audit` step exits 1 after `pip-audit found vulnerabilities in dependencies!`. Update the vulnerable dependencies and regenerate the lockfile.
+
+### `update-lockfile` exits before a signed commit
+
+This is `.github/workflows/lockfile-update.yml`, step `Commit updated lockfile (GitHub-signed, via API)`. It is not the `lockfile-check` job. Full contract: [Dependabot lockfile automation](#runbook-dependabot-lockfile-automation).
+
+- `base64 produced an empty payload -- lockfile NOT committed`: the encode was empty. An empty lock encodes to an empty string and `base64` exits 0, so `set -e` does not catch it. Nothing was committed. `jq` and `gh` did not run.
+- The step dies on `LOCK_B64=$(base64 -w0 requirements.lock)` and does not print the empty-payload error: `base64` exited non-zero, including the case where it printed bytes and then failed. Those bytes were not committed.
+- `createCommitOnBranch failed — lockfile NOT committed:`: the mutation returned `.errors` (often `expectedHeadOid` after the branch moved). The step does not print `Signed lockfile commit`.
+- `Lockfile already up to date — no commit needed`: the lock was unchanged. The step exits 0 and does not encode.
 
 ### `Analyze (python)` fails (CodeQL)
 
