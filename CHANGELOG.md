@@ -11,6 +11,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Regression tests harvested from the Cursor flood-4 test PRs** (canopy#789, #792, #794, #795): four new test
+  files over four workflows. `src/tests/regression/test_bandit_sarif_upload.py` pins the Security Scans job's
+  `bandit[sarif]` install, its `|| BANDIT_EXIT=$?` capture, and the SARIF upload, which runs `if: always()` and
+  whose failure fails the job only on a pull request (`continue-on-error: ${{ github.event_name != 'pull_request' }}`);
+  it runs the job's Bandit step against a stub, and the weekly `security-scan.yml` must install the same extra and
+  not swallow a formatter error with `|| true` (#780, #781). `src/tests/regression/test_lockfile_regen_empty_payload.py`
+  runs `lockfile-update.yml`'s commit step: an empty encode and a failing `base64` exit before `jq` or `gh`, the
+  mutation carries the lockfile's own bytes and the trigger's headline, and a GraphQL error or an unchanged lockfile
+  commits nothing (#775). `src/tests/unit/test_agents_md_date_check.py` runs `agents-md-touch-up.yml`'s verify step
+  over each header state (missing, not YYYY-MM-DD, future, today, bumped, unchanged, a base tip that moved the
+  header) and pins its SHA-pinned full-history checkout and read-only permissions.
+  `src/tests/regression/test_codecov_token_upload.py` pins that every `codecov/codecov-action` step sends
+  `${{ secrets.CODECOV_TOKEN }}` and uploads the xml its job's pytest writes (#779). Each was re-run on `main` and
+  mutation-checked against the workflow line it pins, and
+  corrected where the head was wrong. #792 ran the coreutils form `base64 -w0 FILE` on the required macOS leg,
+  whose BSD `base64` refuses the file operand (5 failures); off Linux, a runner whose `base64` fails a probe of
+  that exact form on a one-byte file now gets a stand-in for that one form, and nothing is skipped. #792 also ran the
+  cases meant to stop before `jq` with the step's own `/tmp/lockfile-commit.json` path, so a regressed guard wrote
+  that file on the host and the check that no body was written read a path the step never wrote; every run now
+  relocates both of the step's paths under `tmp_path`. #794's fixture read the developer's global git config: a
+  signing config asked the signing key for every fixture commit, `color.ui=always` broke the diff the step parses,
+  and a refusing `core.hooksPath` hook failed every commit. Its git calls now pass
+  `-c commit.gpgsign=false -c tag.gpgsign=false`, and they and the step it runs set `GIT_CONFIG_GLOBAL` to the
+  null device and `GIT_CONFIG_NOSYSTEM=1`. Test-only.
+
 - **juniper-canopy#737: a CI job now notices juniper-data parameter drift against the committed generator-schema
   snapshot.** W1.2's declared-param filter (canopy#733) reads `DECLARED_PARAM_DEFAULTS`, which the unit tests pin to
   `src/tests/fixtures/juniper_data_sequence_generator_schemas.json`, but nothing compared that capture with
