@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **F-CANOPY-065: a flat REST apply body no longer hides the WebSocket leg's partition in the tests.**
+  `apply_params` unions `applied` / `skipped` from each leg's own result (#763). The existing mixed-apply
+  test pairs an unwrapped WebSocket result with a REST envelope whose partition sits under `data`, so those
+  keys do not collide and a return to one merged dict stays green. A flat REST body carries the same
+  top-level keys the unwrapped WebSocket result uses; merging replaces the first lists, and an empty
+  `skipped` wipes a key the WebSocket leg declined. A `/ws/control` ack whose `data.result` is not a dict
+  unwraps to `{}` rather than the list (which `dict.update` rejects) or the command envelope.
+  Tests: `src/tests/unit/backend/test_apply_partition_flat_legs.py`. Test-only.
+
 - **juniper-canopy#737: a CI job now notices juniper-data parameter drift against the committed generator-schema
   snapshot.** W1.2's declared-param filter (canopy#733) reads `DECLARED_PARAM_DEFAULTS`, which the unit tests pin to
   `src/tests/fixtures/juniper_data_sequence_generator_schemas.json`, but nothing compared that capture with
