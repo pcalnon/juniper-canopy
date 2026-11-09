@@ -83,6 +83,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not carried; and #793's two code spans of `##` plus a trailing space, which markdownlint's `--fix` rewrites to
   bare `##`, are reworded. Docs and comments only.
 
+- **Documentation harvested from the Cursor flood-4 round-2 docs PRs** (canopy#798, #799, which duplicate each
+  other). `docs/ci_cd/CICD_MANUAL.md`'s Dependabot lockfile runbook now documents, once, the commit step's refusal
+  of an empty payload (#775): `lockfile-update.yml` encodes `requirements.lock` on a line of its own under
+  `set -euo pipefail` and exits 1 on an empty result before `jq` or `gh` runs, because `base64 -w0` of an empty
+  file prints nothing and exits 0. A table gives the log lines the step ends on, what happened, and whether
+  anything was committed; `CICD_REFERENCE.md` and `CICD_QUICK_START.md` point to it. Re-checked against `main`, one
+  claim both drafts made is corrected: a GraphQL error does not reach the step's own
+  `createCommitOnBranch failed — lockfile NOT committed:` message, because `gh api graphql` exits 1 on a response
+  that carries `errors` and `set -e` ends the step there, so the log shows `gh: <message>`.
+  `CICD_ENVIRONMENT_SETUP.md`'s security install snippet said `pip install -e .`; it now shows each workflow's own
+  install, `pip install -e ".[juniper-data,juniper-cascor,observability]"` in `ci.yml`'s `Security Scans` and
+  `pip install -e ".[dev]"` in `security-scan.yml` (#799). The drafts' Bandit SARIF material is not carried: the
+  upload's pull-request failure is already documented in `CICD_MANUAL.md` (the CodeQL runbook's constraints and the
+  `security` troubleshooting bullet). The drafts' version stamps are dropped and each file is bumped once. Docs only.
+
 - **juniper-canopy#737: a CI job now notices juniper-data parameter drift against the committed generator-schema
   snapshot.** W1.2's declared-param filter (canopy#733) reads `DECLARED_PARAM_DEFAULTS`, which the unit tests pin to
   `src/tests/fixtures/juniper_data_sequence_generator_schemas.json`, but nothing compared that capture with
