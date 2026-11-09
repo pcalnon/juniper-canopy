@@ -1,7 +1,7 @@
 # CI/CD Environment Setup
 
-**Last Updated:** 2026-11-07
-**Version:** 0.28.3
+**Last Updated:** 2026-11-09
+**Version:** 0.28.4
 **Status:** Current
 
 ## Table of Contents
@@ -86,11 +86,20 @@ uv pip compile pyproject.toml \
 
 The freshness check resolves with `requirements.lock` as a constraint, then compares package pin lines only. It fails when the committed lockfile no longer satisfies `pyproject.toml`, not merely because newer package versions exist.
 
-Security workflow installs scanning tools and project dependencies with:
+The two security workflows install the SARIF extra as the quoted token `"bandit[sarif]"`. Bare `bandit` has no `sarif` formatter.
+
+`ci.yml` job `Security Scans` installs the scanners, then installs the project extras in the pip-audit step:
 
 ```bash
 pip install "bandit[sarif]" pip-audit
-pip install -e .
+pip install -e ".[juniper-data,juniper-cascor,observability]"
+```
+
+`security-scan.yml` installs the dev extra instead, and its audit command is `pip-audit --desc on --skip-editable` (no `--strict`):
+
+```bash
+pip install "bandit[sarif]" pip-audit
+pip install -e ".[dev]"
 ```
 
 ## Secrets and Permissions
