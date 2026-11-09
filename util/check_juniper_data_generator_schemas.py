@@ -35,7 +35,9 @@ say), is compared from the commit that adds it. For each one:
 * ``version`` against the entry's ``version``.
 
 Equality is JSON's: object key order is ignored and ``1`` equals ``1.0``, but ``true`` is not ``1`` (Python's
-``==`` says it is). A generator juniper-data no longer registers is drift as well.
+``==`` says it is). That rule holds inside arrays, which the key-by-key walk (``diff_json``) does not enter: ``[0]``
+is not ``[false]``, and ``NaN`` equals ``NaN`` at any depth. A generator juniper-data no longer registers is drift
+as well.
 
 Which juniper-data
 ------------------
@@ -257,7 +259,11 @@ def json_equal(a: Any, b: Any) -> bool:
     """Equality as JSON means it: object key order ignored and ``1 == 1.0``, but ``true`` is not ``1``.
 
     Python's ``==`` gets the last one wrong (``True == 1``), and a default flipped from ``1`` to ``true`` is
-    exactly the kind of upstream change this check exists to catch.
+    exactly the kind of upstream change this check exists to catch. ``diff_json`` walks objects only, so an
+    array (an ``enum``, an ``anyOf``) is compared here, and the rule has to hold inside it.
+    ``[0] == [False]`` and ``[{"minimum": 1}] == [{"minimum": True}]`` in Python; neither is equal as JSON.
+    ``NaN`` equals ``NaN`` at any depth. Python's list equality agrees only when the two are one object:
+    ``[float("nan")] != [float("nan")]``, while ``json`` parses every ``NaN`` to one shared float.
     """
     if isinstance(a, bool) or isinstance(b, bool):
         return isinstance(a, bool) and isinstance(b, bool) and a == b
