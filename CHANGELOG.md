@@ -281,6 +281,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **The image picks up R-OBS-SC-2's two security patches.** `requirements.lock` moves `juniper-observability` 0.4.1 ->
+  0.4.2 and `juniper-service-core` 0.7.1 -> 0.7.2, and nothing else: 60 pins, which CI's constraint-mode freshness
+  resolution reproduces. The image installs that lock (`Dockerfile:40`).
+  - **observability 0.4.2** fixes `configure_sentry`, which `src/main.py:312` calls through `src/observability.py`'s
+    wrapper. Under 0.4.1, once a Sentry DSN was set, a request's `Sec-WebSocket-Protocol`, `X-CSRF-Token` and
+    `X-XSRF-Token` headers reached Sentry in every error event and transaction. `Sec-WebSocket-Protocol` is the header
+    that carries canopy's own WebSocket key (`bearer, <key>`) when the opt-in `ws_auth_enabled` is on. 0.4.2 runs its
+    scrubbing hook on transactions too (`before_send_transaction`), redacts the parsed cookies, and filters those three
+    headers and `Proxy-Authorization`. The wrapper leaves `send_pii` off, so the `X-API-Key` and cookie leaks that 0.4.2
+    also closes were not reachable here.
+  - **Still open**: the `?api_key=` WebSocket query parameter reaches Sentry under the default `send_pii=False`. Query
+    strings are juniper-observability 0.4.3's follow-up, so this lock does not close that path.
+  - **service-core 0.7.2** rounds `FailedAuthThrottle`'s `Retry-After` up instead of truncating it. canopy imports only
+    `enforce_auth_posture`, `AuthPostureError` and `enforce_dependency_floors` from service-core, so the change does not
+    reach it, and the pin is consistency with the sibling services.
+  - Regenerated with `--upgrade-package` for the two packages only, compiled onto a copy of the lock so every other pin
+    is held (juniper-ml `util/ad-hoc/2026-10-10_targeted_lock_refresh.py`). The `pyproject.toml` floors move in the next
+    release PR.
+
 - **CI's Gitleaks step loaded zero rules and could not fail; it now loads gitleaks' built-in ruleset.**
   `.gitleaks.toml` held an `[allowlist]` and no `[extend]` table, and a gitleaks v8 config without
   `[extend] useDefault = true` loads only its own `[[rules]]`, of which it had none. Every push, pull-request and
