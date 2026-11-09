@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-11-07
-**Version:** 0.28.0
+**Last Updated:** 2026-11-09
+**Version:** 0.29.0
 **Status:** Current
 
 ## Table of Contents
@@ -802,6 +802,30 @@ A regen commit can therefore vanish from a Dependabot PR. canopy#709's branch ca
 Lockfile Freshness stays green across a skipped regen whenever the existing lock still satisfies `pyproject.toml`. That job compiles with `--constraint requirements.lock` and compares pin lines. It fails when a floor in `pyproject.toml` has moved past a pin, not when newer wheels exist on PyPI, and not when only `conf/requirements_ci.txt` changed.
 
 **Signed commit.** The lock commit is the GitHub `createCommitOnBranch` mutation, with `expectedHeadOid` set to the checked-out HEAD. The mutation authenticates as `CROSS_REPO_DISPATCH_TOKEN`, so the new commit re-triggers CI. A local `git commit` on the runner is unsigned, and `required_signatures` would leave the PR unmergeable. If the branch moved after checkout, the mutation fails instead of overwriting the new tip. An unchanged `requirements.lock` produces no commit.
+
+**Empty payload.** The commit step, `Commit updated lockfile (GitHub-signed, via API)`, runs under `set -euo pipefail`. After the unchanged-lock check it encodes the lockfile on a line of its own and refuses an empty result before `jq` or `gh` runs (juniper-canopy#775):
+
+```bash
+LOCK_B64=$(base64 -w0 requirements.lock)
+if [ -z "${LOCK_B64}" ]; then
+  echo "::error::base64 produced an empty payload -- lockfile NOT committed"
+  exit 1
+fi
+```
+
+`base64 -w0` of an empty file prints nothing and exits 0, so `set -e` cannot stop it; the emptiness check does. A `base64` that fails, on a missing `requirements.lock` for example, fails the assignment itself under `set -e`, even if it printed bytes first.
+Keep the encode on its own line: as a `jq --arg` value, `"$(base64 ...)"` can fail without tripping `set -e`, and `createCommitOnBranch` would then sign a commit whose `requirements.lock` holds whatever the failed encode printed: nothing, for a missing file. The mutation carries one file addition, `requirements.lock`, whose `contents` are that payload, so the commit holds the lockfile's own bytes.
+
+| The step log shows | What happened | Committed |
+| --- | --- | --- |
+| `Lockfile already up to date — no commit needed` | `git diff --quiet -- requirements.lock` found no change. The step exits 0 before it encodes. | No |
+| `base64 produced an empty payload -- lockfile NOT committed` | The regenerated lockfile encoded to nothing. The step exits 1 before `jq` writes the request body or `gh` runs. | No |
+| A `base64` error, such as `base64: requirements.lock: No such file or directory` | `base64` exited non-zero, so the `LOCK_B64` assignment failed under `set -e`. Nothing after it runs. | No |
+| `gh: <message>` | The mutation came back with GraphQL `errors`, for example an `expectedHeadOid` the branch no longer matches. `gh api graphql` exits 1 on such a response, and `set -e` ends the step there. | No |
+| `gh: HTTP <status>`, or `gh: <message> (HTTP <status>)` | The request failed at the HTTP level, for example `gh: HTTP 502`: the same `gh:` prefix. `gh api graphql` exits 1 on it too, and `set -e` ends the step there. | Unknown from the log: check the branch for the lock commit |
+| `Signed lockfile commit: <url>` | `createCommitOnBranch` returned the new commit. | Yes |
+
+The step's own `.errors` check, which prints `createCommitOnBranch failed — lockfile NOT committed:`, runs only if `gh` exits 0 with an `errors` body, and `gh api graphql` does not: its `api` command turns a GraphQL `errors` array into `gh: <message>` and exit 1. `src/tests/regression/test_lockfile_regen_empty_payload.py` reaches that check through a stub `gh` that exits 0, and tests the exit-1 case separately.
 
 **Review.** Confirm the expected floor is in `conf/requirements_ci.txt`. Treat every other pin in the lock diff as an `--upgrade` of `pyproject.toml`. Recompile locally with the three extras and `--upgrade` before changing those pins by hand.
 

@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-11-07
-**Version:** 0.30.0
+**Last Updated:** 2026-11-09
+**Version:** 0.30.1
 **Status:** Current
 
 ## Table of Contents
@@ -525,6 +525,7 @@ uv pip compile pyproject.toml \
 
 - The compiler input is `pyproject.toml`. Dependabot's pip floor edits land in `conf/requirements_ci.txt` (repo-root `requirements.txt` resolves to that file through the `conf/requirements.txt` symlink). A package absent from `pyproject.toml` stays out of `requirements.lock`. `--upgrade` can still move other pins in the same commit.
 - Commit, only when `requirements.lock` changed, via `createCommitOnBranch` (`expectedHeadOid` is the checked-out HEAD). Push subjects: `[dependabot skip] Update requirements.lock` on `push`, `chore(deps): auto-regenerate requirements.lock after pyproject change` on `pull_request`.
+- The commit step runs under `set -euo pipefail`, encodes on a line of its own, `LOCK_B64=$(base64 -w0 requirements.lock)`, and exits 1 on an empty result before `jq` or `gh` runs (juniper-canopy#775). A GraphQL error makes `gh api graphql` exit 1, so the step stops there; its own `.errors` check is reached only by a `gh` that exits 0. The log lines it ends on: [Dependabot lockfile automation](CICD_MANUAL.md#runbook-dependabot-lockfile-automation).
 - Lockfile Freshness (`ci.yml` job `lockfile-check`) is a separate `--constraint` compile. A skipped regen stays green while the current pins still satisfy `pyproject.toml`.
 
 ### `agents-md-touch-up.yml`
@@ -875,7 +876,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-11-07
-**Version:** 0.30.0
+**Last Updated:** 2026-11-09
+**Version:** 0.30.1
 **Maintained By:** Development Team
 **Status:** ✅ Current
