@@ -36,6 +36,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-c commit.gpgsign=false -c tag.gpgsign=false`, and they and the step it runs set `GIT_CONFIG_GLOBAL` to the
   null device and `GIT_CONFIG_NOSYSTEM=1`. Test-only.
 
+- **Regression tests harvested from the Cursor flood-4 round-2 test PRs** (canopy#800, #801): two new test files.
+  `src/tests/unit/backend/test_apply_partition_flat_legs.py` pins that `apply_params` reads `applied` / `skipped`
+  from each leg's own result and unions them (F-CANOPY-065, #763). The mixed-apply test already on `main`
+  (`src/tests/integration/test_n5_apply_params_ux.py`) pairs a WebSocket result whose partition is at the top level
+  with a REST envelope whose partition sits under `data`. Those keys do not collide, so reading the partition from
+  one dict merged from both legs stays green there. A flat REST body uses the same top-level keys, so a merge
+  replaces the WebSocket leg's lists, and an empty `skipped` wipes the key that leg declined; the new tests fail on
+  that regression. They also pin that a `/ws/control` ack whose `data.result` is not a dict unwraps to `{}`, not to
+  that value (`dict.update` raises on the list, string and number they send) or to the command envelope.
+  `src/tests/unit/test_schema_drift_nested_equality.py` pins the JSON equality of
+  `util/check_juniper_data_generator_schemas.py` inside arrays (#737). `diff_json` walks objects and hands every
+  other value, `enum` and `anyOf` included, to `json_equal`, and both committed snapshots carry both. Python's `==`
+  says `[0, 1] == [false, true]` and `[{"minimum": 1}] == [{"minimum": true}]`, so a `json_equal` that compared
+  arrays with `==` would miss exactly the drift the job exists to catch, while every test on `main` stayed green
+  (`src/tests/unit/test_check_juniper_data_generator_schemas.py` checks booleans against numbers, and `NaN`, as
+  bare values only). The new tests fail on that regression, through `json_equal` and through the drift report.
+  `NaN` equals `NaN` at any depth, and the drift report's `NaN` case pins that rule but cannot catch an `==` over
+  whole arrays: `json` parses every `NaN` to one shared float, which list equality matches by identity, so an `==`
+  over arrays would not report a matching `NaN` as drift, contrary to the draft's text. The script's docstrings now
+  state the rule for arrays, with that correction. Tests and docstrings only.
+
 - **Documentation harvested from the Cursor flood-4 docs PRs** (canopy#790, #791, #793, #796). The CI/CD set
   (`docs/ci_cd/CICD_MANUAL.md`, `CICD_QUICK_START.md`, `CICD_REFERENCE.md`, `CICD_ENVIRONMENT_SETUP.md`) gains the
   Gitleaks ruleset contract (`.gitleaks.toml`'s `[extend] useDefault = true`, the AND-scoped `generic-api-key`
@@ -61,6 +82,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   eight lines over markdownlint's 512-character limit are wrapped (#790 one, #793 four, #796 three); #790's loss of `CICD_QUICK_START.md`'s header hard breaks is
   not carried; and #793's two code spans of `##` plus a trailing space, which markdownlint's `--fix` rewrites to
   bare `##`, are reworded. Docs and comments only.
+
+- **Documentation harvested from the Cursor flood-4 round-2 docs PRs** (canopy#798, #799, which duplicate each
+  other). `docs/ci_cd/CICD_MANUAL.md`'s Dependabot lockfile runbook now documents, once, the commit step's refusal
+  of an empty payload (#775): `lockfile-update.yml` encodes `requirements.lock` on a line of its own under
+  `set -euo pipefail` and exits 1 on an empty result before `jq` or `gh` runs, because `base64 -w0` of an empty
+  file prints nothing and exits 0. A table gives the log lines the step ends on, what happened, and whether
+  anything was committed; `CICD_REFERENCE.md` and `CICD_QUICK_START.md` point to it. Re-checked against `main`, one
+  claim both drafts made is corrected: a GraphQL error does not reach the step's own
+  `createCommitOnBranch failed — lockfile NOT committed:` message, because `gh api graphql` exits 1 on a response
+  that carries `errors` and `set -e` ends the step there, so the log shows `gh: <message>`.
+  `CICD_ENVIRONMENT_SETUP.md`'s security install snippet said `pip install -e .`; it now shows each workflow's own
+  install, `pip install -e ".[juniper-data,juniper-cascor,observability]"` in `ci.yml`'s `Security Scans` and
+  `pip install -e ".[dev]"` in `security-scan.yml` (#799). The drafts' Bandit SARIF material is not carried: the
+  upload's pull-request failure is already documented in `CICD_MANUAL.md` (the CodeQL runbook's constraints and the
+  `security` troubleshooting bullet). The drafts' version stamps are dropped and each file is bumped once. Docs only.
 
 - **juniper-canopy#737: a CI job now notices juniper-data parameter drift against the committed generator-schema
   snapshot.** W1.2's declared-param filter (canopy#733) reads `DECLARED_PARAM_DEFAULTS`, which the unit tests pin to
@@ -280,6 +316,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   drove. The fix itself does not depend on the dash version; a 3.3.0 leg of this tree is alive too.
 
 ### Security
+
+- **The image picks up R-OBS-SC-2's two security patches.** `requirements.lock` moves `juniper-observability` 0.4.1 ->
+  0.4.2 and `juniper-service-core` 0.7.1 -> 0.7.2, and nothing else: 60 pins, which CI's constraint-mode freshness
+  resolution reproduces. The image installs that lock (`Dockerfile:40`).
+  - **observability 0.4.2** fixes `configure_sentry`, which `src/main.py:312` calls through `src/observability.py`'s
+    wrapper. Under 0.4.1, once a Sentry DSN was set, a request's `Sec-WebSocket-Protocol`, `X-CSRF-Token` and
+    `X-XSRF-Token` headers reached Sentry in every error event and transaction. `Sec-WebSocket-Protocol` is the header
+    that carries canopy's own WebSocket key (`bearer, <key>`) when the opt-in `ws_auth_enabled` is on. 0.4.2 runs its
+    scrubbing hook on transactions too (`before_send_transaction`), redacts the parsed cookies, and filters those three
+    headers and `Proxy-Authorization`. The wrapper leaves `send_pii` off, so the `X-API-Key` and cookie leaks that 0.4.2
+    also closes were not reachable here.
+  - **Still open**: the `?api_key=` WebSocket query parameter reaches Sentry under the default `send_pii=False`. Query
+    strings are juniper-observability 0.4.3's follow-up, so this lock does not close that path.
+  - **service-core 0.7.2** rounds `FailedAuthThrottle`'s `Retry-After` up instead of truncating it. canopy imports only
+    `enforce_auth_posture`, `AuthPostureError` and `enforce_dependency_floors` from service-core, so the change does not
+    reach it, and the pin is consistency with the sibling services.
+  - Regenerated with `--upgrade-package` for the two packages only, compiled onto a copy of the lock so every other pin
+    is held (juniper-ml `util/ad-hoc/2026-10-10_targeted_lock_refresh.py`). The `pyproject.toml` floors move in the next
+    release PR.
 
 - **CI's Gitleaks step loaded zero rules and could not fail; it now loads gitleaks' built-in ruleset.**
   `.gitleaks.toml` held an `[allowlist]` and no `[extend]` table, and a gitleaks v8 config without

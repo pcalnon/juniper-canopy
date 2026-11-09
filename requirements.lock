@@ -76,9 +76,9 @@ juniper-data-client==0.6.0
     # via juniper-canopy (pyproject.toml)
 juniper-model-core==0.3.2
     # via juniper-service-core
-juniper-observability==0.4.1
+juniper-observability==0.4.2
     # via juniper-canopy (pyproject.toml)
-juniper-service-core==0.7.1
+juniper-service-core==0.7.2
     # via juniper-canopy (pyproject.toml)
 markupsafe==3.0.4
     # via
