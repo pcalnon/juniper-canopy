@@ -36,6 +36,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-c commit.gpgsign=false -c tag.gpgsign=false`, and they and the step it runs set `GIT_CONFIG_GLOBAL` to the
   null device and `GIT_CONFIG_NOSYSTEM=1`. Test-only.
 
+- **Regression tests harvested from the Cursor flood-4 round-2 test PRs** (canopy#800, #801): two new test files.
+  `src/tests/unit/backend/test_apply_partition_flat_legs.py` pins that `apply_params` reads `applied` / `skipped`
+  from each leg's own result and unions them (F-CANOPY-065, #763). The mixed-apply test already on `main`
+  (`src/tests/integration/test_n5_apply_params_ux.py`) pairs a WebSocket result whose partition is at the top level
+  with a REST envelope whose partition sits under `data`. Those keys do not collide, so reading the partition from
+  one dict merged from both legs stays green there. A flat REST body uses the same top-level keys, so a merge
+  replaces the WebSocket leg's lists, and an empty `skipped` wipes the key that leg declined; the new tests fail on
+  that regression. They also pin that a `/ws/control` ack whose `data.result` is not a dict unwraps to `{}`, not to
+  that value (`dict.update` raises on the list, string and number they send) or to the command envelope.
+  `src/tests/unit/test_schema_drift_nested_equality.py` pins the JSON equality of
+  `util/check_juniper_data_generator_schemas.py` inside arrays (#737). `diff_json` walks objects and hands every
+  other value, `enum` and `anyOf` included, to `json_equal`, and both committed snapshots carry both. Python's `==`
+  says `[0, 1] == [false, true]` and `[{"minimum": 1}] == [{"minimum": true}]`, so a `json_equal` that compared
+  arrays with `==` would miss exactly the drift the job exists to catch, while every test on `main` stayed green
+  (`src/tests/unit/test_check_juniper_data_generator_schemas.py` checks booleans against numbers, and `NaN`, as
+  bare values only). The new tests fail on that regression, through `json_equal` and through the drift report.
+  `NaN` equals `NaN` at any depth, and the drift report's `NaN` case pins that rule but cannot catch an `==` over
+  whole arrays: `json` parses every `NaN` to one shared float, which list equality matches by identity, so an `==`
+  over arrays would not report a matching `NaN` as drift, contrary to the draft's text. The script's docstrings now
+  state the rule for arrays, with that correction. Tests and docstrings only.
+
 - **Documentation harvested from the Cursor flood-4 docs PRs** (canopy#790, #791, #793, #796). The CI/CD set
   (`docs/ci_cd/CICD_MANUAL.md`, `CICD_QUICK_START.md`, `CICD_REFERENCE.md`, `CICD_ENVIRONMENT_SETUP.md`) gains the
   Gitleaks ruleset contract (`.gitleaks.toml`'s `[extend] useDefault = true`, the AND-scoped `generic-api-key`
