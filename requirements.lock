@@ -21,7 +21,7 @@ certifi==2026.10.23
     #   sentry-sdk
 charset-normalizer==3.5.2
     # via requests
-click==8.5.0
+click==8.5.1
     # via
     #   flask
     #   uvicorn
@@ -35,7 +35,7 @@ dash==4.5.0
     #   dash-bootstrap-components
 dash-bootstrap-components==2.0.4
     # via juniper-canopy (pyproject.toml)
-fastapi==0.162.0
+fastapi==0.162.2
     # via
     #   juniper-canopy (pyproject.toml)
     #   juniper-service-core
@@ -56,7 +56,7 @@ idna==3.20
     #   anyio
     #   httpx
     #   requests
-importlib-metadata==10.1.0
+importlib-metadata==10.2.0
     # via dash
 itsdangerous==2.2.0
     # via
@@ -80,6 +80,8 @@ juniper-observability==0.4.2
     # via juniper-canopy (pyproject.toml)
 juniper-service-core==0.7.2
     # via juniper-canopy (pyproject.toml)
+lazy-importer==0.1.0
+    # via importlib-metadata
 markupsafe==3.0.4
     # via
     #   flask
@@ -112,7 +114,7 @@ prometheus-client==0.26.0
     # via juniper-canopy (pyproject.toml)
 psutil==7.2.2
     # via juniper-canopy (pyproject.toml)
-pydantic==2.14.2
+pydantic==2.14.3
     # via
     #   juniper-canopy (pyproject.toml)
     #   dash
@@ -121,7 +123,7 @@ pydantic==2.14.2
     #   juniper-observability
     #   juniper-service-core
     #   pydantic-settings
-pydantic-core==2.50.2
+pydantic-core==2.50.4
     # via pydantic
 pydantic-settings==2.16.2
     # via
@@ -147,7 +149,7 @@ retrying==1.4.2
     # via dash
 scipy==1.18.1
     # via juniper-canopy (pyproject.toml)
-sentry-sdk==2.73.0
+sentry-sdk==2.74.0
     # via juniper-canopy (pyproject.toml)
 setuptools==84.2.1
     # via dash
@@ -166,7 +168,7 @@ typing-extensions==4.16.0
     #   pydantic-core
     #   pydantic-settings
     #   typing-inspection
-typing-inspection==0.4.4
+typing-inspection==0.4.5
     # via
     #   fastapi
     #   pydantic
