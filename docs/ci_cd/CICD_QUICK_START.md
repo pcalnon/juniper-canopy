@@ -1,8 +1,8 @@
 # CI/CD Quick Start
 
-**Last Updated:** 2026-11-07  
+**Last Updated:** 2026-11-09  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.27.2  
+**Version:** 0.27.3  
 **Status:** Current
 
 ## Prerequisites
@@ -108,6 +108,8 @@ Open the PR checks and confirm these gates complete:
   Recompile with the three extras and `--upgrade`, then commit `requirements.lock`. The freshness job itself uses `--constraint` and stays green when newer wheels exist and the current pins still satisfy `pyproject.toml`.
 - A Dependabot `deps:` lock diff names packages the requirements diff did not:
   The floor edit is `conf/requirements_ci.txt` (repo-root `requirements.txt` resolves there through the `conf/requirements.txt` symlink). The lock commit compiles `pyproject.toml` with `--upgrade`. Review both. [Dependabot lockfile automation](CICD_MANUAL.md#runbook-dependabot-lockfile-automation).
+- `Update requirements.lock` (`lockfile-update.yml`) fails with `base64 produced an empty payload -- lockfile NOT committed`, or with `gh: <message>` after `gh api graphql`:
+  Neither committed anything. The first is a regenerated lockfile that encoded to nothing, which the step refuses to commit. The second is GraphQL `errors` from `createCommitOnBranch`, for example an `expectedHeadOid` the branch no longer matches. An HTTP failure prints the same prefix (`gh: HTTP 502`), and its log does not show whether a commit landed: check the branch. [Dependabot lockfile automation](CICD_MANUAL.md#runbook-dependabot-lockfile-automation).
 - Docs-only change fails CI:
   Run `scripts/check_doc_links.py` locally with the same excludes used in CI.
 - Local tests pass but CI fails:
