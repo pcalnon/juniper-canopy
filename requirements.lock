@@ -36,7 +36,7 @@ dash==4.5.0
     #   dash-bootstrap-components
 dash-bootstrap-components==2.0.4
     # via juniper-canopy (pyproject.toml)
-fastapi==0.162.4
+fastapi==0.162.5
     # via
     #   juniper-canopy (pyproject.toml)
     #   juniper-service-core
