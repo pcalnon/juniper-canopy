@@ -11,9 +11,12 @@ Environment Variables for Test Control:
 """
 
 import contextlib
+import errno
 import json
 import os
+import socket
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Dict
 
@@ -267,6 +270,141 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "requires_redis" in item.keywords:
                 item.add_marker(skip_redis)
+
+
+# ===================================================================
+# UNIT-LANE NETWORK GUARD
+# ===================================================================
+# A unit test that connects to whatever listens on the host is not hermetic: it
+# passes or fails by host state, and on a developer machine it talks to a LIVE
+# service (canopy on :8050, juniper-data on :8100). CI's runner has nothing
+# listening there, so the same test is refused in CI and served locally.
+#
+# While a guarded test runs -- its setup, call and teardown, so the module- and
+# session-scoped fixtures it brings up are covered too -- a connect to a Juniper
+# service port is refused the way an empty host refuses it (``connect`` raises
+# ConnectionRefusedError, ``connect_ex`` returns ECONNREFUSED), and the test is
+# then FAILED, even when the code under test swallowed the refusal and fell back.
+#
+# * Armed for every test the CI unit lane runs (unit/, regression/, contract/,
+#   performance/), and for tests marked ``unit`` elsewhere that are not also
+#   marked ``integration``. The integration, e2e and ui lanes are unaffected.
+# * Disarmed by ``e2e``, ``ui``, ``requires_server`` and ``requires_cascor``
+#   (tests that need a live service say so, and are skipped without one).
+# * A test's own server bound to port 0 gets an ephemeral port, never a service
+#   port, so it keeps working. A test that must connect to a service port it
+#   listens on ITSELF opts out with ``@pytest.mark.allow_service_ports``.
+# * It sees the connects the pytest process makes through Python's ``socket``
+#   module: not a child process, a uvloop/libuv transport or a direct
+#   ``_socket.socket.connect`` call. A refusal fails whichever test is running
+#   when it happens; one made off the main thread is reported with the thread's
+#   name, because a thread or task an earlier test left running can make it.
+#
+# Fix a refused test by mocking the client or transport as its neighbours do,
+# never by opting out. Pinned by src/tests/unit/test_unit_lane_network_guard.py.
+
+# canopy 8050 (and the 8051-8059 E2E legs), juniper-cascor 8200 (container) /
+# 8201 (host) / 8202, juniper-recurrence 8210 / 8211. juniper-data's 8100 is NOT
+# guarded: 124 unit-lane tests reach it through the app's own startup probe
+# (main.py lifespan) and /v1/health/ready, so guarding it is deferred.
+SERVICE_PORTS = frozenset({*range(8050, 8060), 8200, 8201, 8202, 8210, 8211})
+_UNIT_LANE_DIRS = frozenset({"unit", "regression", "contract", "performance"})
+_UNGUARDED_MARKERS = ("allow_service_ports", "e2e", "ui", "requires_server", "requires_cascor")
+_TESTS_ROOT = Path(__file__).resolve().parent
+
+
+class ServicePortGuard:
+    """Refuses, and records, connects to ``SERVICE_PORTS`` while a guarded test runs."""
+
+    ports = SERVICE_PORTS
+
+    def __init__(self) -> None:
+        self.armed_for: str | None = None  # node id of the guarded test now running
+        self.refused: list[str] = []  # "host:port" (plus " (thread NAME)" off the main thread) refused since the last report
+        self.real_connect = socket.socket.connect
+        self.real_connect_ex = socket.socket.connect_ex
+
+    @staticmethod
+    def applies_to(item) -> bool:
+        """Whether the guard is armed for ``item`` (see the section comment)."""
+        if any(item.get_closest_marker(name) is not None for name in _UNGUARDED_MARKERS):
+            return False
+        try:
+            in_unit_lane = Path(item.path).resolve().relative_to(_TESTS_ROOT).parts[0] in _UNIT_LANE_DIRS
+        except (ValueError, IndexError):
+            in_unit_lane = False
+        return in_unit_lane or (item.get_closest_marker("unit") is not None and item.get_closest_marker("integration") is None)
+
+    def refuses(self, sock, address) -> bool:
+        """Record and refuse ``address`` when armed and it names a service port."""
+        if self.armed_for is None or sock.family not in (socket.AF_INET, socket.AF_INET6):
+            return False
+        if not (isinstance(address, tuple) and len(address) >= 2 and address[1] in self.ports):
+            return False
+        thread = threading.current_thread()
+        self.refused.append(f"{address[0]}:{address[1]}" if thread is threading.main_thread() else f"{address[0]}:{address[1]} (thread {thread.name})")
+        return True
+
+    def take(self) -> list[str]:
+        """Return and clear the refusals recorded so far; a test that triggers one on purpose claims it here."""
+        refused, self.refused = self.refused, []
+        return refused
+
+    def flag(self, report) -> None:
+        """Fail ``report`` when a connect was refused during its phase, even if the code swallowed the refusal."""
+        refused = self.take()
+        if not refused:
+            return
+        message = f"unit-lane network guard: a connect to {', '.join(sorted(set(refused)))}, a Juniper service port, was refused while this test ran (made by this test, or by a thread or task an earlier test left running). A unit test must not reach whatever listens on the host: mock the client or transport, as the neighbouring tests do (src/tests/conftest.py, UNIT-LANE NETWORK GUARD)."
+        report.sections.append(("unit-lane network guard", message))
+        if hasattr(report, "wasxfail"):
+            del report.wasxfail  # an xfail marker must not turn the guard's failure back into a skip (exit 0, junit "skipped")
+        if not report.failed:
+            report.outcome = "failed"
+            report.longrepr = message
+
+
+_SERVICE_PORT_GUARD = ServicePortGuard()
+
+
+def _guarded_connect(sock, address):
+    if _SERVICE_PORT_GUARD.refuses(sock, address):
+        raise ConnectionRefusedError(errno.ECONNREFUSED, f"refused by the unit-lane network guard: {address[0]}:{address[1]} is a Juniper service port (src/tests/conftest.py)")
+    return _SERVICE_PORT_GUARD.real_connect(sock, address)
+
+
+def _guarded_connect_ex(sock, address):
+    if _SERVICE_PORT_GUARD.refuses(sock, address):
+        return errno.ECONNREFUSED
+    return _SERVICE_PORT_GUARD.real_connect_ex(sock, address)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def service_port_guard():
+    """Route every socket connect through the guard for the session; yields the guard."""
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(socket.socket, "connect", _guarded_connect)
+        patcher.setattr(socket.socket, "connect_ex", _guarded_connect_ex)
+        yield _SERVICE_PORT_GUARD
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_protocol(item, nextitem):
+    """Arm the guard for a guarded test across its setup, call and teardown."""
+    _SERVICE_PORT_GUARD.armed_for = item.nodeid if ServicePortGuard.applies_to(item) else None
+    _SERVICE_PORT_GUARD.refused.clear()
+    try:
+        return (yield)
+    finally:
+        _SERVICE_PORT_GUARD.armed_for = None
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Fail the phase (setup, call or teardown) during which a connect was refused."""
+    report = yield
+    _SERVICE_PORT_GUARD.flag(report)
+    return report
 
 
 # Phase B-pre-a + B-pre-b: WebSocket test infrastructure.

@@ -933,14 +933,21 @@ class TestParameterTrackingHandler:
 class TestApplyParametersHandler:
     """Tests for apply parameters handler."""
 
+    @patch("requests.get")
     @patch("requests.post")
-    def test_apply_parameters_success(self, mock_post, reset_singletons):
+    def test_apply_parameters_success(self, mock_post, mock_get, reset_singletons):
         """Test successful parameter application."""
         from frontend.dashboard_manager import DashboardManager
 
         mock_response = Mock()
         mock_response.status_code = 200
         mock_post.return_value = mock_response
+        # After a 200 the handler reads the applied state back (GET /api/state). Unmocked,
+        # that read went to whatever listened on 127.0.0.1:8050 (the unit-lane network guard).
+        mock_state_response = Mock()
+        mock_state_response.status_code = 200
+        mock_state_response.json.return_value = {}
+        mock_get.return_value = mock_state_response
 
         manager = DashboardManager({})
 
@@ -957,6 +964,8 @@ class TestApplyParametersHandler:
         assert params["nn_learning_rate"] == 0.02
         assert params["nn_max_hidden_units"] == 15
         assert "Parameters applied" in status
+        mock_get.assert_called_once()
+        assert mock_get.call_args.args[0].endswith("/api/state")
 
     @patch("requests.post")
     def test_apply_parameters_failure(self, mock_post, reset_singletons):

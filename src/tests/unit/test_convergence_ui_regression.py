@@ -35,8 +35,9 @@ class TestB51CheckboxDoesNotRevertAfterApply:
 
         manager = DashboardManager({})
 
-        with patch("requests.post") as mock_post:
+        with patch("requests.post") as mock_post, patch("requests.get") as mock_get:
             mock_post.return_value = Mock(status_code=200)
+            mock_get.return_value = Mock(status_code=200, json=Mock(return_value={}))  # the /api/state read-back after the 200
             env = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/").get_environ()
 
             with manager.app.server.request_context(env):
@@ -160,8 +161,9 @@ class TestB52ThresholdDoesNotRevertAfterApply:
 
         manager = DashboardManager({})
 
-        with patch("requests.post") as mock_post:
+        with patch("requests.post") as mock_post, patch("requests.get") as mock_get:
             mock_post.return_value = Mock(status_code=200)
+            mock_get.return_value = Mock(status_code=200, json=Mock(return_value={}))  # the /api/state read-back after the 200
             env = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/").get_environ()
 
             with manager.app.server.request_context(env):
@@ -268,8 +270,9 @@ class TestB52ThresholdDoesNotRevertAfterApply:
         manager = DashboardManager({})
 
         for threshold in [0.01, 0.05, 0.0001]:
-            with patch("requests.post") as mock_post:
+            with patch("requests.post") as mock_post, patch("requests.get") as mock_get:
                 mock_post.return_value = Mock(status_code=200)
+                mock_get.return_value = Mock(status_code=200, json=Mock(return_value={}))  # the /api/state read-back after the 200
                 env = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/").get_environ()
 
                 with manager.app.server.request_context(env):
@@ -615,8 +618,9 @@ class TestB57StatusMessagePreserved:
 
         manager = DashboardManager({})
 
-        with patch("requests.post") as mock_post:
+        with patch("requests.post") as mock_post, patch("requests.get") as mock_get:
             mock_post.return_value = Mock(status_code=200)
+            mock_get.return_value = Mock(status_code=200, json=Mock(return_value={}))  # the /api/state read-back after the 200
             env = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/").get_environ()
 
             with manager.app.server.request_context(env):

@@ -831,6 +831,8 @@ class TestAdditionalHandlerCases:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mocker.patch("requests.post", return_value=mock_response)
+        # The handler reads /api/state back after a 200; unmocked, that read reached 127.0.0.1:8050.
+        mocker.patch("requests.get", return_value=MagicMock(status_code=200, json=MagicMock(return_value={})))
 
         edge_cases = [
             (0.0001, 1, 1),  # Minimum values
