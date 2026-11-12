@@ -11,6 +11,13 @@ stub. The two commit-body paths the step writes are relocated under ``tmp_path``
 in every case; the workflow text itself is not modified. Off
 Linux, a runner whose ``base64`` cannot run the step's ``base64 -w0 FILE`` gets a
 stand-in for exactly that form (see ``_BASE64_W0_STAND_IN``).
+
+``gh api graphql`` exits 1 on a response that carries GraphQL ``errors`` and on an
+HTTP failure, after writing the body to stdout and ``gh: <message>`` to stderr
+(cli/cli ``pkg/cmd/api/api.go``, ``processResponse``). The stub fails the same way.
+Called bare under ``set -e``, that exit ended the step before its own diagnostic;
+the step now captures gh's status and stderr, prints the diagnostic, and fails, with
+the token's value masked in anything gh printed.
 """
 
 from __future__ import annotations
@@ -52,12 +59,14 @@ _GH = """\
   for arg in "$@"; do printf '\\t%s' "$arg"; done
   printf '\\n'
 } >> "$GH_LOG"
+printf '%s' "${GH_STDOUT-}"
 if [[ "${GH_RC:-0}" -ne 0 ]]; then
   printf '%s\\n' "${GH_ERR:-gh failed}" >&2
   exit "${GH_RC}"
 fi
-printf '%s' "${GH_STDOUT-}"
 """
+
+STALE = 'Expected branch to point to "abc" but it did not. Pull and try again.'
 
 _JQ_POISON = """\
 #!/bin/bash
@@ -231,6 +240,7 @@ def _run(
     poison_jq: bool = False,
     gh_stdout: str = "",
     gh_rc: int = 0,
+    gh_err: str = "gh failed",
     script: str | None = None,
 ) -> _Result:
     source = script if script is not None else _script()
@@ -271,6 +281,7 @@ def _run(
         "B64_LOG": str(b64_log),
         "GH_STDOUT": gh_stdout,
         "GH_RC": str(gh_rc),
+        "GH_ERR": gh_err,
         "EVENT_NAME": event,
         "GITHUB_REPOSITORY": REPO_NAME,
         "BRANCH": BRANCH,
@@ -373,7 +384,8 @@ def test_a_changed_lockfile_is_committed_as_its_own_bytes(tmp_path: Path, event:
         gh_stdout=json.dumps(SIGNED),
     )
     assert result.code == 0, result.combined
-    assert "Signed lockfile commit: https://example.test/commit/abc123" in result.out
+    assert result.out == "Signed lockfile commit: https://example.test/commit/abc123\n"
+    assert result.err == ""
     mutation = _mutation(result)
     addition = mutation["fileChanges"]["additions"]
     assert len(addition) == 1
@@ -388,6 +400,13 @@ def test_a_changed_lockfile_is_committed_as_its_own_bytes(tmp_path: Path, event:
 
 
 def test_graphql_errors_fail_the_step(tmp_path: Path) -> None:
+    """An ``errors`` body from a ``gh`` that exits 0.
+
+    The real CLI exits 0 on one only when it finds no message to print, for example
+    a single error without a ``message`` (api.go ``parseErrorResponse`` joins the
+    messages, and an empty join is no error). The exit-1 shape is
+    ``test_a_graphql_error_that_fails_gh_prints_the_steps_diagnostic``.
+    """
     result = _run(
         tmp_path,
         dirty="changed\n",
@@ -405,3 +424,90 @@ def test_a_failing_gh_does_not_report_a_signed_commit(tmp_path: Path) -> None:
     assert result.code != 0, result.combined
     assert "Signed lockfile commit" not in result.combined
     assert result.gh.startswith("gh\t")
+
+
+def test_a_graphql_error_that_fails_gh_prints_the_steps_diagnostic(tmp_path: Path) -> None:
+    """The real CLI's shape: the ``errors`` body on stdout, ``gh: <message>`` on stderr, exit 1.
+
+    A bare ``gh api graphql`` under ``set -e`` ended the step at that exit, so the
+    step's own ``createCommitOnBranch failed`` diagnostic never printed.
+    """
+    body = {"data": {"createCommitOnBranch": None}, "errors": [{"type": "STALE_DATA", "message": STALE}]}
+    result = _run(tmp_path, dirty="changed\n", gh_stdout=json.dumps(body), gh_rc=1, gh_err=f"gh: {STALE}")
+    assert result.code == 1, result.combined
+    assert f"gh: {STALE}" in result.err
+    assert "createCommitOnBranch failed" in result.out
+    assert "lockfile NOT committed" in result.out
+    assert "STALE_DATA" in result.out
+    assert "gh exited 1" in result.out
+    assert "re-run this job" in result.out
+    assert "gh api graphql failed" not in result.combined
+    assert "Signed lockfile commit" not in result.combined
+    assert result.gh.startswith("gh\t")
+
+
+@pytest.mark.parametrize(
+    ("gh_stdout", "gh_err", "printed", "names_the_token"),
+    [
+        ("<html>502 Bad Gateway</html>\n", "gh: HTTP 502", "empty or not JSON", False),
+        (json.dumps({"message": "Bad credentials", "status": "401"}), "gh: Bad credentials (HTTP 401)", '"Bad credentials"', True),
+        ("", "error connecting to api.github.com", "empty or not JSON", False),
+    ],
+    ids=["http-502-html", "http-401-json", "no-response"],
+)
+def test_an_http_failure_prints_that_the_commit_is_unknown(tmp_path: Path, gh_stdout: str, gh_err: str, printed: str, names_the_token: bool) -> None:
+    """No GraphQL ``errors``: the request failed at the HTTP level or before any response.
+
+    The log alone cannot show whether a commit landed (an HTTP error is not proof that
+    the mutation did not run), so the step does not say nothing was committed.
+    """
+    result = _run(tmp_path, dirty="changed\n", gh_stdout=gh_stdout, gh_rc=1, gh_err=gh_err)
+    assert result.code == 1, result.combined
+    assert gh_err in result.err
+    assert "gh api graphql failed (exit 1)" in result.out
+    assert "cannot show whether the lock commit landed" in result.out
+    assert printed in result.out
+    assert f"Check {BRANCH} for the lock commit" in result.out
+    assert ("CROSS_REPO_DISPATCH_TOKEN is invalid or expired" in result.out) is names_the_token
+    assert "createCommitOnBranch failed" not in result.combined
+    assert "Signed lockfile commit" not in result.combined
+
+
+def test_gh_output_is_printed_with_the_token_masked(tmp_path: Path) -> None:
+    """What gh printed reaches the log through the step's mask; ``_run`` refuses any ``TOKEN``."""
+    body = {"errors": [{"type": "FORBIDDEN", "message": f"token {TOKEN} lacks access ({TOKEN})"}]}
+    result = _run(tmp_path, dirty="changed\n", gh_stdout=json.dumps(body), gh_rc=1, gh_err=f"gh: token {TOKEN} lacks access ({TOKEN})")
+    assert result.code == 1, result.combined
+    assert "gh: token *** lacks access (***)" in result.err
+    assert "token *** lacks access (***)" in result.out
+    assert "createCommitOnBranch failed" in result.out
+
+
+def test_an_http_failure_body_is_printed_with_the_token_masked(tmp_path: Path) -> None:
+    """The HTTP-failure branch prints a JSON body through the same mask as gh's message."""
+    body = {"message": f"bad token {TOKEN}", "status": "403"}
+    result = _run(tmp_path, dirty="changed\n", gh_stdout=json.dumps(body), gh_rc=1, gh_err=f"gh: bad token {TOKEN} (HTTP 403)")
+    assert result.code == 1, result.combined
+    assert "gh: bad token *** (HTTP 403)" in result.err
+    assert "gh api graphql failed (exit 1)" in result.out
+    assert '"bad token ***"' in result.out
+
+
+@pytest.mark.parametrize(
+    ("gh_rc", "gh_stdout", "printed"),
+    [
+        (4, "", "gh api graphql failed (exit 4)"),
+        (0, json.dumps({"errors": [{"type": "X"}]}), "gh exited 0"),
+    ],
+    ids=["exit-4-no-token", "exit-0-errors-without-a-message"],
+)
+def test_the_diagnostic_names_the_exit_status_gh_gave(tmp_path: Path, gh_rc: int, gh_stdout: str, printed: str) -> None:
+    """Both diagnostics report gh's own exit status, and the step exits 1 whatever that was.
+
+    gh exits 4 when it has no usable token (cli/cli ``internal/ghcmd/cmd.go``, ``exitAuth``),
+    and 0 on an ``errors`` body that carries no message.
+    """
+    result = _run(tmp_path, dirty="changed\n", gh_stdout=gh_stdout, gh_rc=gh_rc, gh_err="gh: set the GH_TOKEN environment variable")
+    assert result.code == 1, result.combined
+    assert printed in result.out
+    assert "Signed lockfile commit" not in result.combined

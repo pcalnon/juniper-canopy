@@ -175,6 +175,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ubuntu-latest`. The encoding is now its own assignment, which `set -e` does catch, and an empty result fails the
   step before anything is committed. `.github/workflows/lockfile-update.yml` banner 0.1.2. Found by the Cursor
   flood-3 evaluation: juniper-ml `notes/JUNIPER_2026-10-08_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-3-DISPOSITION.md` §4.
+- **The lockfile regen's own failure message never printed: a GraphQL error ended the step at the `gh` line.**
+  `gh api graphql` exits 1, not 0, on a response that carries GraphQL `errors` (it writes the body to stdout and
+  `gh: <message>` to stderr; cli/cli `pkg/cmd/api/api.go`, `processResponse`), and on an HTTP failure. Called bare
+  under `set -euo pipefail`, that exit ended `lockfile-update.yml`'s commit step before its `.errors` check, so
+  `createCommitOnBranch failed — lockfile NOT committed:` was unreachable and the log showed only gh's line. The
+  step now captures gh's exit status and stderr, prints gh's message with the `CROSS_REPO_DISPATCH_TOKEN` value
+  masked, and fails with its own diagnostic: the GraphQL `errors` and what to do, or, when the response carries no
+  `errors`, `gh api graphql failed` and the branch to check, because that log cannot show whether the commit
+  landed. A successful run prints what it printed before. The stub `gh` in
+  `src/tests/regression/test_lockfile_regen_empty_payload.py` now fails as the real CLI does, and eight new cases
+  pin both diagnostics, the mask and gh's exit status; `docs/ci_cd/CICD_MANUAL.md`, `CICD_REFERENCE.md` and `CICD_QUICK_START.md`
+  describe the new log lines (they documented the old ending, juniper-canopy#808).
+  `.github/workflows/lockfile-update.yml` banner 0.1.3. Cursor flood-4 evaluation, owner ruling 17 (2026-11-09).
 - **`claude.yml`'s header said `ANTHROPIC_API_KEY` is set at the organization level.** Juniper repos are
   user-owned, so no organization secret can reach them; the key is a repository secret here, added 2026-10-10.
   The header now says so, and the three CI docs that repeated the claim (`docs/ci_cd/CICD_REFERENCE.md`,
