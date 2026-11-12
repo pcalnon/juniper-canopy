@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-11-09
-**Version:** 0.29.0
+**Last Updated:** 2026-11-12
+**Version:** 0.29.1
 **Status:** Current
 
 ## Table of Contents
@@ -821,11 +821,12 @@ Keep the encode on its own line: as a `jq --arg` value, `"$(base64 ...)"` can fa
 | `Lockfile already up to date — no commit needed` | `git diff --quiet -- requirements.lock` found no change. The step exits 0 before it encodes. | No |
 | `base64 produced an empty payload -- lockfile NOT committed` | The regenerated lockfile encoded to nothing. The step exits 1 before `jq` writes the request body or `gh` runs. | No |
 | A `base64` error, such as `base64: requirements.lock: No such file or directory` | `base64` exited non-zero, so the `LOCK_B64` assignment failed under `set -e`. Nothing after it runs. | No |
-| `gh: <message>` | The mutation came back with GraphQL `errors`, for example an `expectedHeadOid` the branch no longer matches. `gh api graphql` exits 1 on such a response, and `set -e` ends the step there. | No |
-| `gh: HTTP <status>`, or `gh: <message> (HTTP <status>)` | The request failed at the HTTP level, for example `gh: HTTP 502`: the same `gh:` prefix. `gh api graphql` exits 1 on it too, and `set -e` ends the step there. | Unknown from the log: check the branch for the lock commit |
+| `createCommitOnBranch failed — lockfile NOT committed:`, after `gh: <message>`, followed by the GraphQL `errors` | The mutation came back with GraphQL `errors`, for example an `expectedHeadOid` the branch no longer matches. `gh api graphql` exits 1 on such a response; the step captures that exit, prints the errors and exits 1. | No |
+| `gh api graphql failed (exit <n>) with no GraphQL errors in the response`, after `gh: HTTP <status>`, `gh: <message> (HTTP <status>)` or a connection error | The request failed at the HTTP level, for example `gh: HTTP 502`, or got no response. The step prints the response body when it is JSON, names the branch to check, and exits 1. On a 401 it adds `CROSS_REPO_DISPATCH_TOKEN is invalid or expired`. | Unknown from the log: check the branch for the lock commit |
 | `Signed lockfile commit: <url>` | `createCommitOnBranch` returned the new commit. | Yes |
 
-The step's own `.errors` check, which prints `createCommitOnBranch failed — lockfile NOT committed:`, runs only if `gh` exits 0 with an `errors` body, and `gh api graphql` does not: its `api` command turns a GraphQL `errors` array into `gh: <message>` and exit 1. `src/tests/regression/test_lockfile_regen_empty_payload.py` reaches that check through a stub `gh` that exits 0, and tests the exit-1 case separately.
+`gh api graphql` exits 1 both on a GraphQL `errors` array, which its `api` command turns into `gh: <message>`, and on an HTTP failure. The step therefore does not let `set -e` end it at the `gh` line: it captures gh's exit status and stderr, prints gh's message with the `CROSS_REPO_DISPATCH_TOKEN` value masked, then prints its own diagnostic and exits 1.
+The `.errors` check also covers a `gh` that exits 0 on an `errors` body, which the CLI does only when it finds no error message to print, for example a single error without a `message`. `src/tests/regression/test_lockfile_regen_empty_payload.py` runs the step against a stub `gh` that fails the way the real one does, and against one that exits 0.
 
 **Review.** Confirm the expected floor is in `conf/requirements_ci.txt`. Treat every other pin in the lock diff as an `--upgrade` of `pyproject.toml`. Recompile locally with the three extras and `--upgrade` before changing those pins by hand.
 
