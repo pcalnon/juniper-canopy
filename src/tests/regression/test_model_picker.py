@@ -50,6 +50,21 @@ def _resp(*, ok, json_body=None, status_code=200, text=""):
     return resp
 
 
+def _generator_fetch_fails(manager, monkeypatch):
+    """Fail the generators fetch a gate call makes when it is passed none, as CI's empty runner does.
+
+    Unmocked, it went to whatever listened on 127.0.0.1:8050 (the unit-lane network guard), and the
+    module-scoped manager cached that answer for every later gate call: a live canopy's answer could
+    mark a dataset unavailable and grey it here.
+    """
+
+    def _refused(*_args, **_kwargs):
+        raise requests.ConnectionError("refused")
+
+    manager._generators_cache = None
+    monkeypatch.setattr(requests, "get", _refused)
+
+
 def test_select_model_handler_success_mirrors_swap(manager, monkeypatch):
     body = {"nn_model": "recurrence", "backend": "recurrence", "execution": "one_shot", "status": "coming_soon", "swapped": True}
     monkeypatch.setattr(requests, "post", lambda *a, **k: _resp(ok=True, json_body=body))
@@ -90,7 +105,8 @@ def test_model_summary_text_live_vs_coming_soon():
 # Dataset gate (A1-iv-3b): the model -> dataset-dropdown greying callback body.
 
 
-def test_gate_dataset_options_handler_greys_and_clears_for_recurrence(manager):
+def test_gate_dataset_options_handler_greys_and_clears_for_recurrence(manager, monkeypatch):
+    _generator_fetch_fails(manager, monkeypatch)
     options, value, _notice = manager._gate_dataset_options_handler("recurrence", "spirals")
     by_value = {option["value"]: option for option in options}
     assert by_value["spirals"]["disabled"] is True  # 2-D greyed for the 3-D model
@@ -109,7 +125,8 @@ def test_gate_dataset_options_handler_greys_and_clears_for_recurrence(manager):
     assert enabled[0] == "multi_sine"
 
 
-def test_gate_dataset_options_handler_keeps_compatible_value(manager):
+def test_gate_dataset_options_handler_keeps_compatible_value(manager, monkeypatch):
+    _generator_fetch_fails(manager, monkeypatch)
     _options, value, _notice = manager._gate_dataset_options_handler("cascor", "spirals")
     assert value is dash.no_update  # spirals stays valid for cascor -> no write (a stranded one would be cleared)
 

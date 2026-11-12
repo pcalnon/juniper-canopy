@@ -1,7 +1,7 @@
 # Testing Reference
 
-**Last Updated:** September 5, 2026  
-**Version:** v0.26.3
+**Last Updated:** November 12, 2026  
+**Version:** v0.26.4
 
 Technical reference for the active pytest configuration, markers, fixtures, and CI-equivalent commands.
 
@@ -75,6 +75,7 @@ Registered markers include:
 - `requires_cassandra`
 - `api`
 - `generators`
+- `allow_service_ports` (opts a unit-lane test out of the network guard below; only for a test that connects to a service port it listens on itself)
 
 Common selector examples:
 
@@ -98,6 +99,7 @@ Defined in `src/tests/conftest.py`:
 - `ensure_test_data_directory` (session, autouse)
 - `reset_singletons` (function, autouse)
 - `cleanup_test_environment` (function, autouse)
+- `service_port_guard` (session, autouse): the unit-lane network guard below
 - plus sample data/config fixtures (`test_config`, `sample_training_metrics`, `sample_network_topology`, `sample_dataset`)
 
 Runtime setup behaviors in `conftest.py`:
@@ -107,8 +109,32 @@ Runtime setup behaviors in `conftest.py`:
 - Sets `CANOPY_RATE_LIMIT_ENABLED=false`
 - Adds `src/` to `sys.path` and `PYTHONPATH`
 - Injects stubs for `juniper_data_client` and `juniper_cascor_client` when unavailable
+- Refuses connects to Juniper service ports in the unit lane (the network guard below)
 
 These defaults make most unit/integration tests runnable without external services.
+
+### Unit-lane network guard
+
+A unit test that connects to whatever listens on the host is not hermetic: on a developer machine it talks to a
+live canopy (`:8050`) or juniper-data (`:8100`), while CI's runner, with nothing listening, refuses the same
+connect. So while a unit-lane test runs (its setup, call and teardown), the guard in `src/tests/conftest.py`
+refuses every connect the pytest process makes through Python's `socket` module to a Juniper service port, the
+way an empty host does: canopy 8050-8059, juniper-cascor 8200-8202, juniper-recurrence 8210-8211. It then fails
+the test, even when the code under test swallowed the refusal and fell back. It cannot see a child process
+(`subprocess`, `multiprocessing` spawn), a uvloop/libuv transport or a direct `_socket.socket.connect` call, and
+a connect from a thread an earlier test left running fails whichever test is running then (the failure names
+that thread). juniper-data's 8100 is not guarded: 124 unit-lane tests still reach it through the app's own
+startup probe and `/v1/health/ready`, and guarding it is deferred.
+
+- **Armed** for every test in the CI unit lane's directories (`unit/`, `regression/`, `contract/`, `performance/`)
+  and for tests marked `unit` elsewhere that are not also marked `integration`.
+- **Not armed** for tests marked `e2e`, `ui`, `requires_server` or `requires_cascor`. The integration, e2e and ui
+  lanes are unaffected.
+- A test's own server bound to port 0 gets an ephemeral port, never a service port, so it keeps working. A test
+  that connects to a service port it listens on itself opts out with `@pytest.mark.allow_service_ports`.
+
+Fix a refused test by mocking the client or transport, as its neighbours do. Pinned by
+`src/tests/unit/test_unit_lane_network_guard.py`.
 
 ---
 

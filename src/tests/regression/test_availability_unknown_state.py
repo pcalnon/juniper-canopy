@@ -114,6 +114,16 @@ class TestFetchGeneratorsReportsWhetherItSucceeded:
 @pytest.mark.regression
 @pytest.mark.unit
 class TestTheGateSaysSoWithoutChangingWhatItGates:
+    @pytest.fixture(autouse=True)
+    def _the_generator_fetch_fails(self):
+        """``generators=None`` makes the gate fetch them, and these cases pin what that fetch's FAILURE produces.
+
+        Unmocked, the fetch went to whatever listened on 127.0.0.1:8050: refused on CI's runner (the unknown
+        state pinned here), answered by a live canopy on a developer machine (the unit-lane network guard).
+        """
+        with patch("frontend.dashboard_manager.requests.get", side_effect=OSError("connection refused")):
+            yield
+
     def test_nothing_is_disabled_merely_because_availability_is_unknown(self, dm):
         options, _value, _notice = dm._gate_dataset_options_handler("cascor", "spirals", generators=None)
         cascor_compatible = [o for o in options if not o.get("disabled")]

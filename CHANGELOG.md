@@ -141,6 +141,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Tests: `test_cascor_staging_declared_params.py` (`TestMnistGetsTheDeclaredParamFilter`) and
     `test_recurrence_request.py`. The `mnist` expectations that pinned its Noise field changed in
     `test_restart_modal_restages_what_it_shows.py` and `test_empty_axis_commit_and_restage_zeros.py`.
+- **Unit-lane tests no longer talk to whatever listens on the host's Juniper service ports** (the owner's ruling
+  17 of 2026-11-09 in juniper-ml's Cursor flood-4 arc, which that record's next update adds to §8 of
+  `notes/JUNIPER_2026-11-06_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-4-DISPOSITION.md`). A census of the CI unit lane at
+  `b4b01904` (CI's selector, 8290 tests) found 20 unmocked connects to `127.0.0.1:8050` from 16 tests and 2 to
+  `127.0.0.1:8200` from 2 (a race: any of the four relay tests in
+  `src/tests/unit/backend/test_cascor_service_adapter_boundary.py` can dial, so the count varies by run). Ten of
+  the :8050 tests mocked only `requests.post` around `_apply_parameters_handler`, whose read-back
+  `GET /api/state` went out unmocked; six called `_gate_dataset_options_handler` without `generators`, whose fetch
+  of `/api/dataset/generators` went out unmocked; the :8200 connects came from the metrics relay's tests, whose
+  control-stream supervisor dialed cascor. CI's runner refuses those connects and the handlers swallow the
+  refusal, so the tests passed there; on a machine running canopy they reached it, and the generator list a live
+  canopy answers with decides what the dataset gate greys out. Each test now mocks that transport as its
+  neighbours do. `src/tests/conftest.py` gains a unit-lane network guard: while a test from the unit lane's
+  directories (or a `unit`-marked test not marked `integration`) runs, a connect the pytest process makes through
+  Python's `socket` module to canopy 8050-8059, juniper-cascor 8200-8202 or juniper-recurrence 8210-8211 is
+  refused as an empty host refuses it, and the test then fails, even when the code swallowed the refusal or the
+  test is an expected failure (xfail). A refusal fails whichever test is running when it happens, so one made off
+  the main thread is reported with its thread's name. A test's own server on port 0 keeps working, and
+  `@pytest.mark.allow_service_ports` opts out a test that connects to a service port it listens on itself.
+  juniper-data's 8100 is not guarded: 124 tests reach it through the app's own startup probe and
+  `/v1/health/ready`, so guarding it is deferred. Tests: `src/tests/unit/test_unit_lane_network_guard.py`;
+  documented in `docs/testing/TESTING_REFERENCE.md`.
 - **The Security Scans job's Bandit SARIF report is written and uploaded again.** `.github/workflows/ci.yml`
   installed bare `bandit`, whose CLI has no `sarif` formatter without the `bandit[sarif]` extra. So `bandit -f sarif`
   failed with `invalid choice: 'sarif'`, no report was written, the step warned "Bandit found security issues" for an

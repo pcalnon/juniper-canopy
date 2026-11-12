@@ -35,6 +35,10 @@ def adapter(mock_client):
     a = CascorServiceAdapter(service_url="http://localhost:8200")
     a._client = mock_client
     a.training_monitor = _ServiceTrainingMonitor(mock_client)
+    # start_metrics_relay() also starts the control-stream supervisor, whose real CascorControlStream
+    # dials ws://localhost:8200 in the background (the unit-lane network guard). These tests drive the
+    # relay, not that socket; the real supervisor object (health, is_connected) is left in place.
+    a._control_supervisor.start = AsyncMock()
     return a
 
 

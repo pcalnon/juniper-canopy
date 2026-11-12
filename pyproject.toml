@@ -483,6 +483,7 @@ markers = [
   "api: Tests for API endpoints",
   "generators: Tests for data generators",
   "ui: Browser-automation tests (Playwright; requires `playwright install chromium` and the `ui-test` extra)",
+  "allow_service_ports: Opt a unit-lane test out of the conftest network guard; only for a test that connects to a Juniper service port (8050-8059, 8200-8202, 8210-8211) it listens on itself",
 ]
 asyncio_mode = "auto"
 consider_namespace_packages = false

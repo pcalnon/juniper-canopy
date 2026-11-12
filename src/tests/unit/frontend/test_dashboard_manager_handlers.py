@@ -1011,12 +1011,15 @@ class TestParameterHandlers:
         assert result[0] is False  # enabled
         assert "Unsaved" in result[1]
 
+    @patch("requests.get")
     @patch("requests.post")
-    def test_apply_parameters_handler_success(self, mock_post, dashboard_manager):
+    def test_apply_parameters_handler_success(self, mock_post, mock_get, dashboard_manager):
         """Test apply parameters handler with success."""
         mock_response = Mock()
         mock_response.status_code = 200
         mock_post.return_value = mock_response
+        # The handler reads /api/state back after a 200; unmocked, that read reached 127.0.0.1:8050.
+        mock_get.return_value = Mock(status_code=200, json=Mock(return_value={}))
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._apply_parameters_handler(
@@ -1238,9 +1241,10 @@ class TestParameterHandlers:
         "cn_random_cands": 1,
     }
 
+    @patch("requests.get", return_value=Mock(status_code=200, json=Mock(return_value={})))  # the /api/state read-back after the 200
     @patch("frontend.dashboard_manager.time.sleep")
     @patch("requests.post")
-    def test_apply_parameters_handler_429_backs_off_then_succeeds(self, mock_post, mock_sleep, dashboard_manager):
+    def test_apply_parameters_handler_429_backs_off_then_succeeds(self, mock_post, mock_sleep, _mock_get, dashboard_manager):
         """A 429 is retried within the budget (not returned immediately); the next 200 succeeds.
 
         Also pins the safety cap: even with ``Retry-After: 60`` the sleep is
@@ -1279,9 +1283,10 @@ class TestParameterHandlers:
         assert result[0] is dash.no_update
         assert "rate limited" in result[1].lower()
 
+    @patch("requests.get", return_value=Mock(status_code=200, json=Mock(return_value={})))  # the /api/state read-back after the 200
     @patch("frontend.dashboard_manager.time.sleep")
     @patch("requests.post")
-    def test_apply_parameters_handler_429_missing_header_uses_fallback(self, mock_post, mock_sleep, dashboard_manager):
+    def test_apply_parameters_handler_429_missing_header_uses_fallback(self, mock_post, mock_sleep, _mock_get, dashboard_manager):
         """A 429 with no ``Retry-After`` header backs off by the fallback delay, then succeeds."""
         resp_429 = Mock()
         resp_429.status_code = 429

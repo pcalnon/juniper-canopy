@@ -1123,6 +1123,8 @@ class TestParameterHandlers:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mocker.patch("requests.post", return_value=mock_response)
+        # The handler reads /api/state back after a 200; unmocked, that read reached 127.0.0.1:8050.
+        mocker.patch("requests.get", return_value=MagicMock(status_code=200, json=MagicMock(return_value={})))
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result, msg = dashboard_manager._apply_parameters_handler(
