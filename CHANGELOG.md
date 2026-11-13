@@ -121,6 +121,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A 429 never says `Retry-After: 0`, and the wait it names is rounded up (APD-ECO-016; owner ruling 2026-11-09).**
+  `RateLimiter.check` in `src/security.py` reported `int(window - elapsed)`, which truncates. A rejection in a
+  window's last second therefore carried `Retry-After: 0` and `X-RateLimit-Reset: 0`, telling a client to retry at
+  once into a limiter that rejects again, and every other fractional remainder was a second short (9.4s left said 9).
+  The allowed path, which feeds `X-RateLimit-Reset`, truncated the same way. Both now report
+  `max(1, ceil(window - elapsed))`, as juniper-service-core's copy does (`APD-SVCCORE-004`). canopy keeps its own
+  copy of the limiter and does not import juniper-service-core's, so that fix never reached it; canopy has no
+  failed-auth throttle. `src/tests/unit/test_retry_after_rounds_up.py` (30 tests, frozen clock) pins the rounding on
+  both paths, and in the headers and the message a caller receives. `docs/api/API_REFERENCE.md`'s Rate Limiting
+  section now shows what the limiter sends: it showed `X-RateLimit-Reset` as a timestamp and a 429 body the code
+  never returned. A robustness fix, not a leak.
+
 - **juniper-canopy#778: the restart modal rendered Noise for `mnist`, and juniper-data dropped the value.** cascor
   forwarded the re-staged `noise`, and juniper-data's `MnistParams` (generator `3.0.0`, 13 parameters) declares
   none, so it vanished without a word: the F-C3 class juniper-canopy#736 closed for flat `equities`.
