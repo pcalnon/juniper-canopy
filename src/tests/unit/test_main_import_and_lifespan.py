@@ -320,6 +320,23 @@ class TestRootEndpoint:
         assert "/dashboard/" in response.headers["location"]
 
 
+class TestFastAPINativeTelemetry:
+    """The module-level ``app`` opts out of FastAPI's native telemetry."""
+
+    def test_app_disables_fastapi_native_telemetry(self):
+        """FastAPI's native telemetry must not overlap canopy's configured observability."""
+        # FastAPI added native telemetry (and ``app._telemetry``) in 0.142; ``pyproject.toml`` still
+        # admits older releases, where the keyword lands in ``app.extra`` and there is nothing to pin.
+        pytest.importorskip("fastapi.telemetry", reason="FastAPI < 0.142 has no native telemetry to opt out of")
+        from main import app
+
+        assert app._telemetry["tracing"] is False
+        assert app._telemetry["metrics"] is False
+        assert app._telemetry["logs"] is False
+        assert app._telemetry["operation_spans"] is False
+        assert app._telemetry["auto_configure"] is False
+
+
 async def _wait_until(predicate, timeout: float = 5.0, poll_interval: float = 0.005) -> bool:
     """Poll ``predicate`` on the running loop until it holds or ``timeout`` elapses.
 

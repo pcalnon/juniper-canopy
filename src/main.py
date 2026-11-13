@@ -539,6 +539,17 @@ from security import get_api_key_auth
 _docs_enabled = not get_api_key_auth().enabled
 # Initialize FastAPI
 app = FastAPI(
+    # FastAPI 0.142 added native OpenTelemetry instrumentation (tracing, metrics, logs and
+    # operation spans), on by default. Canopy's observability is Sentry, Prometheus and its own
+    # logging, so every switch is off, as in juniper-data (juniper-data#454). Before 0.142 the
+    # keyword is not a parameter and lands in ``app.extra``.
+    telemetry={
+        "tracing": False,
+        "metrics": False,
+        "logs": False,
+        "operation_spans": False,
+        "auto_configure": False,
+    },
     title="Juniper Canopy",
     version=APP_VERSION,
     description="Real-time monitoring for CasCor networks",

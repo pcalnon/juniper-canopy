@@ -349,6 +349,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CI's 4.4.1 pip lane and 4.1.0 conda lane, every live drive in the E2E ledger), and a floor that nothing tests is
   how F-CANOPY-069 stayed invisible: the conda file was the one environment on 3.x, and it was the one nobody
   drove. The fix itself does not depend on the dash version; a 3.3.0 leg of this tree is alive too.
+- **The app opts out of FastAPI's native telemetry (owner ruling 2026-11-09).** FastAPI 0.142 added OpenTelemetry
+  instrumentation of its own, with tracing, metrics, logs and operation spans on by default, and the lock pins FastAPI
+  0.162.5. `src/main.py` now builds `app` with `telemetry=`, those four switches and `auto_configure` set to `False`,
+  as juniper-data does (juniper-data#454), so FastAPI's instrumentation cannot overlap canopy's configured
+  observability (Sentry, Prometheus, its own logging). This is hardening, not a fix for a live leak: the
+  instrumentation stays idle until an OpenTelemetry provider is configured, and the lock holds `opentelemetry-api`
+  1.45.2 and no OpenTelemetry SDK. FastAPI can also set up export by itself, when `FASTAPI_OTEL_AUTO_CONFIGURE` is `true`
+  and the environment names an OTLP endpoint; without the SDK that attempt only logs a startup warning, and the
+  explicit `auto_configure: False` now rules it out. On FastAPI < 0.142, which `pyproject.toml` still admits, the
+  keyword lands in `app.extra` and does nothing; the new test in `src/tests/unit/test_main_import_and_lifespan.py`
+  pins all five switches off and skips there.
 
 ### Security
 
