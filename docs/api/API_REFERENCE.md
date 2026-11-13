@@ -1806,20 +1806,29 @@ carry an internal per-process header and are exempt so polling does not drain th
 WebSocket availability limits are always enforced by `WebSocketManager` as described in
 [Connection Admission and Limits](#connection-admission-and-limits).
 
-**Response Headers:**
+**Response Headers** (on a rate-limited route, when the limiter is enabled):
 
 ```bash
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 95
-X-RateLimit-Reset: 1699200000
+X-RateLimit-Limit: 60
+X-RateLimit-Remaining: 55
+X-RateLimit-Reset: 42
 ```
+
+`X-RateLimit-Reset` is the whole seconds until the current window ends, rounded up and never below 1. It is not a
+timestamp.
 
 **429 Too Many Requests Response:**
 
+The reply carries the three headers above (`X-RateLimit-Remaining: 0`) and `Retry-After`, which equals
+`X-RateLimit-Reset` and so is never `0`:
+
+```bash
+Retry-After: 42
+```
+
 ```json
 {
-  "error": "Rate limit exceeded",
-  "retry_after": 60
+  "detail": "Rate limit exceeded. Try again in 42 seconds."
 }
 ```
 
