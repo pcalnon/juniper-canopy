@@ -359,8 +359,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Environment Variables table moved verbatim to `docs/AGENTS_REFERENCE.md`.
 - **The dash floor is `dash>=4.0.0`** (`pyproject.toml`; `conf/requirements_ci.txt`, which `requirements.txt` and
   `requirements_ci.txt` link to), and `conf/conda_environment.yaml` pins `dash=4.4.1` with dash 4's two new run
-  dependencies, `comm` and `janus`, at the lock's versions. Everything canopy tests runs dash 4.x (the lock's 4.4.1,
-  CI's 4.4.1 pip lane and 4.1.0 conda lane, every live drive in the E2E ledger), and a floor that nothing tests is
+  dependencies, `comm` and `janus`, at the lock's versions. Everything canopy tested at the fix ran dash 4.x (the
+  lock's 4.4.1, which has since moved to 4.5.0, CI's 4.4.1 pip lane and 4.1.0 conda lane, every live drive in the E2E
+  ledger), and a floor that nothing tests is
   how F-CANOPY-069 stayed invisible: the conda file was the one environment on 3.x, and it was the one nobody
   drove. The fix itself does not depend on the dash version; a 3.3.0 leg of this tree is alive too.
 - **The app opts out of FastAPI's native telemetry (owner ruling 2026-11-09).** FastAPI 0.142 added OpenTelemetry
@@ -374,6 +375,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicit `auto_configure: False` now rules it out. On FastAPI < 0.142, which `pyproject.toml` still admits, the
   keyword lands in `app.extra` and does nothing; the new test in `src/tests/unit/test_main_import_and_lifespan.py`
   pins all five switches off and skips there.
+- **The dependency lock moved** (`requirements.lock`, which the image installs), through the lock regenerations of
+  the Dependabot updates merged since 0.9.0 (#755, #770, #771, #772, #810, #811, #813), F-CANOPY-069's fix (#760)
+  and #806's two security pins (Security, below). The notable runtime pins: `fastapi` 0.143.3 -> 0.162.5 with
+  `starlette` 1.8.0 -> 1.10.0, `dash` 4.4.1 -> 4.5.0, `pydantic` 2.14.1 -> 2.14.3 (with `pydantic-core` 2.50.4 and
+  `pydantic-settings` 2.16.2), `sentry-sdk` 2.72.0 -> 2.74.0, `websockets` 17.2 -> 17.4, `python-multipart`
+  0.0.32 -> 0.0.33, `importlib-metadata` 9.0.1 -> 10.2.0, `anyio` 4.15.1 -> 4.16.0 and `certifi` 2026.7.22 ->
+  2026.10.23, plus seven smaller moves, and `lazy-importer` 0.1.0 joins it. Apart from the dash floor (above) and the
+  two security floors (Security, below), the wheel's declared requirements are unchanged.
 
 ### Security
 
