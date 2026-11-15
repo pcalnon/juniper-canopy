@@ -146,17 +146,23 @@ jobs:
 
     steps:
       - name: Checkout Code
+        id: checkout-code
+        continue-on-error: ${{ matrix.experimental == true }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 1
 
       - name: Set up Python ${{ matrix.python-version }}
+        id: set-up-python
+        continue-on-error: ${{ matrix.experimental == true }}
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
       - name: Install dependencies
+        id: install-dependencies
+        continue-on-error: ${{ matrix.experimental == true }}
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║    Juniper Canopy - Install Dependencies                   ║"
@@ -207,6 +213,8 @@ jobs:
       # juniper-ci-tools>=0.5.1 (juniper-ml#579/#590). Runs inside this already
       # required job (see required-checks `needs`), so a failure blocks the PR.
       - name: Preflight - Environment Floor-Drift Check
+        id: preflight-environment-floor-drift-check
+        continue-on-error: ${{ matrix.experimental == true }}
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - Environment Floor-Drift Check       ║"
@@ -215,10 +223,14 @@ jobs:
           juniper-env-drift-check --repo-root . --check-lock
 
       - name: Create required directories
+        id: create-required-directories
+        continue-on-error: ${{ matrix.experimental == true }}
         run: |
           mkdir -p logs src/logs reports/junit reports/coverage reports/htmlcov
 
       - name: Run Unit Tests with Coverage Gate
+        id: run-unit-tests-with-coverage-gate
+        continue-on-error: ${{ matrix.experimental == true }}
         env:
           CASCOR_BACKEND_AVAILABLE: 0
           RUN_SERVER_TESTS: 0
@@ -283,6 +295,8 @@ jobs:
       # (>=0.9.0,<0.10.0) is already installed by the preflight step; the pin here
       # keeps the step self-contained.
       - name: Enforce per-file coverage gate (blocking)
+        id: enforce-per-file-coverage-gate-blocking
+        continue-on-error: ${{ matrix.experimental == true }}
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║   Juniper Canopy - Per-File Coverage Gate (>=90 file/>=95) ║"
@@ -291,6 +305,8 @@ jobs:
           juniper-coverage-gap-map --coverage-json reports/coverage.json --enforce
 
       - name: Upload Coverage Artifacts
+        id: upload-coverage-artifacts
+        continue-on-error: ${{ matrix.experimental == true }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: always()
         with:
@@ -305,6 +321,8 @@ jobs:
       # which stays green because fail_ci_if_error is false. A Dependabot PR reads the Dependabot
       # secret store, which has held the token too since 2026-11-04, so its upload carries it.
       - name: Upload Coverage to Codecov
+        id: upload-coverage-to-codecov
+        continue-on-error: ${{ matrix.experimental == true }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
         if: always()
         with:
@@ -314,12 +332,38 @@ jobs:
           fail_ci_if_error: false
 
       - name: Upload Test Results
+        id: upload-test-results
+        continue-on-error: ${{ matrix.experimental == true }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: always()
         with:
           name: unit-test-results-py${{ matrix.python-version }}
           path: reports/junit/
           retention-days: 30
+
+      - name: Report the informational Python 3.15 result
+        # Python 3.15 is INFORMATIONAL (phase 1 of the 3.15 migration). On the 3.15 leg every step above
+        # carries `continue-on-error: ${{ matrix.experimental == true }}`, so a failing step neither stops
+        # this job nor turns its check red, and no merge, push or deployment waits on it. This step says
+        # what failed instead: a warning annotation, and a table in the job summary.
+        if: always() && matrix.experimental == true
+        env:
+          STEPS_JSON: ${{ toJSON(steps) }}
+          PY_LEG: ${{ matrix.python-version }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          steps = json.loads(os.environ["STEPS_JSON"])
+          leg = os.environ["PY_LEG"]
+          failed = [k for k, v in steps.items() if v.get("outcome") not in ("success", "skipped")]
+          rows = "\n".join(f"| `{k}` | {v.get('outcome')} |" for k, v in steps.items())
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+              fh.write(f"### Python {leg}: informational, blocks nothing\n\n| Step | Outcome |\n|---|---|\n{rows}\n")
+          if failed:
+              print(f"::warning title=Python {leg} (informational)::{len(failed)} step(s) failed on Python {leg}: {', '.join(failed)}. Nothing is blocked; see this job's summary.")
+          else:
+              print(f"::notice title=Python {leg} (informational)::every step passed on Python {leg}")
+          PY
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   # Integration Tests: Run integration tests (PRs and main/develop pushes)
