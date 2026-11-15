@@ -1,8 +1,8 @@
 # CI/CD Quick Start
 
-**Last Updated:** 2026-11-12  
+**Last Updated:** 2026-11-15  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.27.4  
+**Version:** 0.27.5  
 **Status:** Current
 
 ## Prerequisites
@@ -99,6 +99,8 @@ Open the PR checks and confirm these gates complete:
 - `Quality Gate`
 - `Analyze (python)` (CodeQL; standalone workflow, required)
 - `Sequence Safety` and `Guard PR base branch` (standalone required checks)
+
+`Unit Tests + Coverage (Python 3.15 on ubuntu-latest)` runs too and is not a gate: the Python 3.15 leg is informational (phase 1 of the Python 3.15 migration), so a red result there blocks no merge.
 
 `Quality Gate` does **not** include CodeQL. A green Quality Gate with a red `Analyze (python)` is not merge-safe.
 

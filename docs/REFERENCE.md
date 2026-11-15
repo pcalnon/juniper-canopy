@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.26.0
+**Version:** 0.26.1
 **Status:** Active
-**Last Updated:** November 7, 2026
+**Last Updated:** November 15, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -364,7 +364,7 @@ Pipeline configuration, hooks, and workflow reference.
 
 **Pre-commit hooks:** black, isort, flake8, mypy, bandit, yamllint
 
-**CI pipeline:** GitHub Actions with multi-version Python testing (3.12-3.14)
+**CI pipeline:** GitHub Actions with multi-version Python testing (3.12-3.14, plus an informational 3.15 unit-test leg that blocks nothing)
 
 ---
 
@@ -452,6 +452,6 @@ The most commonly used environment variables for juniper-canopy configuration. F
 
 ---
 
-**Last Updated:** November 7, 2026
-**Version:** 0.26.0
+**Last Updated:** November 15, 2026
+**Version:** 0.26.1
 **Maintainer:** Paul Calnon

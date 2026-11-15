@@ -1,7 +1,7 @@
 # CI/CD Environment Setup
 
-**Last Updated:** 2026-11-09
-**Version:** 0.28.4
+**Last Updated:** 2026-11-15
+**Version:** 0.28.5
 **Status:** Current
 
 ## Table of Contents
@@ -27,13 +27,14 @@ The workflow definitions are:
 
 ## Runner and Python Strategy
 
-- Matrix jobs (`pre-commit`, `unit-tests`): Ubuntu Python `3.12`, `3.13`, `3.14`; unit tests also run on required macOS Python `3.12`
+- Matrix jobs (`pre-commit`, `unit-tests`): Ubuntu Python `3.12`, `3.13`, `3.14`; unit tests also run on required macOS Python `3.12`, and on an informational Ubuntu Python `3.15` leg that blocks nothing (phase 1 of the Python 3.15 migration)
 - Single-version jobs (`integration-tests`, `build`, `security`, `docs`, `lockfile-check`, `dependency-docs`): Python `3.14`
 - `actions/setup-python` with `cache: pip` is used across jobs
 
 Example from `ci.yml`:
 
 ```yaml
+continue-on-error: ${{ matrix.experimental == true }}  # true on the 3.15 leg alone
 strategy:
   matrix:
     os: [ubuntu-latest]
@@ -42,6 +43,9 @@ strategy:
       - os: macos-latest
         python-version: "3.12"
         experimental: false
+      - os: ubuntu-latest  # informational, never required
+        python-version: "3.15"
+        experimental: true
 ```
 
 ## Dependency Installation Model
