@@ -4,8 +4,8 @@
 **Repository**: pcalnon/juniper-canopy
 **Author**: Paul Calnon
 **License**: MIT License
-**Version**: 0.9.0
-**Last Updated**: 2026-10-26
+**Version**: 0.10.0
+**Last Updated**: 2026-11-15
 
 ---
 
