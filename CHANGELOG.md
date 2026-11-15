@@ -416,9 +416,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     conda build hashes and one `YOUR_API_KEY`-shaped placeholder in `notes/mcp/EXA_API_REFERENCE.md`.
   - **Conda build strings get a narrow allowlist, because they recur, and it REPLACES the broad conda path
     exemption.**
-    - **Why.** Every conda-env refresh rewrites the `<package>=<version>=<build>` lines under a new commit. No
-      commit-scoped entry can name that commit in advance, so the next refresh of a conda environment file would have failed the PR scan and then the push scan of `main`. (`conf/requirements-conda.txt`, which the allowlist also names, has not been in the tree since before 0.9.0; its four findings are in history only.) Meanwhile the old global
-      `conf/conda_environment.*\.ya?ml` path entry skipped EVERY rule in those files.
+    - **Why.** Every conda-env refresh rewrites the `<package>=<version>=<build>` lines under a new commit, and no commit-scoped entry can name that commit in advance. The old global `conf/conda_environment.*\.ya?ml` path entry kept such a refresh from failing only by skipping EVERY rule in those files; without it, the next refresh of a conda environment file would fail the PR scan and then the push scan of `main`. (`conf/requirements-conda.txt`, which the new allowlist also names, has not been in the tree since before 0.9.0; its four findings are in history only.)
     - **What.** `.gitleaks.toml` adds an AND-scoped allowlist to `generic-api-key` alone. A finding is dropped only
       when its file is `conf/conda_environment*.y(a)ml` or `conf/requirements-conda.txt` AND its whole secret is
       `<version>=<build>` with a conda build string (`h<7 hex>_<n>`, `pyh<7 hex>_<n>` or `py<NNN>h<7 hex>_<n>`).
