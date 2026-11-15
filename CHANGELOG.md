@@ -9,8 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.10.0] - 2026-11-15
-
 ### Added
 
 - **CI runs the unit tests on Python 3.15 as well, as an informational leg that blocks nothing.** Phase 1 of the
@@ -33,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/REFERENCE.md`, `docs/ci_cd/CICD_REFERENCE.md`, `docs/ci_cd/CICD_QUICK_START.md`,
     `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`, `docs/ci_cd/CICD_MANUAL.md`, `docs/testing/TESTING_ENVIRONMENT_SETUP.md`
     and `docs/testing/TESTING_MANUAL.md` describe the leg.
+
+
+## [0.10.0] - 2026-11-15
+
+### Added
 
 - **Regression tests harvested from the Cursor flood-4 test PRs** (canopy#789, #792, #794, #795): four new test
   files over four workflows. `src/tests/regression/test_bandit_sarif_upload.py` pins the Security Scans job's
