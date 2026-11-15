@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
 **Last Updated:** 2026-11-15
-**Version:** 0.30.4
+**Version:** 0.30.5
 **Status:** Current
 
 ## Table of Contents
@@ -181,7 +181,7 @@ lint:
 | `.github/workflows/codeql.yml`              | push `main`/`develop`, PR to `main`, weekly Mon 06:00 UTC            | CodeQL SAST; required check `Analyze (python)`       |
 | `.github/workflows/security-scan.yml`       | weekly cron + manual                                                 | Scheduled Bandit + pip-audit                         |
 | `.github/workflows/lockfile-update.yml`     | `push` to `dependabot/pip/**`; `pull_request` paths `pyproject.toml` (skips forks and `release/**`) | `--upgrade` compile of `pyproject.toml` into `requirements.lock` |
-| `.github/workflows/publish.yml`             | release published                                                    | Build + TestPyPI + PyPI publish                      |
+| `.github/workflows/publish.yml`             | release published; `workflow_dispatch` from a tag (republish only)   | One build to TestPyPI, then PyPI, sha256-checked against both |
 | `.github/workflows/publish-image.yml`       | release `v*`, path-filtered PR, manual dispatch                     | GHCR multi-arch image; serve-and-version gate        |
 | `.github/workflows/sequence-safety.yml`     | `pull_request` to `main`/`develop`                                   | Compositional-loss screens (standalone job)          |
 | `.github/workflows/main-verify.yml`         | push to `main`                                                       | Post-merge sequence-safety net                       |
@@ -552,12 +552,14 @@ Operator runbook: [AGENTS.md date check](CICD_MANUAL.md#runbook-agentsmd-date-ch
 
 ### `publish.yml`
 
-- Trigger: GitHub release published
-- `id-token: write` for trusted publishing
+- Trigger: GitHub release published; the build job's guard is `startsWith(github.event.release.tag_name, 'v')`. A `workflow_dispatch` from a release tag with the boolean input `republish_from_testpypi` runs the republish job alone: no other job runs on a dispatch. No `push: tags` (juniper-ml#555's double-fire).
+- Permissions: `permissions: {}` at the top. `Build and Validate` holds `contents: read` and `actions: read`; `Publish to TestPyPI` `contents: read` and `id-token: write`; `Publish to PyPI` `id-token: write`; `Republish the tested files (dispatch only)` `actions: read` and `id-token: write`. Only the jobs that upload can mint the OIDC token for trusted publishing.
 - Stages:
-  1. Build + `twine check`
-  2. Publish to TestPyPI + install verification
-  3. Publish to PyPI
+  1. `Build and Validate`, once: `pip install build twine`, `python -m build`, `twine check dist/*`, the import smoke test, `Record SHA256SUMS`, and `Upload dist artifacts`, which uploads `dist/` and `SHA256SUMS` as one artifact, `juniper-canopy-dist`, kept 90 days. Its first step, `Reuse an earlier attempt's artifact`, runs on attempt 2 and later: when the run already holds that artifact, every later step skips.
+  2. `Publish to TestPyPI`: `Verify the dist against SHA256SUMS`, the upload (`attestations: true`, no `skip-existing`), `Verify TestPyPI serves exactly these files` (TestPyPI's JSON for the version lists exactly those files and sha256), then the install verification.
+  3. `Publish to PyPI`: the dist check, `Verify TestPyPI still serves exactly these files`, the upload (`attestations: true`), and `Verify PyPI serves exactly these files`. It checks out and builds nothing.
+- The steps marked `One-artifact publish template`, and the republish job, are juniper-cascor's, copied verbatim; its manual's [One Artifact, Checked Against TestPyPI](https://github.com/pcalnon/juniper-cascor/blob/main/docs/ci_cd/MANUAL.md#one-artifact-checked-against-testpypi) is the contract.
+  A JSON check polls up to 20 times, 15 s apart, while the index does not list a file yet, and fails at once on a file listed with another sha256 or one the run did not build. Pinned by `src/tests/unit/test_publish_one_artifact.py`. Recovery: [Runbook: Release publishing](CICD_MANUAL.md#runbook-release-publishing).
 
 ### Container image (`publish-image.yml`)
 
@@ -886,6 +888,6 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 ---
 
 **Last Updated:** 2026-11-15
-**Version:** 0.30.4
+**Version:** 0.30.5
 **Maintained By:** Development Team
 **Status:** ✅ Current

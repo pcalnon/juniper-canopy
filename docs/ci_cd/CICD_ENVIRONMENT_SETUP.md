@@ -1,7 +1,7 @@
 # CI/CD Environment Setup
 
 **Last Updated:** 2026-11-15
-**Version:** 0.28.5
+**Version:** 0.28.6
 **Status:** Current
 
 ## Table of Contents
@@ -121,7 +121,7 @@ pip install -e ".[dev]"
 
 - `ci.yml`: `contents: read` globally, with `security-events: write` in the security job for Bandit SARIF upload (`github/codeql-action/upload-sarif`, SHA-pinned with the CodeQL family)
 - `codeql.yml`: `actions: read`, `contents: read`, `security-events: write` for CodeQL analyze
-- `publish.yml`: `id-token: write` for OIDC trusted publishing
+- `publish.yml`: `permissions: {}` at the top, then per job: `Build and Validate` `contents: read` and `actions: read` (its reuse step lists the run's artifacts), `Publish to TestPyPI` `contents: read` and `id-token: write`, `Publish to PyPI` `id-token: write` (it checks out nothing), and `Republish the tested files (dispatch only)` `actions: read` and `id-token: write`. Only the jobs that upload hold `id-token: write`, for OIDC trusted publishing
 - `lockfile-update.yml`: `contents: write` for bot lockfile commits
 - `claude.yml`: `contents: write`, `pull-requests: write`, `issues: write`, `id-token: write`, `actions: read`. Not a required check. `id-token: write` is granted even though the workload-identity inputs are unset.
 

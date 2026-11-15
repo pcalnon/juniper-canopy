@@ -1,7 +1,7 @@
 # CI/CD Manual
 
 **Last Updated:** 2026-11-15
-**Version:** 0.29.3
+**Version:** 0.29.4
 **Status:** Current
 
 ## Table of Contents
@@ -1018,14 +1018,29 @@ The date check has no local console script. It is the workflow step.
 
 ### Runbook: Release publishing
 
-`publish.yml` is release-triggered (`release: published`) and uses OIDC:
+`publish.yml` is release-triggered (`release: published`, a `v*` tag) and uses OIDC. It builds once, and both publish jobs upload that one artifact (`dist/` and `SHA256SUMS`), so PyPI receives exactly the files TestPyPI took and the install check tested:
 
-1. Build and `twine check`
-2. Publish to TestPyPI (`environment: testpypi`)
+1. Build and `twine check`, then the import smoke test, once; `SHA256SUMS` records the files
+2. Publish to TestPyPI (`environment: testpypi`); TestPyPI's JSON must then list exactly those files and sha256
 3. Verify installation from TestPyPI
-4. Publish to PyPI (`environment: pypi`)
+4. Publish to PyPI (`environment: pypi`), after TestPyPI's JSON is checked again; PyPI's JSON is checked after the upload
 
-Do not bypass TestPyPI stage; production publish is intentionally downstream.
+Do not bypass TestPyPI stage; production publish is intentionally downstream. The contract: [`CICD_REFERENCE.md` § `publish.yml`](CICD_REFERENCE.md#publishyml), and juniper-cascor's [One Artifact, Checked Against TestPyPI](https://github.com/pcalnon/juniper-cascor/blob/main/docs/ci_cd/MANUAL.md#one-artifact-checked-against-testpypi), whose template steps this workflow copies verbatim.
+
+A release that did not reach PyPI follows the owner's ladder (ruling of 2026-11-15), in this order. Every rung publishes the files TestPyPI took, or nothing ([juniper-cascor's manual](https://github.com/pcalnon/juniper-cascor/blob/main/docs/ci_cd/MANUAL.md#recovering-a-release-that-did-not-reach-pypi)):
+
+1. Republish TestPyPI's files: dispatch this workflow from the release's tag.
+
+   ```bash
+   gh workflow run publish.yml --repo pcalnon/juniper-canopy --ref v<version> -f republish_from_testpypi=true
+   ```
+
+   Only `Republish the tested files (dispatch only)` runs. It waits at the `pypi` gate like the release run (a fresh approval, then the 5-minute timer), builds nothing, downloads the version's files from TestPyPI, checks each file's bytes against TestPyPI's JSON and, while the release run's artifact exists (90 days), against its `SHA256SUMS`, uploads them, and checks PyPI's JSON.
+   Both publish environments admit tags only, so dispatch from the tag, never a branch. A tag cut before this change does not carry the job.
+2. If that fails, within 30 days of the release run: **Re-run failed jobs** on the release run. The re-run reuses the run's artifact and waits at the gate again. GitHub refuses a re-run after 30 days.
+3. Otherwise, cut a new patch version.
+
+Never use "Re-run all jobs" on a publish run, nor `gh run rerun <id>` without `--failed`. download-artifact takes the newest artifact of a name, so a rebuild would become the files every later job uploads; the build job's `Reuse an earlier attempt's artifact` step skips such a rebuild, but a tag cut before this change lacks the step.
 
 ### Runbook: Container image serve and version
 

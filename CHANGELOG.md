@@ -111,6 +111,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `.gitleaksignore`.
   - Docs: `docs/ci_cd/CICD_MANUAL.md` (§ Runbook: Gitleaks secrets scan, 0.29.3) and `docs/ci_cd/CICD_REFERENCE.md`
     (§ Security Scans: Gitleaks, 0.30.4).
+- **PyPI receives only the files TestPyPI took, checked by sha256: `publish.yml` drops `skip-existing` and checks
+  every upload against TestPyPI's and PyPI's JSON** (the owner's directive of 2026-11-15: "deploy to pypi should send
+  the same artifact that was already sent to testpypi. an identical hash check, of the artifacts after testpypi deploy
+  and prior to pypi deploy, might also be helpful here to prevent this from slipping through the cracks again."; the
+  port of juniper-cascor#763 and #767). This workflow already built once and handed both publish jobs one artifact, and
+  0.5.0 through 0.10.0 serve the same sha256 on both indexes. But nothing compared a sha256 with either index, and the
+  TestPyPI upload set `skip-existing: true`, which keeps an earlier file under the same name. TestPyPI took 0.3.0's
+  files at 09:24Z on 2026-02-27, before that release's only publish run (22481348704) started at 09:52Z, so its
+  TestPyPI upload could only skip them and its install check installed TestPyPI's files, while PyPI serves other files
+  under both names: the wheel is `ce2a0482…` on PyPI and `30b1cdb1…` on TestPyPI, the sdist `d206f2f2…` against
+  `06b04725…`. The artifact was also kept 7 days, while the `pypi` gate may wait 30.
+  - **The template.** The steps marked `One-artifact publish template`, and the republish job, are juniper-cascor's
+    `publish.yml` (its `main` at `675884888f5a`), copied verbatim. The workflow `env` sets their two parameters,
+    `PUBLISH_PACKAGE: juniper-canopy` and `PUBLISH_DIST_DIR: dist`.
+  - **Build once, and reuse it on a re-run.** `Build and Validate` keeps its commands and the import smoke test, then
+    `Record SHA256SUMS` hashes the files, and `Upload dist artifacts` uploads `dist/` and `SHA256SUMS` as one artifact,
+    `juniper-canopy-dist` (was `dist`), kept 90 days (was 7). Its new first step, `Reuse an earlier attempt's artifact`,
+    skips every later step on a re-run attempt whose run already holds that artifact, because download-artifact takes
+    the newest artifact of a name. Its new guard, `startsWith(github.event.release.tag_name, 'v')`, keeps the new
+    dispatch from building; every juniper-canopy release tag starts with `v`.
+  - **TestPyPI.** `Publish to TestPyPI` checks the downloaded files against `SHA256SUMS`, uploads them (attestations
+    kept, `skip-existing` gone), and `Verify TestPyPI serves exactly these files` then requires TestPyPI's JSON for
+    the version to list exactly those files with those sha256. The install check follows, its requirement now quoted
+    (which clears actionlint's one finding, SC2086); otherwise unchanged.
+  - **PyPI.** `Publish to PyPI` no longer checks out or sets up Python. It checks the files against `SHA256SUMS`, and
+    TestPyPI's JSON again, before its upload (attestations kept), and PyPI's JSON after it.
+  - **Only the jobs that upload hold `id-token: write`.** The workflow's `permissions` is `{}`: `Build and Validate`
+    gets `contents: read` and `actions: read`, `Publish to TestPyPI` `contents: read` and `id-token: write`, and
+    `Publish to PyPI` `id-token: write`.
+  - **Recovery, in the owner's order (ruling of 2026-11-15).** A `workflow_dispatch` from the release tag with
+    `republish_from_testpypi` runs only the new job `Republish the tested files (dispatch only)`, behind the same
+    `pypi` gate. It builds nothing: it copies TestPyPI's files for the version to PyPI, each checked against TestPyPI's
+    JSON and, while the release run's artifact exists, its `SHA256SUMS`. If that fails, within 30 days of the release
+    run, "Re-run failed jobs" on it; after that, cut a new patch version. Never "Re-run all jobs".
+  - Unchanged: the `release: published` trigger (no `push: tags`), the `testpypi` and `pypi` environments, the job
+    names juniper-ml's release-train ceremony reads, the build commands, the import smoke test, and
+    `publish-image.yml`.
+  - New `src/tests/unit/test_publish_one_artifact.py` (66 cases), ported from juniper-cascor's: the wiring, what
+    this workflow kept, and rehearsals that run each template step's own Python, extracted from `publish.yml`, against
+    a stand-in index and GitHub API on 127.0.0.1. The unit lane selects it.
+    `util/ad-hoc/2026-11-15_verify_publish_one_artifact_tests_are_not_vacuous.py` makes 50 mutations to a
+    copy of the workflow, one at a time, and the tests catch each. CI does not run it.
+  - Docs: `docs/ci_cd/CICD_MANUAL.md` (§ Runbook: Release publishing, with the recovery ladder; 0.29.4),
+    `docs/ci_cd/CICD_REFERENCE.md` (§ `publish.yml` and the workflow inventory; 0.30.5),
+    `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md` (the workflow permissions; 0.28.6) and `AGENTS.md` (the workflow table).
 
 
 ## [0.10.0] - 2026-11-15
