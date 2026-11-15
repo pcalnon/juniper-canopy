@@ -105,16 +105,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `src/tests/fixtures/juniper_data_sequence_generator_schemas.json`, but nothing compared that capture with
   juniper-data: a parameter added upstream would be withheld from every request, one removed still sent and dropped
   in silence, and a changed default sent as an edit. `util/check_juniper_data_generator_schemas.py` compares every
-  generator in every `src/tests/fixtures/juniper_data_*generator_schemas.json` (the snapshots decide which, so a
-  sibling capture such as flat `equities` is covered from the commit that adds it) with `GENERATOR_REGISTRY[name]`:
+  generator in every `src/tests/fixtures/juniper_data_*generator_schemas.json` (the snapshots decide which, so a sibling capture is covered from the commit that adds it, as flat `equities` and `mnist` are in this release) with `GENERATOR_REGISTRY[name]`:
   `params_class.model_json_schema()` and `version`, with JSON equality (`1` equals `1.0`; `false` is not `0`). Any
   difference exits 1, naming the generator, the field and key, both values, and the exact re-capture command; a
   check that cannot run (no or malformed snapshot, juniper-data not importable, not the expected version, or a
   `juniper_data` imported from anywhere but the distribution it reports) exits 2. The new
   `.github/workflows/juniper-data-schema-drift.yml` installs the released `juniper-data[api]` (a bare install cannot
   import the registry: `pydantic_settings`) and runs it daily at 07:17 UTC, on `workflow_dispatch` (optionally for
-  a version), on `repository_dispatch` `juniper-data-published` (the event juniper-recurrence's bench lane receives;
-  it reaches canopy once juniper-data's notify-consumers matrix lists it), and on a pull request touching the
+  a version), on `repository_dispatch` `juniper-data-published` (the event juniper-recurrence's bench lane receives; juniper-data's notify-consumers matrix has listed canopy since juniper-data#501, 2026-10-30, so juniper-data's next release sends it here), and on a pull request touching the
   workflow, the script or a snapshot. Against juniper-data 0.17.1 on 2026-10-26: no drift in any of the six
   generators. Tests: `src/tests/unit/test_check_juniper_data_generator_schemas.py` (each kind of drift is named and
   exits 1; equality passes; both import modes run in subprocesses; the workflow's contract with juniper-data's sender
@@ -155,9 +153,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Tests: `test_cascor_staging_declared_params.py` (`TestMnistGetsTheDeclaredParamFilter`) and
     `test_recurrence_request.py`. The `mnist` expectations that pinned its Noise field changed in
     `test_restart_modal_restages_what_it_shows.py` and `test_empty_axis_commit_and_restage_zeros.py`.
-- **Unit-lane tests no longer talk to whatever listens on the host's Juniper service ports** (the owner's ruling
-  17 of 2026-11-09 in juniper-ml's Cursor flood-4 arc, which that record's next update adds to §8 of
-  `notes/JUNIPER_2026-11-06_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-4-DISPOSITION.md`). A census of the CI unit lane at
+- **Unit-lane tests no longer talk to whatever listens on the host's Juniper service ports** (the owner's ruling 17 of 2026-11-09 in juniper-ml's Cursor flood-4 arc; as of this release its record, `notes/JUNIPER_2026-11-06_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-4-DISPOSITION.md`, lists rulings 1 to 14 in §8 and not this one). A census of the CI unit lane at
   `b4b01904` (CI's selector, 8290 tests) found 20 unmocked connects to `127.0.0.1:8050` from 16 tests and 2 to
   `127.0.0.1:8200` from 2 (a race: any of the four relay tests in
   `src/tests/unit/backend/test_cascor_service_adapter_boundary.py` can dial, so the count varies by run). Ten of
@@ -196,20 +192,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   what CI keys on). No test body changed, and the checker's docstring now names the real path.
   `src/tests/regression/test_ci_lane_wiring.py` gains `TestNoTestModuleSitsAtTheTopOfTheTestTree`, because its
   directory guard walks subdirectories and could not see a module at this level; restoring the old layout fails it.
-  The unit lane now selects 8,224 of 8,228 collected tests, up from 8,182 of 8,186: the 40 of this suite plus the
+  At this change the unit lane selected 8,224 of 8,228 collected tests, up from 8,182 of 8,186: the 40 of this suite plus the
   guard's 2. The twin of juniper-cascor#734. Separately, the Codecov step in `.github/workflows/ci.yml` now passes
   `token: ${{ secrets.CODECOV_TOKEN }}`, as juniper-data's does, after the owner added the secret on 2026-10-29.
   Until then its uploads were refused ("Token required - not valid tokenless upload") inside a step that stays
   green under `fail_ci_if_error: false`: all 24 in the six `ci.yml` runs from 2026-10-28 20:56Z to 2026-10-29
-  19:41Z. A Dependabot PR reads the Dependabot secret store, which does not hold the token, so its upload stays
-  tokenless. Found by the Cursor flood-3 evaluation: juniper-ml
+  19:41Z. A Dependabot PR reads the Dependabot secret store, which did not hold the token then, so its upload stayed tokenless until the owner added the token there on 2026-11-04. Found by the Cursor flood-3 evaluation: juniper-ml
   `notes/JUNIPER_2026-10-08_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-3-DISPOSITION.md` §4.
 - **The lockfile regen could have committed an empty `requirements.lock` without failing.** The commit step built
   its payload with `--arg contents "$(base64 -w0 requirements.lock)"`. A failure inside a command substitution used
   as an argument does not trip `set -e`, so a failing `base64` would have handed `jq` an empty string and the step
   would have made a signed commit that empties the lockfile. Latent: GNU `base64` does not fail on
   `ubuntu-latest`. The encoding is now its own assignment, which `set -e` does catch, and an empty result fails the
-  step before anything is committed. `.github/workflows/lockfile-update.yml` banner 0.1.2. Found by the Cursor
+  step before anything is committed. `.github/workflows/lockfile-update.yml` banner 0.1.2 (0.1.3 after the next entry's change). Found by the Cursor
   flood-3 evaluation: juniper-ml `notes/JUNIPER_2026-10-08_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-3-DISPOSITION.md` §4.
 - **The lockfile regen's own failure message never printed: a GraphQL error ended the step at the `gh` line.**
   `gh api graphql` exits 1, not 0, on a response that carries GraphQL `errors` (it writes the body to stdout and
@@ -228,11 +223,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   user-owned, so no organization secret can reach them; the key is a repository secret here, added 2026-10-10.
   The header now says so, and the three CI docs that repeated the claim (`docs/ci_cd/CICD_REFERENCE.md`,
   `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md` and `docs/ci_cd/CICD_MANUAL.md`) are corrected with it. Comments and docs
-  only: no trigger, step, pin or job name changed. Same record, §4.
+  only: no trigger, step, pin or job name changed. Found by the Cursor flood-3 evaluation: juniper-ml `notes/JUNIPER_2026-10-08_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-3-DISPOSITION.md` §4.
 - **`docs/DOCUMENTATION_OVERVIEW.md`'s two template examples carried the document's own live stamp.** The example
   document header (`:510-511`) and the metadata example (`:965-966`) both read `1.0.1` / October 8, 2026, the
   header's own values, so a stamp bump rewrote the examples along with the header. juniper-cascor#709 made exactly
-  that edit to cascor's copy (a row in the same record); the juniper-cascor flood-3 backlog PR found this one. The
+  that edit to cascor's copy (a row in that flood-3 record); the juniper-cascor flood-3 backlog PR found this one. The
   examples now show placeholders, and the header moves to 1.0.2, October 26, 2026.
 - **F-CANOPY-069: under every dash 3.x release the dashboard was inert in the browser.** Two callback pairs each
   claimed one `allow_duplicate` Output from one Input: `accept_live_switch` and `open_progress_alert_on_accept` on
@@ -362,8 +357,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dependencies, `comm` and `janus`, at the lock's versions. Everything canopy tested at the fix ran dash 4.x (the
   lock's 4.4.1, which has since moved to 4.5.0, CI's 4.4.1 pip lane and 4.1.0 conda lane, every live drive in the E2E
   ledger), and a floor that nothing tests is
-  how F-CANOPY-069 stayed invisible: the conda file was the one environment on 3.x, and it was the one nobody
-  drove. The fix itself does not depend on the dash version; a 3.3.0 leg of this tree is alive too.
+  how F-CANOPY-069 stayed invisible: the two conda files (`conf/conda_environment.yaml` and `conf/conda_environment_cpu.yaml`, both `dash=3.3.0`) were the environments on 3.x, and nobody drove them. This release moves only `conf/conda_environment.yaml`: `conf/conda_environment_cpu.yaml` still pins `dash=3.3.0`, below the new floor. The fix itself does not depend on the dash version; a 3.3.0 leg of this tree is alive too.
 - **The app opts out of FastAPI's native telemetry (owner ruling 2026-11-09).** FastAPI 0.142 added OpenTelemetry
   instrumentation of its own, with tracing, metrics, logs and operation spans on by default, and the lock pins FastAPI
   0.162.5. `src/main.py` now builds `app` with `telemetry=`, those four switches and `auto_configure` set to `False`,
@@ -386,9 +380,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **The image picks up R-OBS-SC-2's two security patches.** `requirements.lock` moves `juniper-observability` 0.4.1 ->
-  0.4.2 and `juniper-service-core` 0.7.1 -> 0.7.2, and nothing else: 60 pins, which CI's constraint-mode freshness
-  resolution reproduces. The image installs that lock (`Dockerfile:40`).
+- **The image picks up juniper-observability 0.4.2, the security patch, and juniper-service-core 0.7.2, a plain patch released with it.** #806 moved `requirements.lock` from 0.4.1 and 0.7.1 to them, and nothing else; #810 later added `lazy-importer` (the release's other lock moves are under Changed), so the lock this release installs holds 61 pins, which CI's constraint-mode freshness resolution reproduces. The image installs that lock (`Dockerfile:40`).
   - **observability 0.4.2** fixes `configure_sentry`, which `src/main.py:312` calls through `src/observability.py`'s
     wrapper. Under 0.4.1, once a Sentry DSN was set, a request's `Sec-WebSocket-Protocol`, `X-CSRF-Token` and
     `X-XSRF-Token` headers reached Sentry in every error event and transaction. `Sec-WebSocket-Protocol` is the header
@@ -396,8 +388,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     scrubbing hook on transactions too (`before_send_transaction`), redacts the parsed cookies, and filters those three
     headers and `Proxy-Authorization`. The wrapper leaves `send_pii` off, so the `X-API-Key` and cookie leaks that 0.4.2
     also closes were not reachable here.
-  - **Still open**: the `?api_key=` WebSocket query parameter reaches Sentry under the default `send_pii=False`. Query
-    strings are juniper-observability 0.4.3's follow-up, so this lock does not close that path.
+  - **Still open**: 0.4.2's notes leave query strings, Sentry Logs, request bodies, breadcrumbs and exception values for juniper-observability 0.4.3, so this lock does not close them. The query strings include canopy's `?api_key=` WebSocket parameter, which reaches Sentry under the default `send_pii=False`.
   - **service-core 0.7.2** rounds `FailedAuthThrottle`'s `Retry-After` up instead of truncating it. canopy imports only
     `enforce_auth_posture`, `AuthPostureError` and `enforce_dependency_floors` from service-core, so the change does not
     reach it, and the pin is consistency with the sibling services.
@@ -426,8 +417,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Conda build strings get a narrow allowlist, because they recur, and it REPLACES the broad conda path
     exemption.**
     - **Why.** Every conda-env refresh rewrites the `<package>=<version>=<build>` lines under a new commit. No
-      commit-scoped entry can name that commit in advance, so the next refresh of `conf/requirements-conda.txt`
-      would have failed the PR scan and then the push scan of `main`. Meanwhile the old global
+      commit-scoped entry can name that commit in advance, so the next refresh of a conda environment file would have failed the PR scan and then the push scan of `main`. (`conf/requirements-conda.txt`, which the allowlist also names, has not been in the tree since before 0.9.0; its four findings are in history only.) Meanwhile the old global
       `conf/conda_environment.*\.ya?ml` path entry skipped EVERY rule in those files.
     - **What.** `.gitleaks.toml` adds an AND-scoped allowlist to `generic-api-key` alone. A finding is dropped only
       when its file is `conf/conda_environment*.y(a)ml` or `conf/requirements-conda.txt` AND its whole secret is
