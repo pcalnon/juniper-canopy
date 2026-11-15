@@ -1,7 +1,7 @@
 # Testing Environment Setup
 
-**Last Updated:** April 5, 2026
-**Version:** v0.26.0
+**Last Updated:** November 15, 2026
+**Version:** v0.26.1
 
 Operational setup guide for running the Juniper Canopy test suite with the same assumptions used by CI and `src/tests/conftest.py`.
 
@@ -25,7 +25,7 @@ Operational setup guide for running the Juniper Canopy test suite with the same 
 
 ### Required Software
 
-- **Python**: 3.11 or newer (CI parity targets 3.12, 3.13, and 3.14)
+- **Python**: 3.11 or newer (CI parity targets 3.12, 3.13, and 3.14; CI's Python 3.15 unit-test leg is informational and blocks nothing)
 - **Conda/Miniforge**: For environment management
 - **Git**: For version control
 
@@ -89,7 +89,7 @@ pip install -r conf/requirements_ci.txt
 pip install -e .
 ```
 
-- Python `3.12+` (CI validates on `3.12`, `3.13`, `3.14`)
+- Python `3.12+` (CI validates on `3.12`, `3.13`, `3.14`, plus an informational `3.15` unit-test leg that blocks nothing)
 - `pip` available
 - Repository checked out at project root
 
@@ -206,7 +206,7 @@ pre-commit install
 ```bash
 # Check Python version
 python --version
-# Should be: Python 3.11+ (CI parity: 3.12/3.13/3.14)
+# Should be: Python 3.11+ (CI parity: 3.12/3.13/3.14; CI's 3.15 leg is informational)
 
 # Check Python path
 which python

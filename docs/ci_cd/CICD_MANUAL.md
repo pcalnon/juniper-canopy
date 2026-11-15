@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-11-12
-**Version:** 0.29.1
+**Last Updated:** 2026-11-15
+**Version:** 0.29.2
 **Status:** Current
 
 ## Table of Contents
@@ -224,7 +224,7 @@ Add pause/resume functionality to demo mode
 1. Go to "Checks" tab on your PR
 2. Watch jobs complete:
    - ✓ Pre-commit (~2 min)
-   - ✓ Unit Tests Python 3.12/3.13/3.14 (~8 min each)
+   - ✓ Unit Tests Python 3.12/3.13/3.14 (~8 min each); the informational Python 3.15 leg can fail without blocking the PR
    - ✓ Integration Tests (~5 min, PR/main/develop)
    - ✓ Build (~2 min)
    - ✓ Lockfile Freshness (~1 min)

@@ -1,7 +1,7 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** 2026-09-05  
-**Version:** v0.26.2
+**Last Updated:** 2026-11-15  
+**Version:** v0.26.3
 
 Complete guide to testing the Juniper Canopy application.
 
@@ -900,7 +900,7 @@ def test_with_fixture(resource):
 The active CI pipeline is split across multiple jobs in `.github/workflows/ci.yml`.
 For testing-relevant behavior, CI currently uses:
 
-- Python matrix `3.12`, `3.13`, `3.14` for `pre-commit` and `unit-tests`
+- Python matrix `3.12`, `3.13`, `3.14` for `pre-commit` and `unit-tests`, plus an informational `3.15` leg in `unit-tests` that blocks nothing
 - Python `3.14` for non-matrix jobs (integration/security/build/docs/lockfile)
 - `conf/requirements_ci.txt` plus editable install (`pip install -e .`)
 - Unit/regression fast subset:

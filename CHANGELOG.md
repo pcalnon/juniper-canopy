@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **CI runs the unit tests on Python 3.15 as well, as an informational leg that blocks nothing.** Phase 1 of the
+  ecosystem's Python 3.15 migration (the owner's request of 2026-11-14): 3.15 results are reported, and no merge,
+  commit or deployment waits on them.
+  - `ci.yml`'s `unit-tests` gains `Unit Tests + Coverage (Python 3.15 on ubuntu-latest)`, an `include` entry with
+    `experimental: true`. The job already carries `continue-on-error: ${{ matrix.experimental == true }}` from the
+    macOS soak, and every other leg sets or defaults the flag to false, so the expression is true on the 3.15 leg
+    alone: a red 3.15 leg leaves `needs.unit-tests.result`, the Quality Gate and the jobs that `needs: [unit-tests]`
+    (`integration-tests`, `build`) unchanged. The context is not in ruleset 14249530. The comment above
+    `continue-on-error`, which still described the macOS leg as a soak, now says it has been required since
+    juniper-canopy#211 (2026-05-01).
+  - `scheduled-tests.yml`'s `Slow / Integration Tests` matrix gains the same informational 3.15 leg. Its job name now
+    spells out the `(<version>)` suffix GitHub used to append, so the three existing legs post the same names.
+  - The pattern was measured on juniper-data#538 (run 43655144734), with the 3.15 leg failed on purpose: the leg's
+    check read `failure`, the Quality Gate printed `Unit Tests: success` and passed, and the jobs behind
+    `unit-tests` ran.
+  - Pre-commit stays on 3.12-3.14 (the owner's ruling the same day). `requires-python`, the classifiers, the black,
+    mypy and ruff targets, the Docker base and the lockfile are unchanged: 3.15 is tested, not yet supported.
+  - `docs/REFERENCE.md`, `docs/ci_cd/CICD_REFERENCE.md`, `docs/ci_cd/CICD_QUICK_START.md`,
+    `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`, `docs/ci_cd/CICD_MANUAL.md`, `docs/testing/TESTING_ENVIRONMENT_SETUP.md`
+    and `docs/testing/TESTING_MANUAL.md` describe the leg.
+
 - **Regression tests harvested from the Cursor flood-4 test PRs** (canopy#789, #792, #794, #795): four new test
   files over four workflows. `src/tests/regression/test_bandit_sarif_upload.py` pins the Security Scans job's
   `bandit[sarif]` install, its `|| BANDIT_EXIT=$?` capture, and the SARIF upload, which runs `if: always()` and

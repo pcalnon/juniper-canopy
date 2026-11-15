@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-11-12
-**Version:** 0.30.2
+**Last Updated:** 2026-11-15
+**Version:** 0.30.3
 **Status:** Current
 
 ## Table of Contents
@@ -367,7 +367,7 @@ env:
 | Job                 | Needs             | Python                                         | Notes                                             |
 |---------------------|-------------------|------------------------------------------------|---------------------------------------------------|
 | `pre-commit`        | —                 | Ubuntu matrix `3.12/3.13/3.14`                | Runs `pre-commit --all-files`                     |
-| `unit-tests`        | `pre-commit`      | Ubuntu matrix `3.12/3.13/3.14` + macOS `3.12` | Runs unit + regression markers with coverage gate |
+| `unit-tests`        | `pre-commit`      | Ubuntu matrix `3.12/3.13/3.14` + macOS `3.12`; Ubuntu `3.15` informational (never blocks) | Runs unit + regression markers with coverage gate |
 | `integration-tests` | `unit-tests`      | `3.14`                                         | Runs fast integration subset                      |
 | `build`             | `unit-tests`      | `3.14`                                         | Builds sdist and wheel                            |
 | `security`          | `pre-commit`      | `3.14`                                         | Gitleaks + Bandit + pip-audit. [Gitleaks contract](#security-scans-gitleaks) |
@@ -877,7 +877,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-11-12
-**Version:** 0.30.2
+**Last Updated:** 2026-11-15
+**Version:** 0.30.3
 **Maintained By:** Development Team
 **Status:** ✅ Current
