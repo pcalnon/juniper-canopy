@@ -393,8 +393,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `enforce_auth_posture`, `AuthPostureError` and `enforce_dependency_floors` from service-core, so the change does not
     reach it, and the pin is consistency with the sibling services.
   - Regenerated with `--upgrade-package` for the two packages only, compiled onto a copy of the lock so every other pin
-    is held (juniper-ml `util/ad-hoc/2026-10-10_targeted_lock_refresh.py`). The `pyproject.toml` floors move in the next
-    release PR.
+    is held (juniper-ml `util/ad-hoc/2026-10-10_targeted_lock_refresh.py`). The wheel's floors follow in this release:
+    `juniper-observability>=0.4.2,<0.5.0` and `juniper-service-core>=0.7.2,<0.8.0`, so a pip install over an older
+    environment upgrades both. The boot-time `enforce_dependency_floors` reads the **installed** metadata, so an existing
+    editable install keeps booting until it is reinstalled; the reinstall upgrades it. The lock moved in #806; the floors
+    ride in the release proposal, because a `pyproject.toml` change on any branch but `release/` triggers
+    `lockfile-update.yml`'s full `--upgrade` regen.
 
 - **CI's Gitleaks step loaded zero rules and could not fail; it now loads gitleaks' built-in ruleset.**
   `.gitleaks.toml` held an `[allowlist]` and no `[extend]` table, and a gitleaks v8 config without
