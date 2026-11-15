@@ -32,6 +32,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`, `docs/ci_cd/CICD_MANUAL.md`, `docs/testing/TESTING_ENVIRONMENT_SETUP.md`
     and `docs/testing/TESTING_MANUAL.md` describe the leg.
 
+### Fixed
+
+- **The informational Python 3.15 legs no longer show as failed checks** (the owner's report of 2026-11-15: they
+  "are supposed to produce an informational message without affecting the ability of code to commit, push, PR, or
+  merge"). juniper-canopy#819's job-level `continue-on-error` kept the Quality Gate green, but the leg's own check
+  still concluded `failure`: on `main`'s run 43664197630, `Unit Tests + Coverage (Python 3.15 on ubuntu-latest)`
+  failed at `Install dependencies` (h5py 3.16.0 publishes no cp315 wheel) while the run concluded `success`. A pull
+  request therefore showed a red X and "Some checks were not successful", its merge state read `UNSTABLE`, and
+  `gh pr checks` and any tool that reads every check called it failing.
+  - Every step of `ci.yml`'s `unit-tests` and `scheduled-tests.yml`'s `slow-or-integration-tests` now carries `id:`
+    and `continue-on-error: ${{ matrix.experimental == true }}`, so on the 3.15 leg a failing step neither stops the
+    job nor turns its check red, and the steps after it still run. A last step,
+    `Report the informational Python 3.15 result`, reports each failed step as a `::warning` annotation and as a
+    table in the job summary, and emits a `::notice` when every step passed. The blocking legs, macOS included, are
+    unchanged: the expression is false on them.
+  - Measured first on juniper-ml#2578 (head `91591864`): its `Regression Tests (Python 3.15)` check concluded
+    `success` while two of its steps failed, and carried the warning annotation.
+  - Applied by juniper-ml's `util/ad-hoc/2026-11-15_py315_informational_green_legs.py`, a textual edit checked by
+    re-parsing each workflow (same steps in the same order, plus the report step; no other job changed).
+
 
 ## [0.10.0] - 2026-11-15
 
