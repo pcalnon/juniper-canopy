@@ -26,7 +26,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "juniper-canopy"
-version = "0.9.0"
+version = "0.10.0"
 description = "Real-time monitoring dashboard for Cascade Correlation Neural Network"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -107,8 +107,14 @@ dependencies = [
     # ``ReadinessResponse`` model for build provenance (juniper-ml
     # notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md). 0.4.1 (2026-10-10) is
     # the security patch: ``configure_sentry``, which canopy calls, no longer
-    # sends frame-local variables, which could hold the real API key.
-    "juniper-observability>=0.4.1,<0.5.0",
+    # sends frame-local variables, which could hold the real API key. 0.4.2
+    # (PyPI, 2026-11-09) is the second (R-OBS-SC-2): it scrubs transactions
+    # as well as error events, redacts the parsed cookies, and filters
+    # Sec-WebSocket-Protocol (canopy's WebSocket key when ws_auth_enabled is
+    # on), X-CSRF-Token, X-XSRF-Token and Proxy-Authorization. The lock
+    # moved in #806. Query strings (the ?api_key= WebSocket parameter) are
+    # 0.4.3's follow-up.
+    "juniper-observability>=0.4.2,<0.5.0",
     # E-8 boot-time dependency-floor self-check. canopy calls
     # ``enforce_dependency_floors(distribution="juniper-canopy")`` in its FastAPI
     # lifespan (``src/main.py``) to fail loud before binding if any installed
@@ -119,12 +125,14 @@ dependencies = [
     # 0.5.0 floor: adds ``enforce_auth_posture`` (SEC-F01 / HO-2), the boot-time
     # auth-posture self-check the lifespan calls right after the floor check.
     # 0.7.1 floor (2026-10-10): the security patch (non-ASCII X-API-Key is a 401;
-    # bounded FailedAuthThrottle.check()). canopy's own key compare and throttle
-    # live in src/security.py, so this is consistency with the lock and the
-    # sibling services rather than a fix to canopy's auth path. The floor check
-    # reads the INSTALLED metadata, so an existing editable install keeps
-    # booting until it is reinstalled, and the reinstall upgrades the wheel.
-    "juniper-service-core>=0.7.1,<0.8.0",
+    # bounded FailedAuthThrottle.check()). 0.7.2 floor (PyPI, 2026-11-09):
+    # FailedAuthThrottle's Retry-After rounds up instead of truncating.
+    # canopy's own key compare and throttle live in src/security.py, so this
+    # is consistency with the lock and the sibling services rather than a fix
+    # to canopy's auth path. The floor check reads the INSTALLED metadata, so
+    # an existing editable install keeps booting until it is reinstalled, and
+    # the reinstall upgrades the wheel.
+    "juniper-service-core>=0.7.2,<0.8.0",
     # METRICS-MON R2.2.5 / seed-05: WS frame schema validation. Pinned
     # at the first stable release; pulled in transitively by
     # juniper-cascor-client too, but pinned explicitly here so the
