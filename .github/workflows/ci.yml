@@ -160,6 +160,21 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
+      - name: Install the HDF5 headers h5py builds against (Python 3.15 only)
+        # Phase 2 of the ecosystem's Python 3.15 migration. h5py publishes no CPython 3.15 wheel
+        # (3.16.0, 2026-03-06, the newest release, ships cp310-cp314), so on the 3.15 leg pip builds
+        # it from the sdist, and that build needs libhdf5's headers and pkg-config, which the runner
+        # image lacks. Without them `Install dependencies` fails at
+        # `pip install "h5py>=3.0"`, and the snapshot tests that need h5py then fail.
+        # The blocking legs install h5py's wheel and skip this step. Drop it once h5py ships a cp315
+        # wheel.
+        id: install-the-hdf5-headers-h5py-builds-against
+        if: matrix.experimental == true && runner.os == 'Linux'
+        continue-on-error: ${{ matrix.experimental == true }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libhdf5-dev pkg-config
+
       - name: Install dependencies
         id: install-dependencies
         continue-on-error: ${{ matrix.experimental == true }}
