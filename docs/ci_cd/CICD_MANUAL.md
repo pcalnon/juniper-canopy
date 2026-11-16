@@ -1,6 +1,6 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-11-15
+**Last Updated:** 2026-11-16
 **Version:** 0.29.4
 **Status:** Current
 
@@ -1022,7 +1022,7 @@ The date check has no local console script. It is the workflow step.
 
 1. Build and `twine check`, then the import smoke test, once; `SHA256SUMS` records the files
 2. Publish to TestPyPI (`environment: testpypi`); TestPyPI's JSON must then list exactly those files and sha256
-3. Verify installation from TestPyPI
+3. Verify installation from TestPyPI; the import runs from `$RUNNER_TEMP`, outside the checkout, so it loads the installed wheel
 4. Publish to PyPI (`environment: pypi`), after TestPyPI's JSON is checked again; PyPI's JSON is checked after the upload
 
 Do not bypass TestPyPI stage; production publish is intentionally downstream. The contract: [`CICD_REFERENCE.md` § `publish.yml`](CICD_REFERENCE.md#publishyml), and juniper-cascor's [One Artifact, Checked Against TestPyPI](https://github.com/pcalnon/juniper-cascor/blob/main/docs/ci_cd/MANUAL.md#one-artifact-checked-against-testpypi), whose template steps this workflow copies verbatim.
@@ -1040,7 +1040,13 @@ A release that did not reach PyPI follows the owner's ladder (ruling of 2026-11-
 2. If that fails, within 30 days of the release run: **Re-run failed jobs** on the release run. The re-run reuses the run's artifact and waits at the gate again. GitHub refuses a re-run after 30 days.
 3. Otherwise, cut a new patch version.
 
-Never use "Re-run all jobs" on a publish run, nor `gh run rerun <id>` without `--failed`. download-artifact takes the newest artifact of a name, so a rebuild would become the files every later job uploads; the build job's `Reuse an earlier attempt's artifact` step skips such a rebuild, but a tag cut before this change lacks the step.
+When `Publish to TestPyPI` failed after its upload (at `Verify TestPyPI serves exactly these files`, or at the install check), find out why before taking any rung. TestPyPI already holds the files, and the republish job never reads that job's result: it publishes whatever TestPyPI holds.
+
+- The install check failed on index lag: its one `pip install` runs 30 seconds after the upload, and TestPyPI's simple index can be slower. The files are fine. Rung 1 publishes them; rung 2's re-run uploads the same files again (TestPyPI answers a byte-identical file with 200 and keeps the one it holds) and repeats both checks.
+- The install check failed because the package is broken (it does not install, or does not import): publish these files by no rung. Fix the package and cut a new patch version.
+- `Verify TestPyPI serves exactly these files` failed: TestPyPI holds other files for this version. Do not publish them. While the release run's artifact exists, the republish job refuses them too, because they disagree with its `SHA256SUMS`.
+
+Never use "Re-run all jobs" on a publish run, nor `gh run rerun <id>` without `--failed`. download-artifact takes the newest artifact of a name, so a rebuild would become the files every later job uploads; the build job's `Reuse an earlier attempt's artifact` step skips such a rebuild, but a tag cut before this change lacks the step. That older workflow also uploads to TestPyPI with `skip-existing: true`, so there the rebuild passes unnoticed: TestPyPI keeps its files, and PyPI receives the rebuild.
 
 ### Runbook: Container image serve and version
 

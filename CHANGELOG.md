@@ -133,8 +133,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     dispatch from building; every juniper-canopy release tag starts with `v`.
   - **TestPyPI.** `Publish to TestPyPI` checks the downloaded files against `SHA256SUMS`, uploads them (attestations
     kept, `skip-existing` gone), and `Verify TestPyPI serves exactly these files` then requires TestPyPI's JSON for
-    the version to list exactly those files with those sha256. The install check follows, its requirement now quoted
-    (which clears actionlint's one finding, SC2086); otherwise unchanged.
+    the version to list exactly those files with those sha256. The install check follows. Its requirement is now
+    quoted (which clears actionlint's one finding, SC2086), and its import now runs from `$RUNNER_TEMP`: run from the
+    checkout's root, `python -c` put the checkout's `juniper_canopy/` first on `sys.path`, so a broken wheel passed it.
   - **PyPI.** `Publish to PyPI` no longer checks out or sets up Python. It checks the files against `SHA256SUMS`, and
     TestPyPI's JSON again, before its upload (attestations kept), and PyPI's JSON after it.
   - **Only the jobs that upload hold `id-token: write`.** The workflow's `permissions` is `{}`: `Build and Validate`
@@ -148,10 +149,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Unchanged: the `release: published` trigger (no `push: tags`), the `testpypi` and `pypi` environments, the job
     names juniper-ml's release-train ceremony reads, the build commands, the import smoke test, and
     `publish-image.yml`.
-  - New `src/tests/unit/test_publish_one_artifact.py` (66 cases), ported from juniper-cascor's: the wiring, what
+  - New `src/tests/unit/test_publish_one_artifact.py` (69 cases), ported from juniper-cascor's: the wiring, what
     this workflow kept, and rehearsals that run each template step's own Python, extracted from `publish.yml`, against
-    a stand-in index and GitHub API on 127.0.0.1. The unit lane selects it.
-    `util/ad-hoc/2026-11-15_verify_publish_one_artifact_tests_are_not_vacuous.py` makes 50 mutations to a
+    a stand-in index and GitHub API on 127.0.0.1. Beyond cascor's copy it pins every job's exact steps, in order, no
+    `continue-on-error` on a job or a step, an `if:` only where the template gates a step, the install check's
+    commands, and more build front ends than `python -m build`. The unit lane selects it.
+    `util/ad-hoc/2026-11-15_verify_publish_one_artifact_tests_are_not_vacuous.py` makes 86 mutations to a
     copy of the workflow, one at a time, and the tests catch each. CI does not run it.
   - Docs: `docs/ci_cd/CICD_MANUAL.md` (§ Runbook: Release publishing, with the recovery ladder; 0.29.4),
     `docs/ci_cd/CICD_REFERENCE.md` (§ `publish.yml` and the workflow inventory; 0.30.5),

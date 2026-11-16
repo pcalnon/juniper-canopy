@@ -8,7 +8,7 @@
 # Version:       0.2.0
 #
 # Date Created:  2026-02-26
-# Last Modified: 2026-11-15
+# Last Modified: 2026-11-16
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-2026 Paul Calnon
@@ -323,6 +323,9 @@ jobs:
           VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           sleep 30
           pip install --no-deps --index-url https://test.pypi.org/simple/ "juniper-canopy==${VERSION}"
+          # `python -c` puts the working directory first on sys.path, and the checkout's root holds juniper_canopy/,
+          # which would shadow the wheel just installed: import it from outside the checkout.
+          cd "${RUNNER_TEMP}"
           python -c "from juniper_canopy import __version__; print(f'TestPyPI OK: v{__version__}')"
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════

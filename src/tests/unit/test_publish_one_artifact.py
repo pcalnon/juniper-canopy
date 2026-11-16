@@ -24,8 +24,10 @@ job names juniper-ml's release-train ceremony reads; per-job permissions; the re
 guarding every later step, the import smoke test included; each upload preceded by the dist check; TestPyPI's JSON
 checked after the TestPyPI upload and again before the PyPI one, and PyPI's after; no ``skip-existing``; an artifact
 that outlives the 30-day ``pypi`` gate; the republish job's trigger, gate, steps and name; the triggers and the tag
-guard; what this workflow kept (its build commands, the smoke test, the install check, the attestations); and every
-copy of a template step byte-identical. The rehearsals run each template step's own Python, extracted from
+guard; every job's exact steps, in order; no ``continue-on-error`` on a job or a step, and an ``if:`` only where the
+template gates a step, because a check that may fail, or that does not run, passes; what this workflow kept (its build
+commands, the smoke test, the install check, which imports outside the checkout, the attestations); and every copy of a
+template step byte-identical. The rehearsals run each template step's own Python, extracted from
 ``publish.yml``, in a scratch workspace, against a stand-in index and a stand-in GitHub API on 127.0.0.1. Ported from
 juniper-cascor's ``src/tests/unit/test_publish_one_artifact.py`` (its ``main`` at ``675884888f5a``); juniper-ml's
 ``util/ad-hoc/2026-11-15_publish_port_template_identity.py`` checks this workflow's copies against cascor's.
@@ -106,7 +108,57 @@ TEMPLATE_ENV = {
     "GITHUB_WORKFLOW_REF",
 }
 PUBLISH_ACTION = "pypa/gh-action-pypi-publish@"
-BUILD_COMMAND = re.compile(r"\bpython3?\s+-m\s+build\b|\bpip3?\s+wheel\b|\buv\s+build\b|\bsetup\.py\s+(?:sdist|bdist_wheel)\b")
+#: Any build front end a rebuild could hide behind, not only the one this workflow uses (`pyproject-build` is pypa/build's
+#: own entry point).
+BUILD_COMMAND = re.compile(r"\bpython3?\s+-m\s+build\b|\bpyproject-build\b|\bpip3?\s+wheel\b|\buv\s+build\b|\b(?:hatch|flit|poetry|pdm)\s+build\b|\bsetup\.py\s+(?:sdist|bdist_wheel)\b")
+#: Every job's steps, in order, each as (its name, the action it uses without the ref, or "run"): a step added, dropped or
+#: moved anywhere fails, whatever it runs. A Dependabot bump moves an action's ref, not the step.
+JOB_STEPS = {
+    "build": [
+        (REUSE, "run"),
+        ("", "actions/checkout"),
+        ("", "actions/setup-python"),
+        ("Install build tools", "run"),
+        ("Build package", "run"),
+        ("Check package", "run"),
+        (SMOKE, "run"),
+        (RECORD, "run"),
+        (UPLOAD, "actions/upload-artifact"),
+    ],
+    "testpypi": [
+        ("", "actions/checkout"),
+        ("", "actions/setup-python"),
+        (DOWNLOAD, "actions/download-artifact"),
+        (VERIFY_DIST, "run"),
+        ("Publish to TestPyPI", "pypa/gh-action-pypi-publish"),
+        (TESTPYPI_AFTER, "run"),
+        (INSTALL_CHECK, "run"),
+    ],
+    "pypi": [
+        (DOWNLOAD, "actions/download-artifact"),
+        (VERIFY_DIST, "run"),
+        (TESTPYPI_BEFORE, "run"),
+        ("Publish to PyPI", "pypa/gh-action-pypi-publish"),
+        (PYPI_AFTER, "run"),
+    ],
+    REPUBLISH: [
+        (FIND, "run"),
+        (FETCH_ORIGINAL, "actions/download-artifact"),
+        (FETCH, "run"),
+        (VERIFY_DIST, "run"),
+        ("Publish to PyPI", "pypa/gh-action-pypi-publish"),
+        (PYPI_AFTER, "run"),
+    ],
+}
+#: The install check's commands, comments aside: the version is read in the checkout, and the import runs outside it,
+#: because `python -c` puts the working directory first on sys.path and the checkout's root holds juniper_canopy/.
+INSTALL_COMMANDS = [
+    "VERSION=$(python -c \"import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])\")",
+    "sleep 30",
+    'pip install --no-deps --index-url https://test.pypi.org/simple/ "juniper-canopy==${VERSION}"',
+    'cd "${RUNNER_TEMP}"',
+    "python -c \"from juniper_canopy import __version__; print(f'TestPyPI OK: v{__version__}')\"",
+]
 #: GitHub lets a deployment wait this many days for its reviewer: the PyPI job may start that late, and needs the artifact.
 GATE_APPROVAL_DAYS = 30
 ARTIFACT = "${{ env.PUBLISH_PACKAGE }}-dist"
@@ -135,6 +187,11 @@ def _workflow(name: str) -> dict:
 
 def _names(job: dict) -> list[str]:
     return [str(s.get("name") or s.get("uses") or "") for s in job.get("steps") or []]
+
+
+def _shape(job: dict) -> list[tuple[str, str]]:
+    """Each step as (its name, the action it uses without the ref, or "run"), in order."""
+    return [(str(s.get("name") or ""), str(s["uses"]).split("@", 1)[0] if s.get("uses") else "run") for s in job.get("steps") or []]
 
 
 def _index(job: dict, name: str) -> int:
@@ -312,14 +369,29 @@ class TestWiring:
         assert reuse.get("working-directory") == "${{ github.workspace }}"
         assert reuse.get("shell") == "python3 {0}"
         assert reuse.get("env") == {API_CREDENTIAL_ENV: RUNNER_CREDENTIAL}
-        # Every later step is skipped once the reuse step finds the artifact, except a release-convention gate that runs
-        # on `push` alone, an event this workflow does not subscribe to (it has none).
+        # Every later step is skipped once the reuse step finds the artifact, and gated on nothing else. (juniper-cascor's
+        # copy of this case exempts a step gated on `push` alone; this workflow has no push trigger and no such step, so
+        # the exemption would only let the smoke test or `twine check` be switched off unseen.)
         for step in build["steps"][1:]:
-            if step.get("if") == "github.event_name == 'push'":
-                continue
-            assert step.get("if") == REUSE_IF, f"{step.get('name') or step.get('uses')} would run on a re-run that reuses the artifact"
+            assert step.get("if") == REUSE_IF, f"{step.get('name') or step.get('uses')} would run on a re-run that reuses the artifact, or never run"
         for name in (RECORD, UPLOAD):
             assert _step(build, name).get("if") == REUSE_IF
+
+    def test_no_job_or_step_may_fail_without_failing_the_run(self, workflow):
+        # A check under `continue-on-error` reports its mismatch and lets the run publish anyway; so does a whole job.
+        for job_id, job in _workflow(workflow)["jobs"].items():
+            assert "continue-on-error" not in job, f"{job_id} may fail without failing the run"
+            for step in job.get("steps") or []:
+                assert "continue-on-error" not in step, f"{job_id}: {step.get('name') or step.get('uses')} may fail without failing the run"
+
+    def test_no_publish_step_is_gated_but_the_release_run_download_the_template_gates(self, workflow):
+        # A check that `if:` skips passes by not running. The build job's gates are pinned above; in the jobs that publish,
+        # the template gates one step: the republish job's download of the release run's artifact, which may be gone.
+        _, _, test_id, prod_id = PUBLISHERS[workflow]
+        jobs = _workflow(workflow)["jobs"]
+        for job_id, gated in ((test_id, {}), (prod_id, {}), (REPUBLISH, {FETCH_ORIGINAL: "steps.original.outputs.run-id != ''"})):
+            have = {str(s.get("name") or s.get("uses")): s["if"] for s in jobs[job_id]["steps"] if "if" in s}
+            assert have == gated, f"{job_id}: gated steps {have}"
 
     def test_the_testpypi_job_checks_the_dist_uploads_then_checks_testpypi_before_the_install_check(self, workflow):
         _, _, test_id, _ = PUBLISHERS[workflow]
@@ -433,19 +505,25 @@ class TestUnchanged:
         assert checkout[0] < python[0] < _index(job, DOWNLOAD)
         assert job["steps"][python[0]]["with"] == {"python-version": "3.14"}
         assert names[-1] == INSTALL_CHECK
-        run = _step(job, INSTALL_CHECK)["run"]
-        assert "tomllib.load(open('pyproject.toml','rb'))['project']['version']" in run
         # Release-train policy (juniper-ml#384): TestPyPI only, no dependency resolution, no pypi.org fallback. The
-        # requirement is quoted (actionlint's SC2086); the command is otherwise the one it ran before.
-        assert 'pip install --no-deps --index-url https://test.pypi.org/simple/ "juniper-canopy==${VERSION}"' in run
-        assert "--extra-index-url" not in run
-        assert "from juniper_canopy import __version__" in run
+        # requirement is quoted (actionlint's SC2086). The version is read in the checkout, then the import runs from
+        # $RUNNER_TEMP: from the checkout's root, `python -c` would import the checkout's juniper_canopy/, and a broken
+        # wheel would pass.
+        run = _step(job, INSTALL_CHECK)["run"]
+        commands = [line.strip() for line in run.splitlines() if line.strip() and not line.strip().startswith("#")]
+        assert commands == INSTALL_COMMANDS
 
     def test_both_release_uploads_still_attest(self):
         jobs = _workflow("publish.yml")["jobs"]
         for job_id in ("testpypi", "pypi"):
             job = jobs[job_id]
             assert job["steps"][_uploads(job)[0]]["with"].get("attestations") is True, job_id
+
+    def test_each_job_runs_exactly_these_steps_in_this_order(self):
+        # A step slipped in anywhere (a rebuild between the PyPI job's checks and its upload, under a build command no
+        # pattern knows), or one dropped (the TestPyPI job's setup-python), fails here.
+        jobs = _workflow("publish.yml")["jobs"]
+        assert {job_id: _shape(job) for job_id, job in jobs.items()} == JOB_STEPS
 
 
 class TestTemplate:

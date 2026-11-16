@@ -1,6 +1,6 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-11-15
+**Last Updated:** 2026-11-16
 **Version:** 0.30.5
 **Status:** Current
 
@@ -556,7 +556,7 @@ Operator runbook: [AGENTS.md date check](CICD_MANUAL.md#runbook-agentsmd-date-ch
 - Permissions: `permissions: {}` at the top. `Build and Validate` holds `contents: read` and `actions: read`; `Publish to TestPyPI` `contents: read` and `id-token: write`; `Publish to PyPI` `id-token: write`; `Republish the tested files (dispatch only)` `actions: read` and `id-token: write`. Only the jobs that upload can mint the OIDC token for trusted publishing.
 - Stages:
   1. `Build and Validate`, once: `pip install build twine`, `python -m build`, `twine check dist/*`, the import smoke test, `Record SHA256SUMS`, and `Upload dist artifacts`, which uploads `dist/` and `SHA256SUMS` as one artifact, `juniper-canopy-dist`, kept 90 days. Its first step, `Reuse an earlier attempt's artifact`, runs on attempt 2 and later: when the run already holds that artifact, every later step skips.
-  2. `Publish to TestPyPI`: `Verify the dist against SHA256SUMS`, the upload (`attestations: true`, no `skip-existing`), `Verify TestPyPI serves exactly these files` (TestPyPI's JSON for the version lists exactly those files and sha256), then the install verification.
+  2. `Publish to TestPyPI`: `Verify the dist against SHA256SUMS`, the upload (`attestations: true`, no `skip-existing`), `Verify TestPyPI serves exactly these files` (TestPyPI's JSON for the version lists exactly those files and sha256), then the install verification, which imports from `$RUNNER_TEMP` so the checkout's `juniper_canopy/` cannot stand in for the wheel.
   3. `Publish to PyPI`: the dist check, `Verify TestPyPI still serves exactly these files`, the upload (`attestations: true`), and `Verify PyPI serves exactly these files`. It checks out and builds nothing.
 - The steps marked `One-artifact publish template`, and the republish job, are juniper-cascor's, copied verbatim; its manual's [One Artifact, Checked Against TestPyPI](https://github.com/pcalnon/juniper-cascor/blob/main/docs/ci_cd/MANUAL.md#one-artifact-checked-against-testpypi) is the contract.
   A JSON check polls up to 20 times, 15 s apart, while the index does not list a file yet, and fails at once on a file listed with another sha256 or one the run did not build. Pinned by `src/tests/unit/test_publish_one_artifact.py`. Recovery: [Runbook: Release publishing](CICD_MANUAL.md#runbook-release-publishing).
@@ -887,7 +887,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-11-15
+**Last Updated:** 2026-11-16
 **Version:** 0.30.5
 **Maintained By:** Development Team
 **Status:** ✅ Current

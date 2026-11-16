@@ -23,7 +23,11 @@ pass. The repository itself is never written.
 The mutations are juniper-cascor's, retargeted at this repository's single publisher (its sub-package mutations are
 replaced by the same properties here), plus this workflow's own: the import smoke test and the build step running
 although the artifact is reused, the smoke test made non-blocking, an upload that stops attesting, the artifact's old
-name and 30-day retention, an install check with a pypi.org fallback, and a dispatch that builds.
+name and 30-day retention, an install check with a pypi.org fallback, and a dispatch that builds. The review of
+juniper-canopy#823 added the rest: `continue-on-error` on a check step or a whole job, `if:` on a check that the
+template does not gate, a build step gated on a push this workflow never gets, an install check that imports from the
+checkout, a rebuild slipped into the PyPI job under a build command the first pattern did not know, a dropped
+setup-python, and a rebuild hidden inside the install check.
 
 The test file needs only pytest and PyYAML, so it runs with ``--noconftest`` (src/tests/conftest.py imports the
 application, which no case here uses). pyproject.toml's addopts pass ``--strict-config``, so the interpreter also
@@ -54,6 +58,12 @@ COPIED = (*WORKFLOWS, TEST, "pyproject.toml")
 REUSE_IF = "        if: steps.reuse.outputs.reuse != 'true'\n"
 SMOKE = "      - name: Import smoke test (built wheel, nothing from the checkout)\n"
 INSTALL = 'pip install --no-deps --index-url https://test.pypi.org/simple/ "juniper-canopy==${VERSION}"'
+IMPORT = "          python -c \"from juniper_canopy import __version__; print(f'TestPyPI OK: v{__version__}')\"\n"
+DIST_CHECK = "      - name: Verify the dist against SHA256SUMS\n"
+MAY_FAIL = "        continue-on-error: true\n"
+NEVER_RUNS = "        if: false\n"
+TESTPYPI_SETUP_PYTHON = '      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0\n        with:\n          # python-version: ["3.12", "3.13", "3.14"]\n          python-version: "3.14"\n\n'
+PYPI_UPLOAD = "      - name: Publish to PyPI\n"
 
 #: (label, files, old, new, mode): mode "one" requires exactly one match in each file; "all" replaces every match (at
 #: least one in each file); "last" replaces the last match only; an int N replaces the Nth match (0-based) only.
@@ -112,6 +122,45 @@ MUTATIONS = (
     ("the republish job accepts a branch named like a tag", WORKFLOWS, 'if os.environ.get("GITHUB_REF_TYPE") == "tag" and tag.startswith("v"):', 'if tag.startswith("v"):', "all"),
     ("the republish job takes a foreign file from TestPyPI", WORKFLOWS, "if normalized(project) != normalized(package) or file_version != version:", "if False:", "all"),
     ("the republish job skips the dist check", WORKFLOWS, "      # One-artifact publish template, step 4: before every upload.\n      - name: Verify the dist against SHA256SUMS\n", "      # One-artifact publish template, step 4: before every upload.\n      - name: Verify the dist\n", "last"),
+    # The review of juniper-canopy#823: a check that may fail, or that does not run, passes.
+    ("the PyPI job's TestPyPI re-check may fail", (PUBLISH,), "      - name: Verify TestPyPI still serves exactly these files\n", "      - name: Verify TestPyPI still serves exactly these files\n" + MAY_FAIL, "one"),
+    ("the TestPyPI job's JSON check may fail", (PUBLISH,), "      - name: Verify TestPyPI serves exactly these files\n", "      - name: Verify TestPyPI serves exactly these files\n" + MAY_FAIL, "one"),
+    ("the PyPI job's JSON check may fail", (PUBLISH,), "      - name: Verify PyPI serves exactly these files\n", "      - name: Verify PyPI serves exactly these files\n" + MAY_FAIL, 0),
+    ("the republish job's PyPI check may fail", (PUBLISH,), "      - name: Verify PyPI serves exactly these files\n", "      - name: Verify PyPI serves exactly these files\n" + MAY_FAIL, 1),
+    ("the TestPyPI job's dist check may fail", (PUBLISH,), DIST_CHECK, DIST_CHECK + MAY_FAIL, 0),
+    ("the record step may fail", (PUBLISH,), "      - name: Record SHA256SUMS\n" + REUSE_IF, "      - name: Record SHA256SUMS\n" + REUSE_IF + MAY_FAIL, "one"),
+    ("the reuse step may fail", (PUBLISH,), "        id: reuse\n", "        id: reuse\n" + MAY_FAIL, "one"),
+    ("the find step may fail", (PUBLISH,), "        id: original\n", "        id: original\n" + MAY_FAIL, "one"),
+    ("the fetch step may fail", (PUBLISH,), "      - name: Download TestPyPI's files and verify them\n", "      - name: Download TestPyPI's files and verify them\n" + MAY_FAIL, "one"),
+    ("the install check may fail", (PUBLISH,), "      - name: Verify TestPyPI install\n", "      - name: Verify TestPyPI install\n" + MAY_FAIL, "one"),
+    ("the TestPyPI upload may fail", (PUBLISH,), "      - name: Publish to TestPyPI\n", "      - name: Publish to TestPyPI\n" + MAY_FAIL, "one"),
+    ("the build job may fail", (PUBLISH,), "    name: Build and Validate\n", "    name: Build and Validate\n    continue-on-error: true\n", "one"),
+    ("the TestPyPI job may fail", (PUBLISH,), "    environment: testpypi\n", "    environment: testpypi\n    continue-on-error: true\n", "one"),
+    ("the PyPI job may fail", (PUBLISH,), "    environment: pypi\n", "    environment: pypi\n    continue-on-error: true\n", 0),
+    ("the republish job may fail", (PUBLISH,), "    environment: pypi\n", "    environment: pypi\n    continue-on-error: true\n", 1),
+    ("the TestPyPI job's JSON check never runs", (PUBLISH,), "      - name: Verify TestPyPI serves exactly these files\n", "      - name: Verify TestPyPI serves exactly these files\n" + NEVER_RUNS, "one"),
+    ("the PyPI job's TestPyPI re-check never runs", (PUBLISH,), "      - name: Verify TestPyPI still serves exactly these files\n", "      - name: Verify TestPyPI still serves exactly these files\n" + NEVER_RUNS, "one"),
+    ("the PyPI job's dist check never runs", (PUBLISH,), DIST_CHECK, DIST_CHECK + NEVER_RUNS, 1),
+    ("the PyPI job's check after its upload never runs", (PUBLISH,), "      - name: Verify PyPI serves exactly these files\n", "      - name: Verify PyPI serves exactly these files\n" + NEVER_RUNS, 0),
+    ("the republish job's dist check never runs", (PUBLISH,), DIST_CHECK, DIST_CHECK + NEVER_RUNS, 2),
+    ("the find step never runs", (PUBLISH,), "      - name: Find the release run's artifact\n", "      - name: Find the release run's artifact\n" + NEVER_RUNS, "one"),
+    ("the fetch step never runs", (PUBLISH,), "      - name: Download TestPyPI's files and verify them\n", "      - name: Download TestPyPI's files and verify them\n" + NEVER_RUNS, "one"),
+    ("the install check never runs", (PUBLISH,), "      - name: Verify TestPyPI install\n", "      - name: Verify TestPyPI install\n" + NEVER_RUNS, "one"),
+    ("the TestPyPI job's download never runs", (PUBLISH,), "      - name: Download dist artifacts\n", "      - name: Download dist artifacts\n" + NEVER_RUNS, 0),
+    ("a TestPyPI check is gated on the event", (PUBLISH,), "      - name: Verify TestPyPI serves exactly these files\n", "      - name: Verify TestPyPI serves exactly these files\n        if: github.event_name == 'release'\n", "one"),
+    ("the record step never runs", (PUBLISH,), "      - name: Record SHA256SUMS\n" + REUSE_IF, "      - name: Record SHA256SUMS\n" + NEVER_RUNS, "one"),
+    ("the import smoke test runs only on a push", (PUBLISH,), SMOKE + REUSE_IF, SMOKE + "        if: github.event_name == 'push'\n", "one"),
+    ("twine check runs only on a push", (PUBLISH,), "      - name: Check package\n" + REUSE_IF, "      - name: Check package\n        if: github.event_name == 'push'\n", "one"),
+    # The install check imports the installed wheel, not the checkout's juniper_canopy/.
+    ("the install check imports from the checkout", (PUBLISH,), '          cd "${RUNNER_TEMP}"\n', "", "one"),
+    ("the install check goes back to the checkout before importing", (PUBLISH,), IMPORT, '          cd "${GITHUB_WORKSPACE}"\n' + IMPORT, "one"),
+    ("the install check imports before it leaves the checkout", (PUBLISH,), '          cd "${RUNNER_TEMP}"\n' + IMPORT, IMPORT + '          cd "${RUNNER_TEMP}"\n', "one"),
+    # The review of juniper-data's port: a rebuild under a build command the first pattern did not know, a dropped step.
+    ("the PyPI job rebuilds with pyproject-build", (PUBLISH,), PYPI_UPLOAD, "      - name: Rebuild\n        run: pip install build && rm -rf dist && pyproject-build\n\n" + PYPI_UPLOAD, 0),
+    ("the PyPI job rebuilds with hatch", (PUBLISH,), PYPI_UPLOAD, "      - run: hatch build\n\n" + PYPI_UPLOAD, 0),
+    ("the republish job rebuilds before its upload", (PUBLISH,), PYPI_UPLOAD, "      - name: Rebuild\n        run: pyproject-build\n\n" + PYPI_UPLOAD, 1),
+    ("the TestPyPI job loses its setup-python", (PUBLISH,), TESTPYPI_SETUP_PYTHON, "", "one"),
+    ("the install check hides a rebuild", (PUBLISH,), "          sleep 30\n", '          sleep 30\n          pyproject-build --outdir "${RUNNER_TEMP}/rebuilt"\n', "one"),
 )
 
 
