@@ -35,7 +35,7 @@
 #    every dependabot/pip/** push (runs 29749713997 / 29866415598 /
 #    30274100485). The token-availability gate below turns that arm into a
 #    loud green no-op (the Lockfile Freshness CI gate still enforces staleness)
-#    until the owner registers the same PAT under Settings -> Secrets ->
+#    until the Overtoad registers the same PAT under Settings -> Secrets ->
 #    Dependabot, which re-enables full auto-regen for Dependabot pushes with
 #    no further workflow change. A missing PAT on a NON-Dependabot run still
 #    fails loudly (secret misconfiguration must not pass silently).

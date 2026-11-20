@@ -14,7 +14,7 @@
 #                design PR 2 (§4.10 hydration, both axes). §4.5's
 #                restart-modal regate (X2) had no test until
 #                2026-09-23 (TestX2RestartModalIsGatedAgainst...).
-#                X11's unknown-liveness wording, the owner's
+#                X11's unknown-liveness wording, the Overtoad's
 #                2026-09-24 ruling: TestX11UnknownLivenessIsNotActive.
 #####################################################################
 """Guardrails for the selection-reachability remediation design.
@@ -160,7 +160,7 @@ class TestG5ModelStateTruth:
         assert body["backend"] in summary
 
 
-#: The owner's X11 wording (2026-09-24) for the default model when liveness is unknown.
+#: The Overtoad's X11 wording (2026-09-24) for the default model when liveness is unknown.
 X11_UNKNOWN_CASCOR = "Selected: CasCor (Cascade-Correlation) · backend status unknown"
 
 
@@ -171,7 +171,7 @@ class TestX11UnknownLivenessIsNotActive:
 
     ``_selection_is_live`` has three answers, and the summary rendered two of them the same way:
     ``None`` (nothing has round-tripped, so there is no ``backend``) read *"Active: CasCor"* at
-    first paint, and a mount whose read failed kept that text. The owner ruled (2026-09-24) that
+    first paint, and a mount whose read failed kept that text. The Overtoad ruled (2026-09-24) that
     the unknown state reads "Selected: … · backend status unknown", never "Active".
     """
 
@@ -451,7 +451,7 @@ class TestX2RestartModalIsGatedAgainstTheSelectedModel:
         assert enabled == {spec.value for spec in compatible_datasets(model)}
 
     def test_a_dataset_the_selected_model_cannot_use_is_swapped_within_that_model_s_list(self, manager):
-        # The swap itself is the owner-ruled OQ-6 exception (point 4 of §5.6.1 of juniper-ml's
+        # The swap itself is the Overtoad-ruled OQ-6 exception (point 4 of §5.6.1 of juniper-ml's
         # JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md). What this pins is
         # WHICH list it swaps within: the selected model's, so a spiral carried over from a CasCor
         # session lands on a dataset the LMU can train.

@@ -2040,7 +2040,7 @@ class DemoMode:
             raise
 
         # juniper_data_client.validate_npz_contract runs first, as an ADVISORY check: a
-        # violation is logged, never enforced (canopy#559, owner ruling 2026-09-22). See
+        # violation is logged, never enforced (canopy#559, Overtoad ruling 2026-09-22). See
         # ``_advise_npz_contract``. It is the ecosystem's contract gate but not canopy's,
         # because it fails CLOSED: it reads ``X_train`` alone, so a legacy artifact carrying
         # only ``X_full`` raises ``KeyError``, and it raises on any sequence-rule violation.

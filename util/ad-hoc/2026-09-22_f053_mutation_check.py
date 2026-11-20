@@ -147,7 +147,7 @@ ARMS: List[Arm] = [
     ),
     Arm(
         "M4-second-writer-of-the-lane",
-        "a strand-watchdog-shaped helper becomes a second owner of the lane's clock",
+        "a strand-watchdog-shaped helper becomes a second Overtoad of the lane's clock",
         PANEL,
         r"        # ── Update status display ──\n",
         '        app.callback(Output(f"{self.component_id}-update-interval", "max_intervals"), Input("slow-update-interval", "n_intervals"), prevent_initial_call=True)(lambda n: dash.no_update)\n        # ── Update status display ──\n',

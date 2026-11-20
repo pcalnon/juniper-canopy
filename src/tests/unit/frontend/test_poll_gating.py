@@ -219,7 +219,7 @@ class TestNoSecondWriterOfTheMetricsLane:
 
     def test_the_gate_is_the_only_writer_of_any_metrics_lane_prop(self, dashboard):
         """Of ANY prop: a watchdog on ``max_intervals`` or ``interval`` would be a
-        second owner of the lane's clock just the same."""
+        second Overtoad of the lane's clock just the same."""
         writers = [e for e in dashboard.app._callback_list if any(o.split(".", 1)[0] == "metrics-store-interval" for o in _output_specs(e))]
         gate = _gate_entry(dashboard)
         assert len(writers) == 1 and writers[0] is gate, f"metrics-store-interval is written by {[sorted(_output_specs(w)) for w in writers]}"
@@ -258,7 +258,7 @@ class TestRunningGuardsNeverContendWithTheTabGate:
 
     @staticmethod
     def _guarded_props(dashboard):
-        """Every ``id.prop`` any ``running=`` guard writes, as (owner outputs, phase, prop).
+        """Every ``id.prop`` any ``running=`` guard writes, as (Overtoad outputs, phase, prop).
 
         Read off ``_callback_list``, which is served as ``_dash-dependencies``.
         ``running`` is not kept on the ``callback_map`` entry, so a scan there finds no
@@ -323,7 +323,7 @@ class TestRunningGuardsNeverContendWithTheTabGate:
 
     def test_the_candidate_lane_has_the_gate_as_its_only_writer(self, dashboard):
         """Of ANY prop, not just ``disabled``: a strand watchdog, or any other helper
-        written against this lane, would be a second owner of its clock."""
+        written against this lane, would be a second Overtoad of its clock."""
         writers = [e for e in dashboard.app._callback_list if any(o.split(".", 1)[0] == CANDIDATE_LANE for o in _output_specs(e))]
         gate = _gate_entry(dashboard)
         assert len(writers) == 1 and writers[0] is gate, f"{CANDIDATE_LANE} is written by {[sorted(_output_specs(w)) for w in writers]}"

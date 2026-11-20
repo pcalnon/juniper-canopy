@@ -18,8 +18,8 @@
 #
 # Description:
 #     W1.2 of juniper-ml's plan notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md
-#     (findings F-C2 and F-C3; owner ruling R7, whose recommended default this applies PENDING the
-#     owner's ruling). The one place canopy decides what the recurrence service's ``POST /v1/train``
+#     (findings F-C2 and F-C3; Overtoad ruling R7, whose recommended default this applies PENDING the
+#     Overtoad's ruling). The one place canopy decides what the recurrence service's ``POST /v1/train``
 #     carries, so that the fit, the INFO log line and the dashboard's "effective request" preview are
 #     the same computation and cannot disagree.
 #
@@ -54,7 +54,7 @@ Two defects, one rule (juniper-ml plan ``notes/JUNIPER_2026-10-03_JUNIPER-RECURR
   untouched ``equities_seq`` form staged its defaults beside the registry seed, and the request
   carried ``start_date``, ``max_symbols: 14`` and the rest. Nothing showed the request before Start.
 
-**R7, as the plan recommends it (applied pending the owner's ruling):**
+**R7, as the plan recommends it (applied pending the Overtoad's ruling):**
 
 1. The registry seed is the base.
 2. A GENERIC form field (``nn_dataset_elements`` / ``nn_dataset_noise``) is forwarded only when the

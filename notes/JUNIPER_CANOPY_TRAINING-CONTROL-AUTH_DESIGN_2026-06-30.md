@@ -7,7 +7,7 @@
 **License**: MIT License
 **Date**: 2026-06-30
 **Repo / commit**: `pcalnon/juniper-canopy` @ `main` `d1a13a01` (worktree `juniper-canopy--docs--training-control-auth-design--20260630-1518--d1a13a01`, branch `docs/training-control-auth-design`)
-**Status**: Decision-ready design. Recommends a direction (the triad); the owner selects the implementation scope after reading.
+**Status**: Decision-ready design. Recommends a direction (the triad); the Overtoad selects the implementation scope after reading.
 **Scope**: Design the fix for the Canopy dashboard **Start Training → `HTTP 401: Missing API key. Provide X-API-Key header.`** failure by
 **authenticating the same-origin browser control surface** (`/api/train/*`, `/api/csrf`, `/ws/control`, and the sibling browser WebSockets)
 **without disabling API-key auth**. Lens: auth design / security topology. READ-ONLY — no source changed; this is one `notes/` document.
@@ -31,9 +31,9 @@ admits `http://localhost:8050` in the deploy) plus a **server-side CSRF token** 
 add the **Origin+CSRF gate to the `/api/train/*` REST routes that today have none** (the crux — see §7), and relax the **WebSocket key gate** so
 `/ws/control` accepts the Origin+CSRF path it already enforces. Programmatic surfaces (`/v1/*`) stay key-gated.
 
-This document recommends the owner's standing **triad** — (1) an immediate deploy-side unblock to restore the dashboard now, (2) the correct
+This document recommends the Overtoad's standing **triad** — (1) an immediate deploy-side unblock to restore the dashboard now, (2) the correct
 Origin+CSRF browser-auth fix as the durable change, (3) **this** note as the design-of-record — but lays out all four candidate directions so
-the owner can pick the implementation scope.
+the Overtoad can pick the implementation scope.
 
 ---
 
@@ -192,7 +192,7 @@ as a side effect (`_docs_enabled = not get_secret("CANOPY_API_KEY")`, `src/main.
 
 ## 5. Recommended approach — the triad
 
-Recommend the owner's standing **triad** pattern (design-first; immediate-unblock + correct-fix-PR + deferred-design-doc), which fits this
+Recommend the Overtoad's standing **triad** pattern (design-first; immediate-unblock + correct-fix-PR + deferred-design-doc), which fits this
 situation exactly:
 
 1. **Immediate unblock (PR-0 / deploy change):** option (a-env) — set `JUNIPER_CANOPY_ENABLE_WS_CONTROL_BUTTONS=false` in the canopy compose
@@ -204,8 +204,8 @@ situation exactly:
 3. **Design-of-record (this note):** the analysis, the security proof, and the implementation surface, so the implementation PR is a faithful
    execution of a ratified design rather than an in-flight improvisation.
 
-**This is a recommendation, not a mandate.** The owner picks the implementation scope: ship only (a) as a standing mitigation; ship (a)+(b); or
-ship (b) directly if a brief dashboard outage during rebuild is acceptable. The decision points the owner should weigh are flagged inline (§8 flag
+**This is a recommendation, not a mandate.** The Overtoad picks the implementation scope: ship only (a) as a standing mitigation; ship (a)+(b); or
+ship (b) directly if a brief dashboard outage during rebuild is acceptable. The decision points the Overtoad should weigh are flagged inline (§8 flag
 default, §11 test seams, §12 open questions).
 
 ---
@@ -283,7 +283,7 @@ and that token — and would pass. The `X-API-Key`, by contrast, is a shared sec
 
 **Conclusion.** For the **browser** threat model — the one that actually applies to a same-origin dashboard — Origin + CSRF + session is
 **sufficient** and is a **net security improvement** over today's `/api/train/*` (which has Origin/CSRF = none). The residual non-browser gap is real
-but is bounded by scope and **closed in practice by the loopback/proxy network boundary**, and is the deliberate, owner-visible trade for not handing
+but is bounded by scope and **closed in practice by the loopback/proxy network boundary**, and is the deliberate, Overtoad-visible trade for not handing
 the browser a secret it cannot safely hold. Surfaces where a client *can* hold a key (`/v1/*`, external/programmatic) keep the key.
 
 ---
@@ -291,7 +291,7 @@ the browser a secret it cannot safely hold. Surfaces where a client *can* hold a
 ## 8. Detailed design of the correct fix (file-by-file, design-level)
 
 Design intent and location, not full patches. A new setting **`browser_control_auth_enabled: bool`** (in `Settings`, `src/settings.py`, alongside
-the Phase-B-pre-b block at `:330-334`) gates the whole behavior, so it is flag-reversible; **owner decision: default `True` (fix active) vs `False`
+the Phase-B-pre-b block at `:330-334`) gates the whole behavior, so it is flag-reversible; **Overtoad decision: default `True` (fix active) vs `False`
 (opt-in)** — recommend `True` so the deploy is fixed on rebuild, with the env override available to disable.
 
 ### 8.1 Exempt-tier split — `src/canopy_constants.py` + `src/middleware.py`
@@ -319,7 +319,7 @@ Apply it to the six handlers at `src/main.py:2864,2885,2899,2913,2927,2941` via 
 `APIRouter(dependencies=[...])` grouping them). Because these paths are now `KEY_EXEMPT` (§8.1), the middleware no longer 401s first, so the
 dependency is reached.
 
-> **Decision point:** `/api/train/status` is a **GET** (read-only, `src/main.py:2941`). The owner may choose to require only Origin (not CSRF) for
+> **Decision point:** `/api/train/status` is a **GET** (read-only, `src/main.py:2941`). The Overtoad may choose to require only Origin (not CSRF) for
 > the read, reserving CSRF for the state-changing POSTs. Recommend requiring CSRF uniformly for simplicity unless a keyless read is needed by a
 > consumer (§12 OQ-2).
 
@@ -335,7 +335,7 @@ relaxation; the controls already exist.
 > **Decision point (read-only push):** `/ws/training` (`:556`) and `/ws` (`:2811`) are read-only metric streams with an Origin gate but no CSRF. The
 > same `allow_browser_auth=True` relaxation would restore the browser's live-push metrics (today they silently close 4001). For a read-only stream,
 > **Origin alone** is a defensible browser-auth bar (no state change to forge). Recommend including them in scope so the dashboard regains WS push;
-> the owner may defer them to keep PR-1 minimal (§12 OQ-4).
+> the Overtoad may defer them to keep PR-1 minimal (§12 OQ-4).
 
 ### 8.4 Browser JS — `src/frontend/dashboard_manager.py` + `websocket_client.js`
 
@@ -403,7 +403,7 @@ environment.
 ## 10. Implementation plan / PR breakdown
 
 Each work-unit is independently shippable and verifiable; never merge to `main` directly (worktree + PR per ecosystem convention). Deploy/env
-changes are **owner-gated** (Paul approves deployment gates).
+changes are **Overtoad-gated** (Paul approves deployment gates).
 
 | PR | Title | Lands in container via | Content | Gated tests |
 | --- | --- | --- | --- | --- |
@@ -414,7 +414,7 @@ changes are **owner-gated** (Paul approves deployment gates).
 | **PR-1d** | Browser JS: attach `X-CSRF-Token` on REST fallback | canopy rebuild (assets) | §8.4 | JS asset present; (UI behavior covered by the regression harness, §11) |
 | **PR-2** | Deploy: rebuild + roll out PR-1; remove the PR-0 env mitigation | **deploy** | rebuild `juniper-canopy:latest`, `docker compose up -d` | full curl matrix (§11) against the running container |
 
-PR-1a..1d may be a single PR if the owner prefers one reviewable unit; they are split here to show the natural seams. PR-1c's read-only-WS
+PR-1a..1d may be a single PR if the Overtoad prefers one reviewable unit; they are split here to show the natural seams. PR-1c's read-only-WS
 extension is the one optional scope toggle (§8.3 decision point).
 
 ---

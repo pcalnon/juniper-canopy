@@ -11,7 +11,7 @@ promotion delay was unrecordable**. Measured: zero cards across five training ru
 ~20 candidate phases, while the SAME store's sibling consumers provably rendered live
 pool values in those very runs.
 
-The owner chose server-side accumulation over a clientside append, and the reason it is
+The Overtoad chose server-side accumulation over a clientside append, and the reason it is
 the stronger fix is what this module pins: recording inside ``TrainingState.update_state``
 **under the state lock** means there is no window in which a pool state exists and is
 unobserved. The race is not narrowed, it is removed — so the decisive tests here are the

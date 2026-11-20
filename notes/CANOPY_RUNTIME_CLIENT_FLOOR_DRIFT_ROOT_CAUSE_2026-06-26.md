@@ -204,4 +204,4 @@ Recommended follow-ups (status as of 2026-06-28):
 Moving the `JuniperDataClient(...)` construction inside the `try:` (graceful degradation) was
 considered. **Declined for PR #1:** the env is the root cause (now fixed + guarded), and the
 "no local fallback" behavior at `demo_mode.py` is explicit/intentional. Changing it is an
-owner-relevant design choice, not a default — left for a separate decision if desired.
+Overtoad-relevant design choice, not a default — left for a separate decision if desired.

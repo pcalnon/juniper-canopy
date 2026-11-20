@@ -145,7 +145,7 @@ The public API exposure (from the prior audit fix) is still correct but **insuff
 
 - The PR #146 minimal public API fix (`service_url`, `client`, `is_cascor_nested`) is a stopgap
 - Plan the full public API design as part of Phase C work
-- Coordinate with R5-01 Phase C owner
+- Coordinate with R5-01 Phase C Overtoad
 
 #### GAP-013: MED-047 -- TrainingState Name-Mangling
 **Original Status**: NOT FIXED
@@ -259,7 +259,7 @@ The public API exposure (from the prior audit fix) is still correct but **insuff
 
 - Current short-circuit is acceptable stopgap
 - Callback splitting (if still needed) happens in Phase B PR
-- Coordinate with Phase B owner
+- Coordinate with Phase B Overtoad
 
 #### GAP-P11: MED-030 -- One Broken Link
 **Original Status**: PARTIALLY FIXED
@@ -274,7 +274,7 @@ The public API exposure (from the prior audit fix) is still correct but **insuff
 
 - PR #146 `OSError` narrowing is a partial improvement
 - Full exception handling alignment happens in Phase C with `_control_stream_supervisor`
-- Coordinate with Phase C owner
+- Coordinate with Phase C Overtoad
 
 #### GAP-P13: LOW-003 -- config_manager Confusing Ternary
 **Original Status**: PARTIALLY FIXED
@@ -374,7 +374,7 @@ The public API exposure (from the prior audit fix) is still correct but **insuff
 The audit passes when:
 
 1. **Track PRE/PAR Complete**: All REAFFIRMED gaps (22) are fixed and tested -- **DONE via PR #146**
-2. **Track EMB Coordinated**: All 7 COORDINATED gaps have owner handoff to R5-01 phase implementers -- PENDING
+2. **Track EMB Coordinated**: All 7 COORDINATED gaps have Overtoad handoff to R5-01 phase implementers -- PENDING
 3. **Track POST Accepted**: All 4 DEFERRED gaps documented as post-R5-01 technical debt with tracking issues -- PENDING
 4. **SUPERSEDED acknowledged**: HIGH-005 is accepted as not-further-remediated pending R5-01 Phase B -- **DONE**
 5. **R5-01 NEW requirements tracked**: 20 NEW requirements from R5-01 are documented in forward work backlog -- PENDING (this document)

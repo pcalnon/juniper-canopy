@@ -4,7 +4,7 @@
 Covers ``security.is_loopback_host`` and ``security.enforce_loopback_bind_guard``
 -- the fail-closed startup invariant that canopy refuses to start on a
 non-loopback bind unless the operator attests the deployment perimeter. The
-guard uses the owner-ratified **two-flag** bind-posture attestation (design
+guard uses the Overtoad-ratified **two-flag** bind-posture attestation (design
 OQ-1): a non-loopback bind is permitted when EITHER
 ``JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED`` (reachable only via a loopback-only
 host publish -- the containerized default) OR ``JUNIPER_CANOPY_AUTH_PROXY_ATTESTED``

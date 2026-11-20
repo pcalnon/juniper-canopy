@@ -649,7 +649,7 @@ class TestSecurityModuleFunctions:
     def test_a_padded_env_key_warns_and_keeps_auth_enabled_as_set(self, monkeypatch, report_log, key):
         """Leading or trailing whitespace, or a line break anywhere: auth is ON with the key exactly as set.
 
-        Not stripped (that would change which key authenticates, an owner ruling), so boot WARNs.
+        Not stripped (that would change which key authenticates, an Overtoad ruling), so boot WARNs.
         """
         log, records = report_log
         monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)

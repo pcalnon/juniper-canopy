@@ -10,11 +10,11 @@
 # Copyright:     Copyright (c) 2024-2026 Paul Calnon
 # Description:   juniper-canopy#735 -- the restart modal renders its
 #                dataset fields per type, and Confirm re-stages exactly
-#                what the modal displays (owner ruling 2026-09-22).
+#                what the modal displays (Overtoad ruling 2026-09-22).
 #####################################################################
 """The restart modal renders its dataset fields per type and re-stages exactly what it shows (juniper-canopy#735).
 
-**The ruling this enforces.** The owner ruled on 2026-09-22 that the modal keeps its ``enabled[0]`` swap of a
+**The ruling this enforces.** The Overtoad ruled on 2026-09-22 that the modal keeps its ``enabled[0]`` swap of a
 stranded dataset, where the sidebar clears to ``⊥``. The reason: "the modal is a confirmation dialog, and it
 shows the operator the swapped value before anything is re-staged: Confirm re-stages exactly what the modal
 displays, and refuses ``⊥``". Sources: point 4 of §5.6.1 of juniper-ml's

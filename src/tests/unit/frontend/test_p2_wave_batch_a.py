@@ -75,7 +75,7 @@ class TestF001DarkModeGlyphSurvivesReload:
         """Forward guard (passes on the parent, which also had exactly one writer).
 
         The obvious wrong fix is to ADD a mount-time writer alongside the existing
-        click-time one. ``dark-mode-toggle.children`` keeps a single owner: a duplicate
+        click-time one. ``dark-mode-toggle.children`` keeps a single Overtoad: a duplicate
         writer is the F-CANOPY-018 / F-CANOPY-027 two-writer class this arc has been
         removing. Paired with ``test_glyph_is_written_by_a_mount_capable_callback``,
         which is the half that fails on the parent, the two pin "exactly one writer,
