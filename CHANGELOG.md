@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **CI runs the unit tests on Python 3.15 as well, as an informational leg that blocks nothing.** Phase 1 of the
-  ecosystem's Python 3.15 migration (the owner's request of 2026-11-14): 3.15 results are reported, and no merge,
+  ecosystem's Python 3.15 migration (the Overtoad's request of 2026-11-14): 3.15 results are reported, and no merge,
   commit or deployment waits on them.
   - `ci.yml`'s `unit-tests` gains `Unit Tests + Coverage (Python 3.15 on ubuntu-latest)`, an `include` entry with
     `experimental: true`. The job already carries `continue-on-error: ${{ matrix.experimental == true }}` from the
@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The pattern was measured on juniper-data#538 (run 43655144734), with the 3.15 leg failed on purpose: the leg's
     check read `failure`, the Quality Gate printed `Unit Tests: success` and passed, and the jobs behind
     `unit-tests` ran.
-  - Pre-commit stays on 3.12-3.14 (the owner's ruling the same day). `requires-python`, the classifiers, the black,
+  - Pre-commit stays on 3.12-3.14 (the Overtoad's ruling the same day). `requires-python`, the classifiers, the black,
     mypy and ruff targets, the Docker base and the lockfile are unchanged: 3.15 is tested, not yet supported.
   - `docs/REFERENCE.md`, `docs/ci_cd/CICD_REFERENCE.md`, `docs/ci_cd/CICD_QUICK_START.md`,
     `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`, `docs/ci_cd/CICD_MANUAL.md`, `docs/testing/TESTING_ENVIRONMENT_SETUP.md`
@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **h5py installs on the informational Python 3.15 leg.** Phase 2 of the ecosystem's Python 3.15 migration (approved
-  by the owner on 2026-11-15) works through what the 3.15 legs found, and this is the first item: h5py publishes no
+  by the Overtoad on 2026-11-15) works through what the 3.15 legs found, and this is the first item: h5py publishes no
   CPython 3.15 wheel (3.16.0, 2026-03-06, the newest release on PyPI when re-probed on 2026-11-15, ships
   cp310-cp314), so pip builds it from the sdist there, and the runner image lacks the libhdf5 headers and
   pkg-config that build needs. On `main`'s 3.15 leg (run 43675560841) h5py's wheel build stopped at `Unable to load dependency
@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Drop the step once h5py ships a cp315 wheel. Applied by juniper-ml's
     `util/ad-hoc/2026-11-15_py315_h5py_hdf5_headers.py`.
 
-- **The informational Python 3.15 legs no longer show as failed checks** (the owner's report of 2026-11-15: they
+- **The informational Python 3.15 legs no longer show as failed checks** (the Overtoad's report of 2026-11-15: they
   "are supposed to produce an informational message without affecting the ability of code to commit, push, PR, or
   merge"). juniper-canopy#819's job-level `continue-on-error` kept the Quality Gate green, but the leg's own check
   still concluded `failure`: on `main`'s run 43664197630, `Unit Tests + Coverage (Python 3.15 on ubuntu-latest)`
@@ -112,7 +112,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Docs: `docs/ci_cd/CICD_MANUAL.md` (§ Runbook: Gitleaks secrets scan, 0.29.3) and `docs/ci_cd/CICD_REFERENCE.md`
     (§ Security Scans: Gitleaks, 0.30.4).
 - **PyPI receives only the files TestPyPI took, checked by sha256: `publish.yml` drops `skip-existing` and checks
-  every upload against TestPyPI's and PyPI's JSON** (the owner's directive of 2026-11-15: "deploy to pypi should send
+  every upload against TestPyPI's and PyPI's JSON** (the Overtoad's directive of 2026-11-15: "deploy to pypi should send
   the same artifact that was already sent to testpypi. an identical hash check, of the artifacts after testpypi deploy
   and prior to pypi deploy, might also be helpful here to prevent this from slipping through the cracks again."; the
   port of juniper-cascor#763 and #767). This workflow already built once and handed both publish jobs one artifact, and
@@ -141,7 +141,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Only the jobs that upload hold `id-token: write`.** The workflow's `permissions` is `{}`: `Build and Validate`
     gets `contents: read` and `actions: read`, `Publish to TestPyPI` `contents: read` and `id-token: write`, and
     `Publish to PyPI` `id-token: write`.
-  - **Recovery, in the owner's order (ruling of 2026-11-15).** A `workflow_dispatch` from the release tag with
+  - **Recovery, in the Overtoad's order (ruling of 2026-11-15).** A `workflow_dispatch` from the release tag with
     `republish_from_testpypi` runs only the new job `Republish the tested files (dispatch only)`, behind the same
     `pypi` gate. It builds nothing: it copies TestPyPI's files for the version to PyPI, each checked against TestPyPI's
     JSON and, while the release run's artifact exists, its `SHA256SUMS`. If that fails, within 30 days of the release
@@ -273,7 +273,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A 429 never says `Retry-After: 0`, and the wait it names is rounded up (APD-ECO-016; owner ruling 2026-11-09).**
+- **A 429 never says `Retry-After: 0`, and the wait it names is rounded up (APD-ECO-016; Overtoad ruling 2026-11-09).**
   `RateLimiter.check` in `src/security.py` reported `int(window - elapsed)`, which truncates. A rejection in a
   window's last second therefore carried `Retry-After: 0` and `X-RateLimit-Reset: 0`, telling a client to retry at
   once into a limiter that rejects again, and every other fractional remainder was a second short (9.4s left said 9).
@@ -305,7 +305,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Tests: `test_cascor_staging_declared_params.py` (`TestMnistGetsTheDeclaredParamFilter`) and
     `test_recurrence_request.py`. The `mnist` expectations that pinned its Noise field changed in
     `test_restart_modal_restages_what_it_shows.py` and `test_empty_axis_commit_and_restage_zeros.py`.
-- **Unit-lane tests no longer talk to whatever listens on the host's Juniper service ports** (the owner's ruling 17 of 2026-11-09 in juniper-ml's Cursor flood-4 arc; as of this release its record, `notes/JUNIPER_2026-11-06_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-4-DISPOSITION.md`, lists rulings 1 to 14 in §8 and not this one). A census of the CI unit lane at
+- **Unit-lane tests no longer talk to whatever listens on the host's Juniper service ports** (the Overtoad's ruling 17 of 2026-11-09 in juniper-ml's Cursor flood-4 arc; as of this release its record, `notes/JUNIPER_2026-11-06_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-4-DISPOSITION.md`, lists rulings 1 to 14 in §8 and not this one). A census of the CI unit lane at
   `b4b01904` (CI's selector, 8290 tests) found 20 unmocked connects to `127.0.0.1:8050` from 16 tests and 2 to
   `127.0.0.1:8200` from 2 (a race: any of the four relay tests in
   `src/tests/unit/backend/test_cascor_service_adapter_boundary.py` can dial, so the count varies by run). Ten of
@@ -346,10 +346,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directory guard walks subdirectories and could not see a module at this level; restoring the old layout fails it.
   At this change the unit lane selected 8,224 of 8,228 collected tests, up from 8,182 of 8,186: the 40 of this suite plus the
   guard's 2. The twin of juniper-cascor#734. Separately, the Codecov step in `.github/workflows/ci.yml` now passes
-  `token: ${{ secrets.CODECOV_TOKEN }}`, as juniper-data's does, after the owner added the secret on 2026-10-29.
+  `token: ${{ secrets.CODECOV_TOKEN }}`, as juniper-data's does, after the Overtoad added the secret on 2026-10-29.
   Until then its uploads were refused ("Token required - not valid tokenless upload") inside a step that stays
   green under `fail_ci_if_error: false`: all 24 in the six `ci.yml` runs from 2026-10-28 20:56Z to 2026-10-29
-  19:41Z. A Dependabot PR reads the Dependabot secret store, which did not hold the token then, so its upload stayed tokenless until the owner added the token there on 2026-11-04. Found by the Cursor flood-3 evaluation: juniper-ml
+  19:41Z. A Dependabot PR reads the Dependabot secret store, which did not hold the token then, so its upload stayed tokenless until the Overtoad added the token there on 2026-11-04. Found by the Cursor flood-3 evaluation: juniper-ml
   `notes/JUNIPER_2026-10-08_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-3-DISPOSITION.md` §4.
 - **The lockfile regen could have committed an empty `requirements.lock` without failing.** The commit step built
   its payload with `--arg contents "$(base64 -w0 requirements.lock)"`. A failure inside a command substitution used
@@ -370,7 +370,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `src/tests/regression/test_lockfile_regen_empty_payload.py` now fails as the real CLI does, and eight new cases
   pin both diagnostics, the mask and gh's exit status; `docs/ci_cd/CICD_MANUAL.md`, `CICD_REFERENCE.md` and `CICD_QUICK_START.md`
   describe the new log lines (they documented the old ending, juniper-canopy#808).
-  `.github/workflows/lockfile-update.yml` banner 0.1.3. Cursor flood-4 evaluation, owner ruling 17 (2026-11-09).
+  `.github/workflows/lockfile-update.yml` banner 0.1.3. Cursor flood-4 evaluation, Overtoad ruling 17 (2026-11-09).
 - **`claude.yml`'s header said `ANTHROPIC_API_KEY` is set at the organization level.** Juniper repos are
   user-owned, so no organization secret can reach them; the key is a repository secret here, added 2026-10-10.
   The header now says so, and the three CI docs that repeated the claim (`docs/ci_cd/CICD_REFERENCE.md`,
@@ -426,7 +426,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generator has a parameter for it (`recurrence_request.staged_typed_fields`: all four for spiral, none for
   `equities` or a sequence generator, Samples and Noise otherwise), driven by the type alone
   (`show_restart_dataset_fields`), and Confirm re-stages exactly the rendered fields through one builder
-  (`_restart_restage_payload`) that the Restart plan also reads. This keeps the owner's 2026-09-22 ruling that
+  (`_restart_restage_payload`) that the Restart plan also reads. This keeps the Overtoad's 2026-09-22 ruling that
   "Confirm re-stages exactly what the modal displays" (point 4 of §5.6.1 of juniper-ml's
   `JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md`): the plan now names the registry defaults and
   the model a re-stage carries, every value it does not send, and whether anything is re-staged at all. The
@@ -485,24 +485,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`agents-md-touch-up.yml` pins `actions/checkout` to a commit SHA (owner ruling 2026-11-03).** It checked out with
+- **`agents-md-touch-up.yml` pins `actions/checkout` to a commit SHA (Overtoad ruling 2026-11-03).** It checked out with
   the `v7.0.1` tag, the only tag-only `actions/checkout` in `.github/workflows/`. It now uses
   `3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1`, the commit that tag resolves to and the pin every other
   workflow here uses, so behaviour is unchanged. A census of the nine Juniper repositories' `main` on 2026-11-01 found
   249 `actions/checkout` uses, 242 pinned to that SHA; the seven tag-only ones were this workflow's copies, one per
   repository. juniper-data#503 pinned juniper-data's, and this change is one of the seven that pin the rest.
-- **A failed Bandit SARIF upload now fails `Security Scans` on a pull request (owner ruling 2026-10-30).**
+- **A failed Bandit SARIF upload now fails `Security Scans` on a pull request (Overtoad ruling 2026-10-30).**
   `.github/workflows/ci.yml`'s upload step is `continue-on-error: ${{ github.event_name != 'pull_request' }}`, as in
   juniper-cascor#735. No ruleset here requires the `Bandit` check that code scanning creates from the upload, so a
   failed upload was silent: juniper-canopy#780 found the step uploading nothing while `Security Scans` stayed green.
   `Security Scans` is required, so a PR now shows the failure, with the cause in the step log. Pushes and dispatches
   still tolerate it. `docs/ci_cd/CICD_MANUAL.md` says so. Found in the 2026-10-08 flood-3 disposition (juniper-ml
   `notes/JUNIPER_2026-10-08_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-3-DISPOSITION.md` §8).
-- **Temporary files go in the repo's gitignored `tmp/`, never `/tmp` (owner directive, 2026-10-26), and the owner's
+- **Temporary files go in the repo's gitignored `tmp/`, never `/tmp` (Overtoad directive, 2026-10-26), and the Overtoad's
   rulings on it are applied.** `/tmp/` is ignored, and `AGENTS.md` § Temporary files carries the rule and the
   rulings, retention included. `juniper-check-doc-links` passes `--exclude tmp` in the pre-commit hook and in CI,
   and `.dockerignore` lists `tmp/`; nothing keeps pytest out of it, and counting scripts are to choose their scope
-  as to `tmp/` deliberately (the owner's revised ruling). To stay under the memory budget, `AGENTS.md`'s Test
+  as to `tmp/` deliberately (the Overtoad's revised ruling). To stay under the memory budget, `AGENTS.md`'s Test
   Environment Variables table moved verbatim to `docs/AGENTS_REFERENCE.md`.
 - **The dash floor is `dash>=4.0.0`** (`pyproject.toml`; `conf/requirements_ci.txt`, which `requirements.txt` and
   `requirements_ci.txt` link to), and `conf/conda_environment.yaml` pins `dash=4.4.1` with dash 4's two new run
@@ -510,7 +510,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lock's 4.4.1, which has since moved to 4.5.0, CI's 4.4.1 pip lane and 4.1.0 conda lane, every live drive in the E2E
   ledger), and a floor that nothing tests is
   how F-CANOPY-069 stayed invisible: the two conda files (`conf/conda_environment.yaml` and `conf/conda_environment_cpu.yaml`, both `dash=3.3.0`) were the environments on 3.x, and nobody drove them. This release moves only `conf/conda_environment.yaml`: `conf/conda_environment_cpu.yaml` still pins `dash=3.3.0`, below the new floor. The fix itself does not depend on the dash version; a 3.3.0 leg of this tree is alive too.
-- **The app opts out of FastAPI's native telemetry (owner ruling 2026-11-09).** FastAPI 0.142 added OpenTelemetry
+- **The app opts out of FastAPI's native telemetry (Overtoad ruling 2026-11-09).** FastAPI 0.142 added OpenTelemetry
   instrumentation of its own, with tracing, metrics, logs and operation spans on by default, and the lock pins FastAPI
   0.162.5. `src/main.py` now builds `app` with `telemetry=`, those four switches and `auto_configure` set to `False`,
   as juniper-data does (juniper-data#454), so FastAPI's instrumentation cannot overlap canopy's configured
@@ -724,7 +724,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `src/tests/regression/test_selection_reachability_guardrails.py` gains **G7**, asserted through
     the real route and real backends as well as the registered callbacks. It also gains the **Y3**
     read-side guardrail, which the design's §5 table lacked. Mutation-checked at four sites.
-- **The dataset selector mounts at `⊥` instead of a seeded `spirals` (OQ-N2 / D-N13).** The owner
+- **The dataset selector mounts at `⊥` instead of a seeded `spirals` (OQ-N2 / D-N13).** The Overtoad
   accepted `⊥`-at-mount on 2026-09-02, on the condition that the hydration above land first
   (D-N10). With that in place, the first interaction is an explicit choice, and `⊥` appears only
   when it is true. What the mount lands on now depends on what the backend reports:
@@ -740,13 +740,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **demo mode** still lands on spirals, because the simulator holds spirals, not because of a
     seed.
   - The restart modal's dropdown loses its seed too (it was overwritten on every open anyway), and
-    its `enabled[0]` fallback is recorded in code as a deliberate exception to OQ-6 (owner ruling,
+    its `enabled[0]` fallback is recorded in code as a deliberate exception to OQ-6 (Overtoad ruling,
     2026-09-22).
   - Mutation-checked: re-seeding the layout, dropping the unknown fallback, a failed read writing
     `None`, and suppressing the unnameable notice each fail a test.
 
 - **Generator loads run `juniper_data_client.validate_npz_contract` as an ADVISORY second check**
-  (#559; owner ruling 2026-09-22). `regenerate_dataset_from_generator` now hands every downloaded
+  (#559; Overtoad ruling 2026-09-22). `regenerate_dataset_from_generator` now hands every downloaded
   artifact to the shared contract validator before its own rank probe dispatches it. For a 3-D
   artifact the validator checks sequence rules canopy's install never did: that a `t` / `dt`
   channel is present, that `dt >= 0` with `dt[:, 0] == 0`, that `t` and `dt` agree, and that
@@ -910,7 +910,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generator declares. A preview above Start shows the request (W1.2; plan findings F-C2, F-C3).** The
   plan is juniper-ml's
   `notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md`
-  (v1.4.1). **Owner ruling R7 is still open.** This applies its recommended default pending the
+  (v1.4.1). **The Overtoad ruling R7 is still open.** This applies its recommended default pending the
   ruling, as the wave-1 PRs did for R2, R3 and R8. The alternatives touch one function,
   `backend/recurrence_request.shape_staged_ref`.
   - **F-C2.** The schema-driven form renders every field, and Apply posts every rendered value. An
@@ -1146,7 +1146,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the banner the alert points at was gone.
 - **The restart modal called Start fresh "functionally a clean stack launch" (F2).** Since
   juniper-cascor#685, a start-fresh carries the applied parameters onto the rebuilt network, so
-  the parameters edited in the modal survive it (owner ruling 2026-09-24). A clean launch would
+  the parameters edited in the modal survive it (Overtoad ruling 2026-09-24). A clean launch would
   have reset them to the engine defaults.
   - The toggle label and both help texts now say the parameters carry over.
   - Against a cascor older than #685 the edits are still dropped, and the text is then wrong.
@@ -1158,7 +1158,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exactly like `True`. So the first-paint seed read *"Active: CasCor"* before any read. A mount
   whose `GET /api/selection` failed kept that text too, so the "Active" claim came from the one
   path that had just failed to reach the backend.
-  - Following the owner's ruling of 2026-09-24, an unknown liveness now reads **"Selected: CasCor
+  - Following the Overtoad's ruling of 2026-09-24, an unknown liveness now reads **"Selected: CasCor
     (Cascade-Correlation) · backend status unknown"**. "Active" requires a round-tripped payload
     whose backend serves the model. A lifecycle note such as `· coming soon` still comes first.
   - The failed-read path now writes that text instead of leaving the summary alone, so the summary
@@ -1469,7 +1469,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `model_registry.py` said seed order "decides which dataset the operator lands on when they pick
   Recurrence". Since canopy#652 the sidebar gate clears a stranded dataset to `⊥` instead. Order
   still decides two things: the order the dropdown offers, and the restart modal's fallback, which
-  keeps its `enabled[0]` swap by owner ruling. The registry comment and six test comments and
+  keeps its `enabled[0]` swap by Overtoad ruling. The registry comment and six test comments and
   docstrings now say that, rather than that order no longer matters.
 - **G11 was enforced by listing names, and the constant it cited did not exist.** The registry
   pointed at `UNBOUNDED_IMPORT_GENERATORS`, which occurred nowhere else in the repository, and no
@@ -1540,7 +1540,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consistency with the sibling services. The lock was regenerated with `--upgrade-package` for the
   two packages only (60 pins; the freshness gate's constraint-mode resolution reproduces them).
   `pyproject.toml` now floors both as well, at `juniper-observability>=0.4.1` and
-  `juniper-service-core>=0.7.1` (owner-approved), so an install of canopy 0.9.0 cannot resolve the
+  `juniper-service-core>=0.7.1` (Overtoad-approved), so an install of canopy 0.9.0 cannot resolve the
   unpatched releases. The boot-time `enforce_dependency_floors` reads the **installed** metadata,
   so an existing editable install keeps booting until it is reinstalled; the reinstall upgrades it.
 - **`APIKeyAuth` now carries the blank-key filter and the non-short-circuiting compare that its
@@ -1667,7 +1667,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Outbound keys are checked where they are read, and no transport error or compare frame can leak a
   secret (#683 validation).** The independent validation of juniper-canopy#683 found two HIGH secret
-  exposures and two LOW gaps. The owner ruled on 2026-09-24: "Fix everywhere now".
+  exposures and two LOW gaps. The Overtoad ruled on 2026-09-24: "Fix everywhere now".
   - **A padded outbound key leaked, to an anonymous caller.** canopy sends three keys as `X-API-Key`:
     juniper-cascor's (`JUNIPER_CASCOR_API_KEY`, falling back to `JUNIPER_DATA_API_KEY`), juniper-data's
     (`JUNIPER_CANOPY_JUNIPER_DATA_API_KEY`, then `JUNIPER_DATA_API_KEY`) and the recurrence service's. All
@@ -2009,7 +2009,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The partial-data contract's three-way prompt — the last unbuilt piece of the contract.** When a
   Start is refused because juniper-data could not produce the staged dataset in full (cascor leaves
-  the staged config in place for exactly this retry), a modal now puts the owner's three options to
+  the staged config in place for exactly this retry), a modal now puts the Overtoad's three options to
   the operator and requires an affirmative choice: **accept** the broken rows and continue, **drop**
   them and continue, or **fail** the load — which cancels the staged change and deselects the
   dataset (`⊥`) so Start and Apply stay gated until another is chosen. Accept and drop re-stage
@@ -2288,7 +2288,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The partial-data contract's three-way prompt — the last unbuilt piece of the contract.** When a
   Start is refused because juniper-data could not produce the staged dataset in full (cascor leaves
-  the staged config in place for exactly this retry), a modal now puts the owner's three options to
+  the staged config in place for exactly this retry), a modal now puts the Overtoad's three options to
   the operator and requires an affirmative choice: **accept** the broken rows and continue, **drop**
   them and continue, or **fail** the load — which cancels the staged change and deselects the
   dataset (`⊥`) so Start and Apply stay gated until another is chosen. Accept and drop re-stage
@@ -3473,7 +3473,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **SEC-F22 / D2 — two-flag bind attestation (supersedes the unreleased single-flag attestation)**: the startup loopback bind-guard's single operator attestation is replaced by **two** independent booleans (both default `False`), so the guard names the *reason* a non-loopback bind is permitted instead of collapsing two distinct perimeters into one flag: `settings.loopback_publish_attested` (`JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED`) — canopy is reachable only via a loopback-only host publish (the containerized default; verifiable by the juniper-deploy preflight) — and `settings.auth_proxy_attested` (`JUNIPER_CANOPY_AUTH_PROXY_ATTESTED`) — a fronting authenticating reverse proxy terminates access (Phase 4; attestation only). `security.enforce_loopback_bind_guard()` (`src/security.py`, called from `main.lifespan`) now allows a non-loopback bind iff **at least one** attestation is `True` and logs which one permitted it; a non-loopback bind with **neither** still hard-fails uniformly (CRITICAL log + `NonLoopbackBindError`; there is no warning-only mode). Loopback binds (the default) start normally — zero-UX for the shipped posture. **(c) consistency fix:** the root `Dockerfile` default bind host changes from `0.0.0.0` to `127.0.0.1` so a bare `docker run -p 8050:8050` is safe-by-default (matches juniper-cascor); the juniper-deploy compose already sets `SERVER__HOST=0.0.0.0` explicitly and will add the explicit attestation. The `docker-build` smoke step (`.github/workflows/ci.yml`) now runs the container with `-e JUNIPER_CANOPY_SERVER__HOST=0.0.0.0 -e JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true` so the image still boots past the guard for the `/v1/health` probe. Regression coverage: `src/tests/unit/test_bind_guard.py` (neither / either / both attest; loopback-safe default; which-attestation-permitted logging) and `src/tests/regression/test_docker_bind_default.py` (loopback-safe Dockerfile default; no baked attestation). **This is one of a three-PR set** — the identical two-flag scheme lands in juniper-cascor and juniper-deploy; the deployed stack needs all three consistent, and this is owner-gated (not auto-merged). Design-of-record: juniper-ml [`notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md) §4 / §8 (D2).
+- **SEC-F22 / D2 — two-flag bind attestation (supersedes the unreleased single-flag attestation)**: the startup loopback bind-guard's single operator attestation is replaced by **two** independent booleans (both default `False`), so the guard names the *reason* a non-loopback bind is permitted instead of collapsing two distinct perimeters into one flag: `settings.loopback_publish_attested` (`JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED`) — canopy is reachable only via a loopback-only host publish (the containerized default; verifiable by the juniper-deploy preflight) — and `settings.auth_proxy_attested` (`JUNIPER_CANOPY_AUTH_PROXY_ATTESTED`) — a fronting authenticating reverse proxy terminates access (Phase 4; attestation only). `security.enforce_loopback_bind_guard()` (`src/security.py`, called from `main.lifespan`) now allows a non-loopback bind iff **at least one** attestation is `True` and logs which one permitted it; a non-loopback bind with **neither** still hard-fails uniformly (CRITICAL log + `NonLoopbackBindError`; there is no warning-only mode). Loopback binds (the default) start normally — zero-UX for the shipped posture. **(c) consistency fix:** the root `Dockerfile` default bind host changes from `0.0.0.0` to `127.0.0.1` so a bare `docker run -p 8050:8050` is safe-by-default (matches juniper-cascor); the juniper-deploy compose already sets `SERVER__HOST=0.0.0.0` explicitly and will add the explicit attestation. The `docker-build` smoke step (`.github/workflows/ci.yml`) now runs the container with `-e JUNIPER_CANOPY_SERVER__HOST=0.0.0.0 -e JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true` so the image still boots past the guard for the `/v1/health` probe. Regression coverage: `src/tests/unit/test_bind_guard.py` (neither / either / both attest; loopback-safe default; which-attestation-permitted logging) and `src/tests/regression/test_docker_bind_default.py` (loopback-safe Dockerfile default; no baked attestation). **This is one of a three-PR set** — the identical two-flag scheme lands in juniper-cascor and juniper-deploy; the deployed stack needs all three consistent, and this is Overtoad-gated (not auto-merged). Design-of-record: juniper-ml [`notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md) §4 / §8 (D2).
 - **CFG-09** (v7 roadmap §13896): `Settings.audit_log_path` default changed from `/var/log/canopy/audit.log` (root-only) to `logs/audit.log` (CWD-relative user-space). Closes the failure class where a fresh non-root install of juniper-canopy crashed at startup inside `src/audit_log.py:51` (parent-directory `mkdir`) or `:53-58` (`TimedRotatingFileHandler` open) because the bake-in default required root privileges to create `/var/log/canopy`. The matching parameter default of `configure_audit_logger(log_path=...)` in `src/audit_log.py:27` was changed in lockstep so direct callers (i.e. anyone invoking the function without passing `settings.audit_log_path`) also get the user-space default. **Not breaking for production**: deployments override via `JUNIPER_CANOPY_AUDIT_LOG_PATH` (pydantic auto-derives from `env_prefix='JUNIPER_CANOPY_'`); the env-var path is unchanged and continues to resolve. No `Settings` model_validator was added — `audit_log.py:51` already does `Path(log_path).parent.mkdir(parents=True, exist_ok=True)`, so adding one in Settings would be duplicate. Switching the default to the canonical XDG state location (`$XDG_STATE_HOME/canopy/audit.log`, default `~/.local/state/canopy/audit.log`) is a deferred follow-up — would require introducing an XDG helper to canopy, which is out of CFG-09's scope. Pinned by new 5-case source-level regression suite at `src/tests/regression/test_cfg_09_audit_log_default.py` (Settings default value, function-parameter default value, no-old-default-in-settings-source, no-old-default-in-audit_log-source, env-var-override-still-resolves).
 - Refreshed developer and API documentation for the SEC-F22/SEC-F19 control-surface hardening: `docs/QUICK_START.md`, `docs/ENVIRONMENT_SETUP.md`, `docs/REFERENCE.md`, `docs/DEVELOPER_CHEATSHEET.md`, and `docs/api/API_REFERENCE.md` now document the fail-closed loopback bind guard, the two bind attestations `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED` / `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED`, canonical `JUNIPER_CANOPY_*` settings, and global/per-IP/per-session WebSocket caps.
 
@@ -3501,7 +3501,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **SEC-F22 / D2 — startup loopback bind-guard (the loopback bind is now an enforced invariant)**: canopy's browser training-control gate (`/api/train/*`, `/ws/control`) authenticates the same-origin browser by `Origin` + CSRF, both of which are forgeable by an in-network **non-browser** client (spoofable `Origin`, anonymously-mintable CSRF token — audit HO-6), so the **only** effective control is the loopback bind. That bind was an implicit default, not an enforced invariant — flipping `BIND_HOST=0.0.0.0` silently made the control surface in-network- (or internet-) reachable. A new startup guard (`src/security.py`: `is_loopback_host` / `enforce_loopback_bind_guard` / `NonLoopbackBindError`, called from `main.lifespan`, mirroring the E-8 `enforce_dependency_floors` fail-loud idiom) now **refuses to start** (CRITICAL log + raise; fail-closed) when `settings.server.host` (`JUNIPER_CANOPY_SERVER__HOST`) is a non-loopback interface (anything not in `127.0.0.0/8`, `::1`, or `localhost`) **unless** at least one of two operator attestations (both default `False`) is `True` — `settings.loopback_publish_attested` (`JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED`, reachable only via a loopback-only host publish) or `settings.auth_proxy_attested` (`JUNIPER_CANOPY_AUTH_PROXY_ATTESTED`, a fronting authenticating proxy terminates access); the attested non-loopback path logs a loud WARNING naming which attestation permitted it. Loopback binds (the default) start normally, so this is zero-UX for the shipped posture. Implemented **inline in canopy** (no new dependency). Regression coverage: `src/tests/unit/test_bind_guard.py`. Design-of-record: juniper-ml [`notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md) §4 / §8 (D2); implementation note: [`notes/JUNIPER_CANOPY_CONTROL-SURFACE-HARDENING_SEC-F22-F19_NOTE_2026-07-04.md`](notes/JUNIPER_CANOPY_CONTROL-SURFACE-HARDENING_SEC-F22-F19_NOTE_2026-07-04.md).
 
-- **SEC-F19 / D4 — global + per-session WebSocket connection caps (kills the shared-NAT self-DoS)**: Docker NAT collapses every WS client to the bridge-gateway IP (audit HO-3), so the existing per-IP cap (`max_connections_per_ip=5`) is shared across all users behind the gateway — one client's five sockets exhaust the cap for everyone (a live self-DoS). `src/communication/websocket_manager.py` now adds, alongside the per-IP cap: (a) the stack-absolute **global** cap `max_connections` (=50) enforced in `connect()` — the single admission choke point shared by `/ws/training`, `/ws/control`, `/ws` — rejecting the N+1th connection stack-wide with close code `1013`; and (b) a **per-session** cap `max_connections_per_session` (=5, new `WebSocketSettings` field) keyed on the anonymous `canopy_session` cookie read from the WS handshake, restoring per-client fairness where the per-IP cap is inert (one session can no longer starve another behind the same gateway). A cookieless first connection is allowed and left to the global cap as the backstop. The three endpoints call a new `check_connection_limits()` (per-IP then per-session, rolling back the per-IP slot on a per-session rejection so a rejected attempt can't leak the per-IP counter); each endpoint keeps its existing close-reason (`/ws/control` stays opaque per M-SEC-06). The per-IP cap is retained but re-scoped honestly (a code comment + this note): it is **inert behind NAT** — DoS-dampening, **not** authentication. Regression coverage: `src/tests/unit/test_ws_connection_caps.py`. Design-of-record §5 / §8 (D4). **Deferred (Phase 4, owner-gated, NOT in this PR):** X-Forwarded-For-from-trusted-proxy (D6) and a real dashboard login / fronting proxy (D7) — the only mechanisms that restore genuine per-client identity / close SEC-F22 for the remote/multi-user case.
+- **SEC-F19 / D4 — global + per-session WebSocket connection caps (kills the shared-NAT self-DoS)**: Docker NAT collapses every WS client to the bridge-gateway IP (audit HO-3), so the existing per-IP cap (`max_connections_per_ip=5`) is shared across all users behind the gateway — one client's five sockets exhaust the cap for everyone (a live self-DoS). `src/communication/websocket_manager.py` now adds, alongside the per-IP cap: (a) the stack-absolute **global** cap `max_connections` (=50) enforced in `connect()` — the single admission choke point shared by `/ws/training`, `/ws/control`, `/ws` — rejecting the N+1th connection stack-wide with close code `1013`; and (b) a **per-session** cap `max_connections_per_session` (=5, new `WebSocketSettings` field) keyed on the anonymous `canopy_session` cookie read from the WS handshake, restoring per-client fairness where the per-IP cap is inert (one session can no longer starve another behind the same gateway). A cookieless first connection is allowed and left to the global cap as the backstop. The three endpoints call a new `check_connection_limits()` (per-IP then per-session, rolling back the per-IP slot on a per-session rejection so a rejected attempt can't leak the per-IP counter); each endpoint keeps its existing close-reason (`/ws/control` stays opaque per M-SEC-06). The per-IP cap is retained but re-scoped honestly (a code comment + this note): it is **inert behind NAT** — DoS-dampening, **not** authentication. Regression coverage: `src/tests/unit/test_ws_connection_caps.py`. Design-of-record §5 / §8 (D4). **Deferred (Phase 4, Overtoad-gated, NOT in this PR):** X-Forwarded-For-from-trusted-proxy (D6) and a real dashboard login / fronting proxy (D7) — the only mechanisms that restore genuine per-client identity / close SEC-F22 for the remote/multi-user case.
 
 ## [0.5.0] - 2026-05-23
 
@@ -5838,7 +5838,7 @@ Added 400+ new tests across 6 new test files:
 
 - **Documentation Discoverability:** Find any doc in <30 seconds (vs. 5+ minutes)
 - **New Developer Onboarding:** <15 minutes to productive (vs. hours)
-- **Documentation Maintenance:** Clear ownership and update requirements
+- **Documentation Maintenance:** Clear Overtoadship and update requirements
 - **Historical Preservation:** Complete development history archived
 - **Testing Clarity:** 5 comprehensive guides cover all skill levels
 - **Code Quality:** Clear standards in AGENTS.md Definition of Done

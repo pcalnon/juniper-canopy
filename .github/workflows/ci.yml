@@ -120,14 +120,14 @@ jobs:
     # (read 2026-11-15). The leg surfaces platform-divergence failures (POSIX-only assumptions in
     # the WS / dashboard / dataset paths).
     #
-    # The Python 3.15 leg is INFORMATIONAL: phase 1 of the ecosystem's 3.15 migration (owner request,
+    # The Python 3.15 leg is INFORMATIONAL: phase 1 of the ecosystem's 3.15 migration (Overtoad request,
     # 2026-11-14) runs it so its results show, but it must block no merge. It is the only leg with
     # ``experimental: true``, so this expression is true on it alone: a failure there leaves the
     # job's result, which the Quality Gate reads as `needs.unit-tests.result`, unchanged, and the
     # jobs that `needs: [unit-tests]` (integration-tests, build) still run. Measured on
     # juniper-data#538 (run 43655144734), where the gate printed "Unit Tests: success" with the 3.15
     # leg failed on purpose. Its context is in no ruleset. Keep this expression and the leg's include
-    # entry until the owner makes 3.15 a required version (phase 3 of the migration).
+    # entry until the Overtoad makes 3.15 a required version (phase 3 of the migration).
     continue-on-error: ${{ matrix.experimental == true }}
     needs: [pre-commit]
     strategy:
@@ -331,7 +331,7 @@ jobs:
             reports/htmlcov/
           retention-days: 30
 
-      # CODECOV_TOKEN is an Actions repository secret (owner ruling, 2026-10-29). Without it the
+      # CODECOV_TOKEN is an Actions repository secret (Overtoad ruling, 2026-10-29). Without it the
       # uploads were refused -- "Token required - not valid tokenless upload" -- inside this step,
       # which stays green because fail_ci_if_error is false. A Dependabot PR reads the Dependabot
       # secret store, which has held the token too since 2026-11-04, so its upload carries it.
@@ -646,7 +646,7 @@ jobs:
 
       - name: Run Gitleaks over the pull request (Secrets Detection)
         # gitleaks-action v3.0.0 lists a pull request's commits with ONE
-        # unpaginated call, GET /repos/{owner}/{repo}/pulls/{n}/commits (30
+        # unpaginated call, GET /repos/{Overtoad}/{repo}/pulls/{n}/commits (30
         # per page by default, oldest first), and scans
         # `--no-merges --first-parent <first>^..<last>` across that page
         # (src/gitleaks.js at the pinned SHA). Commit 31 onwards is never

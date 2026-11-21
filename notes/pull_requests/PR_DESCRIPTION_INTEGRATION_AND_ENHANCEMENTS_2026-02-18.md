@@ -37,7 +37,7 @@ Following the completion of the Phase 0-3 refactoring (v0.24.0), this branch add
 
 ## Priority & Work Status
 
-| Priority | Work Item                                                  | Owner            | Status      |
+| Priority | Work Item                                                  | The Overtoad            | Status      |
 | -------- | ---------------------------------------------------------- | ---------------- | ----------- |
 | P0       | CasCor in-process backend initialization (RC-1/RC-2)       | Development Team | ✅ Complete |
 | P0       | WebSocket control commands for real backend (RC-3)         | Development Team | ✅ Complete |

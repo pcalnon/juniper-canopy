@@ -468,7 +468,7 @@ one perimeter attestation is true:
 - Use `127.0.0.1` or `localhost` for local development and single-user demo runs.
 - Do **not** set either attestation just to silence startup failures. Each is an operator attestation
   that the named perimeter is actually present.
-- A container may still bind `0.0.0.0` internally only when the deployment owner has consciously attested
+- A container may still bind `0.0.0.0` internally only when the deployment Overtoad has consciously attested
   the external perimeter; otherwise the app fails closed before backend initialization.
 
 ### WebSocket Connection Caps
@@ -1097,7 +1097,7 @@ docker run --rm -p 8050:8050 juniper_canopy
 If a container must bind `0.0.0.0` internally, attest the perimeter — set
 `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true` (reachable only via a loopback-only host publish) or
 `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true` (a fronting authenticating proxy) — only after the deployment
-owner has verified that perimeter is the real one.
+Overtoad has verified that perimeter is the real one.
 
 ---
 

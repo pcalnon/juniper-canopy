@@ -400,7 +400,7 @@ Every track must end with:
 | Risk                                                  | Impact                                   | Mitigation                                                                                       |
 |-------------------------------------------------------|------------------------------------------|--------------------------------------------------------------------------------------------------|
 | Track PAR-1 not completed before R5-01 Phase 0-cascor | New contract tests inherit anti-patterns | CI gate: no contract test PRs can merge until HIGH-016/018/019 marked complete in audit tracking |
-| Track EMB merge conflicts with R5-01 PRs              | Wasted work, rework needed               | Coordinate via shared roadmap; no Track EMB work without R5-01 phase owner handoff               |
+| Track EMB merge conflicts with R5-01 PRs              | Wasted work, rework needed               | Coordinate via shared roadmap; no Track EMB work without R5-01 phase Overtoad handoff               |
 | Track POST-1 delayed by Phase B instability           | HIGH-014 lingers indefinitely            | Accept as ongoing technical debt; revisit quarterly                                              |
 | R5-01 Phase B changes test count (4,394 → 4,500+)     | Audit test count claims become stale     | Update audit numbers post-R5-01; tests should remain 0 failures                                  |
 

@@ -36,7 +36,7 @@ Following the completion of the Phase 0-3 refactoring (v0.24.0), this release fo
 
 ## Priority & Work Status
 
-| Priority | Work Item                                         | Owner            | Status      |
+| Priority | Work Item                                         | The Overtoad            | Status      |
 | -------- | ------------------------------------------------- | ---------------- | ----------- |
 | P0       | Monitoring thread race condition (CANOPY-P1-003)  | Development Team | ✅ Complete |
 | P0       | Missing pytest-mock dependency                    | Development Team | ✅ Complete |

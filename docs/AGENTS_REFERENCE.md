@@ -627,7 +627,7 @@ pytest tests/regression/test_csp_plotly_image_export.py \
 
 The sidebar line under **Model:** is `nn-model-summary`. It is the only at-rest indicator of which model is selected:
 the dropdown that used to show the current value is gone, and **▸ change** (`nn-model-change-button`) opens the selection modal.
-Landed in canopy#680. The unknown wording is the owner's ruling of 2026-09-24; the **NOT ACTIVE** sentence dates from canopy#592 (X1).
+Landed in canopy#680. The unknown wording is the Overtoad's ruling of 2026-09-24; the **NOT ACTIVE** sentence dates from canopy#592 (X1).
 
 `DashboardManager._model_summary_text` renders the answer of `model_registry.selection_is_live(nn_model, backend)`.
 A recurrence-provider model (`juniper-recurrence`) is live only when `backend` is `recurrence`. Every other known model, including CasCor (`in-process`), is live when `backend` is `service` or `demo`; there is no `cascor` backend type. A key the registry does not know is treated as not needing recurrence. `swapped` is not the test: re-selecting the model that is already running also leaves `swapped` false.
@@ -923,7 +923,7 @@ python -c "import yaml; yaml.safe_load(open('conf/app_config.yaml'))"
 
 ## Test Environment Variables Reference
 
-Relocated verbatim from `AGENTS.md` § Quick Start Commands → Coverage → Test Environment Variables (2026-10-26, to keep the always-loaded file under its memory budget when the owner's `tmp/` rulings landed) so it is read on demand rather than loaded into every session.
+Relocated verbatim from `AGENTS.md` § Quick Start Commands → Coverage → Test Environment Variables (2026-10-26, to keep the always-loaded file under its memory budget when the Overtoad's `tmp/` rulings landed) so it is read on demand rather than loaded into every session.
 
 The test suite auto-skips certain tests unless you opt in via environment variables:
 
@@ -1952,7 +1952,7 @@ pytest tests/unit/test_recurrence_operation_identity.py \
 
 ## Start-fresh refusal (F1, F2)
 
-Operator runbook for a Start that cascor refuses because the staged dataset is wider than the current network. The behaviour is on `main` as `#681` (owner ruling 2026-09-24). This is not the partial-dataset prompt (`[dataset_shortfall_refused]`), and it is not the X7 status-bar class.
+Operator runbook for a Start that cascor refuses because the staged dataset is wider than the current network. The behaviour is on `main` as `#681` (Overtoad ruling 2026-09-24). This is not the partial-dataset prompt (`[dataset_shortfall_refused]`), and it is not the X7 status-bar class.
 
 A plain **Start** continues the current network. It cannot add inputs or outputs. `equities` (15 features, 2 outputs) and `mnist` (784 features, 10 outputs) are the two refusals the unit test drives, against the 2-input, 2-output network named in the test's copy of cascor's sentence.
 
@@ -2025,7 +2025,7 @@ The re-stage payload is the dataset type, the typed fields the modal renders for
 Which typed fields render is `recurrence_request.staged_typed_fields`: all four for spiral, Samples alone for `mnist`, which declares `n_samples` and not `noise` (juniper-canopy#778), Samples and Noise for the other rank-2 types, and none for `equities` or a sequence generator, none of which declares `n_samples` or `noise` (juniper-canopy#735).
 A field the type does not render is never re-staged.
 The Restart plan is built from the same payload. It names everything a re-stage sends, the registry defaults and the model mirror included, and every value it does not send.
-So Confirm re-stages exactly what the modal displays, which is the owner's 2026-09-22 ruling (§5.6.1 point 4 of juniper-ml's `JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md`).
+So Confirm re-stages exactly what the modal displays, which is the Overtoad's 2026-09-22 ruling (§5.6.1 point 4 of juniper-ml's `JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md`).
 The modal does not render schema-driven generator params, so a custom list applied earlier from the sidebar is not carried. Re-staging `equities` sends the seed's symbols; it does not send a sidebar override.
 An empty dataset type is refused locally (`"No dataset selected — nothing to re-stage."`) and is not posted as `{}`.
 

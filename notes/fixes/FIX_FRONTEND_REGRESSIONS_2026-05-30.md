@@ -243,7 +243,7 @@ Interpretation: with `Remote worker coordinator set — dual-path dispatch enabl
 
 ## 11. Status tracker (living)
 
-| Workstream | PR branch | Status | Owner | Notes |
+| Workstream | PR branch | Status | The Overtoad | Notes |
 |---|---|---|---|---|
 | Tracking doc (this file) | `fix/frontend-regressions-2026-05-30` | **In progress** | — | This PR. |
 | Phase 0 reproduce & instrument | (same) | **Done (log pass)** | — | §8.1 — live evidence captured; #1/#4 still need interactive browser repro. |

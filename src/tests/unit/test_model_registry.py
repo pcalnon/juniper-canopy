@@ -285,7 +285,7 @@ def test_compatible_datasets_resolver_over_seeds():
     assert [dataset.value for dataset in compatible_datasets(_model("cascor"))] == ["spirals", "xor", "mnist", "circles", "moons", "gaussian", "checkerboard", "equities"]
     # recurrence (3-D, Δt-aware) matches all six rank-3 seeds, in registry order. multi_sine leads
     # because registry order is the order the dropdown OFFERS and the restart modal's fallback
-    # (its owner-ruled ``enabled[0]`` swap). The SIDEBAR gate no longer picks for the operator:
+    # (its Overtoad-ruled ``enabled[0]`` swap). The SIDEBAR gate no longer picks for the operator:
     # since OQ-6 (canopy#652) it clears a stranded dataset to ⊥.
     assert [dataset.value for dataset in compatible_datasets(_model("recurrence"))] == [
         "multi_sine",

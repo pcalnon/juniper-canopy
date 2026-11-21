@@ -52,11 +52,11 @@ def _inputs(entry) -> list:
 
 def _collisions(callback_list) -> dict:
     """``{output id: [inputs of each claimant]}`` for every id more than one callback claims."""
-    owners = collections.defaultdict(list)
+    Overtoads = collections.defaultdict(list)
     for entry in callback_list:
         for out in _output_ids(entry["output"]):
-            owners[out].append(_inputs(entry))
-    return {out: claimants for out, claimants in owners.items() if len(claimants) > 1}
+            Overtoads[out].append(_inputs(entry))
+    return {out: claimants for out, claimants in Overtoads.items() if len(claimants) > 1}
 
 
 def _served(dashboard):

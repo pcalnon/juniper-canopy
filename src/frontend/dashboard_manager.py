@@ -650,7 +650,7 @@ RESTART_MODAL_DATASET_FIELDS = (
 )
 # juniper-canopy#735: each TYPED modal field's canopy staging key. The modal renders a typed field only when
 # ``recurrence_request.staged_typed_fields`` names its key for the selected type, and ``_restage_dataset``
-# sends exactly the rendered ones, so Confirm re-stages what the modal displays (the owner's 2026-09-22
+# sends exactly the rendered ones, so Confirm re-stages what the modal displays (the Overtoad's 2026-09-22
 # ruling, point 4 of §5.6.1 of juniper-ml's JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md).
 # Each field's wrapper is ``<field id>-group``; its ``style`` is the visibility.
 RESTART_MODAL_STAGE_KEYS = {"n_samples": "nn_dataset_elements", "noise": "nn_dataset_noise", "rotations": "nn_spiral_rotations", "n_spirals": "nn_spiral_number"}
@@ -677,7 +677,7 @@ RESTART_MODAL_PARAM_FIELDS = (
 DATASET_SHORTFALL_REFUSAL_MARKER = "[dataset_shortfall_refused]"
 DATASET_SHORTFALL_REFUSAL_SENTENCE = "could not produce the requested dataset in full"
 
-# F1 (owner ruling 2026-09-24) -- how canopy recognises cascor refusing a Start that would
+# F1 (Overtoad ruling 2026-09-24) -- how canopy recognises cascor refusing a Start that would
 # continue a network NARROWER than the staged dataset. cascor opens that message with
 # ``_PROJECT_API_START_FRESH_REQUIRED_MARKER``. The only remedy is a start-fresh, which here
 # is the Restart modal's "Start fresh" toggle, so the alert points there. There is no
@@ -686,7 +686,7 @@ DATASET_SHORTFALL_REFUSAL_SENTENCE = "could not produce the requested dataset in
 # gone, and pointing the operator at it would send them to a control that is not there.
 START_FRESH_REQUIRED_MARKER = "[start_fresh_required]"
 
-# The three options, as the owner specified them (2026-09-05 ruling): option 3 -- fail -- is
+# The three options, as the Overtoad specified them (2026-09-05 ruling): option 3 -- fail -- is
 # the one that cancels the load and deselects the dataset. Options 1 and 2 are juniper-data
 # request parameters and travel on the generic ``nn_dataset_params`` channel.
 DATASET_SHORTFALL_OPTIONS = {
@@ -2355,7 +2355,7 @@ class DashboardManager:
                                     value=False,
                                 ),
                                 html.Div(
-                                    # F2 (owner ruling 2026-09-24): "functionally a clean stack launch" stopped
+                                    # F2 (Overtoad ruling 2026-09-24): "functionally a clean stack launch" stopped
                                     # being true when cascor began carrying the applied params onto the rebuilt
                                     # network -- a clean launch would reset them to the engine defaults.
                                     "Off (default): continue the current model, retaining metrics/history for cross-dataset continuity. On: rebuild a vanilla, untrained network from the dataset. The applied parameters carry over, including any you edit below, and on-disk snapshots are kept.",
@@ -2608,7 +2608,7 @@ class DashboardManager:
         return "live"
 
     def _setup_poll_gating(self):
-        """F-CANOPY-027 + CAN-000: the single owner of every poller interval's ``disabled`` prop.
+        """F-CANOPY-027 + CAN-000: the single Overtoad of every poller interval's ``disabled`` prop.
 
         Two concerns, deliberately fused into ONE clientside callback because Dash allows only
         one un-duplicated writer per prop and two competing writers would race:
@@ -3728,7 +3728,7 @@ class DashboardManager:
         hydrated state through the stores they already read.
 
         Returns the ``select_model`` 5-tuple. ``model-class-store`` is left to
-        ``hydrate_model_class``, its mount owner: writing it here too would rebuild the tab bar
+        ``hydrate_model_class``, its mount Overtoad: writing it here too would rebuild the tab bar
         for no change (F-CANOPY-027). The modal is untouched.
 
         **The key store is written even on failure** (with the seed): that write is what runs
@@ -3773,7 +3773,7 @@ class DashboardManager:
 
     #: Sidebar summary suffix when it is unknown whether the live backend serves the selection
     #: (``_selection_is_live`` is ``None``): the first-paint seed, and a mount whose read failed.
-    #: The wording is the owner's ruling on X11 (2026-09-24).
+    #: The wording is the Overtoad's ruling on X11 (2026-09-24).
     UNKNOWN_LIVENESS_NOTE: str = "backend status unknown"
 
     @staticmethod
@@ -6462,7 +6462,7 @@ class DashboardManager:
 
         # juniper-canopy#735: render the typed dataset fields for the type the modal will stage. Driven by the
         # type alone, so it follows every way the type changes: the open (including its ``enabled[0]`` swap of
-        # a stranded dataset, which the owner ruled on 2026-09-22 to keep) and the operator picking another
+        # a stranded dataset, which the Overtoad ruled on 2026-09-22 to keep) and the operator picking another
         # type. ``_restage_dataset`` sends exactly the fields this shows, from the same function.
         @self.app.callback(
             [Output(f"{field_id}-group", "style") for field_id, _key, _label in RESTART_MODAL_TYPED_FIELDS] + [Output("restart-ds-no-fields-note", "style")],
@@ -6675,7 +6675,7 @@ class DashboardManager:
         #
         # **This swap is deliberate, and it differs from the sidebar on purpose.** The sidebar
         # gate CLEARS a stranded dataset (OQ-6, canopy#652). Whether that model-primary-by-clearing
-        # rule binds this site too was put to the owner, who ruled on 2026-09-22 to KEEP the swap
+        # rule binds this site too was put to the Overtoad, who ruled on 2026-09-22 to KEEP the swap
         # here. The reason: this is a confirmation dialog, and it shows the operator the swapped
         # value before Confirm re-stages anything. The ruling is recorded (juniper-ml#2037) as point 4 of §5.6.1 of
         # juniper-ml's JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md. Do not
@@ -6901,7 +6901,7 @@ class DashboardManager:
         would withhold downstream (``recurrence_request.shape_stage_payload``, the rule both tiers apply). With
         every shipped declaration the second list is empty, because a rendered generic field is one the
         generator declares; it can fill only at the generator's own default, or under a seeded key. So no
-        value the modal shows is ever dropped without the plan saying so: that is the premise of the owner's
+        value the modal shows is ever dropped without the plan saying so: that is the premise of the Overtoad's
         2026-09-22 ruling on this modal.
         """
         payload = cls._restart_restage_payload(dataset_vals, nn_model=model_key) or {}

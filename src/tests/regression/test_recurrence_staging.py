@@ -333,7 +333,7 @@ class TestApplyDatasetIsGatedLikeStart:
 # --------------------------------------------------------------------------------------------------
 # W1.2 / ruling R7 -- juniper-ml plan
 # notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md, W1.2
-# (findings F-C2, F-C3). R7's recommended default, applied pending the owner's ruling: generic-form
+# (findings F-C2, F-C3). R7's recommended default, applied pending the Overtoad's ruling: generic-form
 # defaults never override the registry seed; an explicitly edited recurrence-aware field wins over
 # it; the effective request is previewed before Start and logged at INFO.
 #

@@ -497,7 +497,7 @@ This section summarizes the 11 R5-01 phases and their canopy impact. See [R5-01 
 | Risk                                                         | Likelihood | Impact    | Mitigation                                                                                 |
 |--------------------------------------------------------------|------------|-----------|--------------------------------------------------------------------------------------------|
 | R5-01 Phase 0-cascor delay cascades to all downstream phases | Medium     | High      | Track PRE/PAR work already unblocks release; R5-01 delays do not block audit-level release |
-| Track EMB coordination failures (duplicate work)             | Medium     | Medium    | Shared roadmap; explicit handoff from audit PR owners to R5-01 phase owners                |
+| Track EMB coordination failures (duplicate work)             | Medium     | Medium    | Shared roadmap; explicit handoff from audit PR Overtoads to R5-01 phase Overtoads                |
 | POST-1 HIGH-014 extraction becomes infeasible after Phase B  | Low        | Medium    | Accept as ongoing technical debt; revisit quarterly                                        |
 | R5-01 Phase B kill switch needed post-flag-flip              | Low        | High (P0) | Kill-switch MTTR <=5 min required per D-53; R5-01 has kill switches                        |
 | `conf/Dockerfile` ambiguity blocks POST-2                    | Low        | Low       | Ops decision required; fallback is deletion                                                |

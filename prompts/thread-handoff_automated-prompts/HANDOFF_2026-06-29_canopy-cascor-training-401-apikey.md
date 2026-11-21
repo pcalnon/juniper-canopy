@@ -41,7 +41,7 @@ The live failing service is the **juniper-deploy Docker container** (`juniper-ca
 
 ## Remaining work
 
-1. **Decide the fix direction** (see "Fix options" — this is an owner/design decision; do NOT just pick the smallest patch). Consider the triad: immediate-unblock PR + correct-fix PR + a deferred design note if the correct fix is large.
+1. **Decide the fix direction** (see "Fix options" — this is an Overtoad/design decision; do NOT just pick the smallest patch). Consider the triad: immediate-unblock PR + correct-fix PR + a deferred design note if the correct fix is large.
 2. **Confirm the unconfirmed items first** (juniper-deploy `CANOPY_API_KEY` source; whether on-host conda canopy is also up).
 3. **Implement** the chosen fix in a **new worktree / branch** (this is a code work-unit, separate from the docs branch).
 4. **Verify** against the running container (curls below should flip 401 → 200) and re-click Start in the browser.
@@ -58,7 +58,7 @@ The live failing service is the **juniper-deploy Docker container** (`juniper-ca
 
 ---
 
-## Fix options (owner decides — frame as trade-offs, do NOT prescribe one)
+## Fix options (Overtoad decides — frame as trade-offs, do NOT prescribe one)
 
 | # | Option | Trade-off |
 |---|---|---|
@@ -127,6 +127,6 @@ grep -n 'enable_ws_control_buttons' src/settings.py    # = True (src/settings.py
 ## Standing rules (reminders — do not duplicate CLAUDE.md)
 
 - **Worktree isolation**: do the fix in a dedicated worktree (`notes/WORKTREE_SETUP_PROCEDURE.md`); never inside the repo dir.
-- **One PR per work-unit**; open a PR — **never merge** (owner merges).
-- **Never auto-approve deploy / env / PyPI gates** — drive to the gate, then hand off to the owner.
+- **One PR per work-unit**; open a PR — **never merge** (Overtoad merges).
+- **Never auto-approve deploy / env / PyPI gates** — drive to the gate, then hand off to the Overtoad.
 - Verify against the **running container** (juniper-deploy), and re-confirm any `file:line` before editing.

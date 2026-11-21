@@ -208,7 +208,7 @@ class TestF053CandidateStatePollWiring:
     store riding as its own writer's State in the order the function binds it, and the
     ABSENCE of a ``running=`` guard. The callback's no-op and hold-last-good behaviour is
     pinned in ``test_candidate_metrics_panel_gate_coverage.py``, and the gate's sole
-    ownership of the lane in ``test_poll_gating.py``. Whether the renderer now applies
+    Overtoadship of the lane in ``test_poll_gating.py``. Whether the renderer now applies
     the writes is a live property that no unit test can show.
     """
 
