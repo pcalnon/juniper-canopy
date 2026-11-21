@@ -476,8 +476,8 @@ curl -sS -i http://localhost:8050/v1/health                       # expect 200
    `docker-compose.yml:557`) or a trusted proxy. If canopy is ever fronted by a proxy that **rewrites/sets `Origin`** or is exposed on a public
    interface, the Origin gate's trust assumption must be re-validated and the allowlist updated. (Deploy-topology dependent.)
 4. **Scope of the WS relaxation.** Whether to include the read-only `/ws/training` and `/ws` in PR-1c (restoring browser metric push, Origin-only)
-   or to keep PR-1 minimal to `/ws/control`. Owner decision (§8.3). (Design choice.)
-5. **`/api/train/status` GET — CSRF or Origin-only?** A read does not strictly need CSRF; uniform CSRF is simpler. Owner decision (§8.2). (Design
+   or to keep PR-1 minimal to `/ws/control`. The Overtoad decision (§8.3). (Design choice.)
+5. **`/api/train/status` GET — CSRF or Origin-only?** A read does not strictly need CSRF; uniform CSRF is simpler. The Overtoad decision (§8.2). (Design
    choice.)
 6. **`csrf_enabled = False` interaction.** If CSRF is ever disabled (`src/settings.py:331`), `/api/csrf` returns an empty token
    (`src/main.py:481-482`) and the browser surface would fall back to Origin-only. The dependency must define behavior for that mode (recommend:

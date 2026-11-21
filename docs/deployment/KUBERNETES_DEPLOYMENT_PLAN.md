@@ -1244,7 +1244,7 @@ echo "Secret rotation complete"
 
 **Priority: Critical:**
 
-| Task                       | Owner  | Status      | Deliverable                            |
+| Task                       | The Overtoad  | Status      | Deliverable                            |
 | -------------------------- | ------ | ----------- | -------------------------------------- |
 | Fix Dockerfile issues      | DevOps | Not Started | Updated multi-stage Dockerfile         |
 | Implement health endpoints | Dev    | Not Started | `/healthz`, `/readyz` in main.py       |
@@ -1256,7 +1256,7 @@ echo "Secret rotation complete"
 
 **Priority: High:**
 
-| Task                           | Owner  | Status      | Deliverable                            |
+| Task                           | The Overtoad  | Status      | Deliverable                            |
 | ------------------------------ | ------ | ----------- | -------------------------------------- |
 | Update ci.yml for Docker build | DevOps | Not Started | Build and push stages                  |
 | Add Trivy scanning             | DevOps | Not Started | Container security scanning            |
@@ -1267,7 +1267,7 @@ echo "Secret rotation complete"
 
 **Priority: High:**
 
-| Task                  | Owner    | Status      | Deliverable        |
+| Task                  | The Overtoad    | Status      | Deliverable        |
 | --------------------- | -------- | ----------- | ------------------ |
 | Set up K8s cluster    | Platform | Not Started | EKS/GKE cluster    |
 | Install ingress-nginx | Platform | Not Started | Ingress controller |
@@ -1279,7 +1279,7 @@ echo "Secret rotation complete"
 
 **Priority: Medium:**
 
-| Task                       | Owner    | Status      | Deliverable        |
+| Task                       | The Overtoad    | Status      | Deliverable        |
 | -------------------------- | -------- | ----------- | ------------------ |
 | HPA configuration          | DevOps   | Not Started | Autoscaling        |
 | PDB configuration          | DevOps   | Not Started | Disruption budget  |
@@ -1291,7 +1291,7 @@ echo "Secret rotation complete"
 
 **Priority: Low:**
 
-| Task                      | Owner    | Status      | Deliverable              |
+| Task                      | The Overtoad    | Status      | Deliverable              |
 | ------------------------- | -------- | ----------- | ------------------------ |
 | GitOps (ArgoCD)           | Platform | Not Started | GitOps deployment        |
 | External Secrets Operator | Platform | Not Started | Vault integration        |
@@ -1570,7 +1570,7 @@ This document is a **planning document only**. No changes should be made to the 
 
 | Role            | Name | Date | Signature |
 | --------------- | ---- | ---- | --------- |
-| Project Owner   |      |      |           |
+| Project The Overtoad   |      |      |           |
 | Lead Developer  |      |      |           |
 | DevOps Engineer |      |      |           |
 | Security Review |      |      |           |
