@@ -2,7 +2,7 @@
 #    uv pip compile pyproject.toml --extra juniper-data --extra juniper-cascor --extra observability -o requirements.lock
 a2wsgi==1.10.10
     # via juniper-canopy (pyproject.toml)
-annotated-doc==0.0.6
+annotated-doc==0.0.7
     # via fastapi
 annotated-types==0.8.0
     # via pydantic
@@ -14,13 +14,13 @@ anyio==4.16.0
     #   watchfiles
 blinker==1.9.0
     # via flask
-certifi==2026.10.23
+certifi==2026.11.20
     # via
     #   httpcore
     #   httpx
     #   requests
     #   sentry-sdk
-charset-normalizer==3.5.2
+charset-normalizer==3.5.3
     # via requests
 click==8.5.1
     # via
@@ -30,13 +30,13 @@ colorama==0.4.6
     # via juniper-canopy (pyproject.toml)
 comm==0.2.3
     # via dash
-dash==4.5.0
+dash==4.5.1
     # via
     #   juniper-canopy (pyproject.toml)
     #   dash-bootstrap-components
 dash-bootstrap-components==2.0.4
     # via juniper-canopy (pyproject.toml)
-fastapi==0.163.1
+fastapi==0.165.0
     # via
     #   juniper-canopy (pyproject.toml)
     #   juniper-service-core
@@ -88,7 +88,7 @@ markupsafe==3.0.4
     #   flask
     #   jinja2
     #   werkzeug
-narwhals==2.28.0
+narwhals==2.29.0
     # via plotly
 nest-asyncio==1.6.0
     # via
@@ -115,7 +115,7 @@ prometheus-client==0.26.0
     # via juniper-canopy (pyproject.toml)
 psutil==7.2.2
     # via juniper-canopy (pyproject.toml)
-pydantic==2.14.3
+pydantic==2.14.4
     # via
     #   juniper-canopy (pyproject.toml)
     #   dash
@@ -124,7 +124,7 @@ pydantic==2.14.3
     #   juniper-observability
     #   juniper-service-core
     #   pydantic-settings
-pydantic-core==2.50.4
+pydantic-core==2.50.5
     # via pydantic
 pydantic-settings==2.16.3
     # via
@@ -136,7 +136,7 @@ python-dotenv==1.2.4
     #   uvicorn
 python-multipart==0.0.34
     # via juniper-canopy (pyproject.toml)
-pyyaml==6.0.3
+pyyaml==6.0.4
     # via
     #   juniper-canopy (pyproject.toml)
     #   uvicorn
@@ -150,7 +150,7 @@ retrying==1.4.2
     # via dash
 scipy==1.18.1
     # via juniper-canopy (pyproject.toml)
-sentry-sdk==2.75.0
+sentry-sdk==3.0.0
     # via juniper-canopy (pyproject.toml)
 setuptools==84.2.1
     # via dash
