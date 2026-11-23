@@ -6,7 +6,7 @@
 **Author**: Paul Calnon (implementation by Claude Code, Opus 4.8)
 **License**: MIT License
 **Date**: 2026-07-04
-**Status**: Implemented — Phases 1–2 of the design of record. **Updated 2026-07-06:** the SEC-F22 bind-guard now uses the owner-ratified **two-flag** bind-posture attestation (`JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED` / `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED`), replacing the original single `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED` flag (design OQ-1). Owner-gated for any deploy roll-out; do not auto-merge.
+**Status**: Implemented — Phases 1–2 of the design of record. **Updated 2026-07-06:** the SEC-F22 bind-guard now uses the Overtoad-ratified **two-flag** bind-posture attestation (`JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED` / `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED`), replacing the original single `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED` flag (design OQ-1). Owner-gated for any deploy roll-out; do not auto-merge.
 **Scope**: Records the two now-enforced control-surface invariants shipped in this PR and, explicitly, what remains deferred.
 
 > Design of record (read first): juniper-ml
@@ -19,7 +19,7 @@
 
 ## 1. What changed
 
-This PR is a defensive hardening of the platform owner's own containerized stack. It implements the two app-local,
+This PR is a defensive hardening of the platform Overtoad's own containerized stack. It implements the two app-local,
 proxy-free remediation steps from the design of record and changes no deploy / env / secret file.
 
 ### 1.1 SEC-F22 (D2) — the loopback bind is now an enforced invariant
@@ -47,7 +47,7 @@ A loopback host always starts. A non-loopback bind is permitted when **either** 
 **which** one permitted it, at WARNING); with **neither** set the refusal is fail-loud (a CRITICAL log naming both
 flags) and fail-closed (raises `NonLoopbackBindError`, so uvicorn exits). The hard fail is **uniform** — there is no
 warning-only mode that lets an unattested non-loopback bind proceed. Each flag is an operator **attestation**, not a
-verification. (This two-flag scheme is the owner-ratified refinement of the original single
+verification. (This two-flag scheme is the Overtoad-ratified refinement of the original single
 `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED` flag — design OQ-1.)
 
 Implemented **inline in canopy** (no new dependency):
@@ -57,20 +57,20 @@ Implemented **inline in canopy** (no new dependency):
   fail-loud idiom), before backend init.
 - `src/settings.py` — the `loopback_publish_attested` and `auth_proxy_attested` fields.
 
-> **Deploy roll-out caveat (owner-gated).** The containerized deploy sets
+> **Deploy roll-out caveat (Overtoad-gated).** The containerized deploy sets
 > `JUNIPER_CANOPY_SERVER__HOST=0.0.0.0` *inside* the container
 > (`juniper-deploy/docker-compose.yml:570`) — the standard Docker pattern where
 > the real perimeter is the host-side **loopback publish**
 > (`127.0.0.1:8050:8050`, `:557`), not the in-container bind. Because the guard
 > keys on `settings.server.host`, rolling this code out to that deploy will make
-> canopy **refuse to start** until the owner sets
+> canopy **refuse to start** until the Overtoad sets
 > `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true` — the attestation that matches
 > exactly the deploy's posture (reachable only via the host-side loopback
 > publish), and the one a deploy-layer preflight can verify.
 > `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true` is the alternative, reserved for when
 > the Phase-4 fronting authenticating proxy lands. That is the intended effect:
 > the guard converts the silent `0.0.0.0` bind into a documented, deliberate
-> choice. This is a deploy/env change and is therefore owner-gated (not part of
+> choice. This is a deploy/env change and is therefore Overtoad-gated (not part of
 > this merge).
 
 ### 1.2 SEC-F19 (D4) — global + per-session WS caps; the per-IP cap is re-scoped honestly
@@ -103,7 +103,7 @@ existing close-reason string — `/ws/control` stays opaque (`Policy violation`,
 - **Per-session cap** — per-client fairness / DoS-dampening (best-effort), not authentication (a determined attacker
   rotates cookies).
 
-## 3. Explicitly deferred (Phase 4 — owner-gated, NOT in this PR)
+## 3. Explicitly deferred (Phase 4 — Overtoad-gated, NOT in this PR)
 
 The structural pieces of both findings converge on one component and are **not** built here:
 
@@ -131,4 +131,4 @@ cd src && pytest -m "not requires_cascor and not requires_server and not slow" t
 ```
 
 - Per the design §9, the deploy roll-out still owes a **live** curl / WS probe matrix on an isolated stack
-  (unit-green alone is not sufficient for this class). That is an owner-gated deploy step, not part of this merge.
+  (unit-green alone is not sufficient for this class). That is an Overtoad-gated deploy step, not part of this merge.

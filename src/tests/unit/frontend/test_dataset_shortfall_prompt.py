@@ -8,7 +8,7 @@ Author:        Paul Calnon
 License:       MIT License
 
 When a Start is refused because juniper-data could not produce the staged dataset in
-full, the dashboard must put the owner's three options to the operator and act on the
+full, the dashboard must put the Overtoad's three options to the operator and act on the
 answer. These tests drive the handlers directly (no Dash dispatch): recognition of the
 refusal class, the prompt's open/ignore decision, the re-stage payload each option
 produces, the Start that follows, the cancel-and-deselect of option 3, and the two
@@ -201,7 +201,7 @@ class TestResolvePrompt:
         assert "Nothing to re-stage" in str(alert)
 
     def test_fail_cancels_the_staged_change_and_deselects_the_dataset(self, dm):
-        """Option 3 (owner's ruling): cancel the load, deselect the dataset (``⊥``), let the operator pick another."""
+        """Option 3 (Overtoad's ruling): cancel the load, deselect the dataset (``⊥``), let the operator pick another."""
         with patch("frontend.dashboard_manager.requests.delete", return_value=_response(200, {"status": "success"})) as delete:
             is_open, alert, action, dropdown, banner = dm._resolve_dataset_shortfall_handler(triggered_id=DATASET_SHORTFALL_FAIL_BUTTON, clicks=(None, None, 1), context=None)
         assert delete.call_args.args[0].endswith("/api/cancel_pending_dataset")

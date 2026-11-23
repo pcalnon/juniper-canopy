@@ -3,7 +3,7 @@
 ``DemoMode.regenerate_dataset_from_generator`` gates on its own rank probe, because the shared
 helper fails closed (a legacy ``X_full``-only artifact raises ``KeyError``; any sequence-rule
 violation raises) while the ecosystem contract obliges canopy to keep loading such artifacts.
-The owner ruled on 2026-09-22 that the helper should nonetheless run, warn-only. These tests
+The Overtoad ruled on 2026-09-22 that the helper should nonetheless run, warn-only. These tests
 pin both halves: a violation is REPORTED, and it never stops the install.
 """
 

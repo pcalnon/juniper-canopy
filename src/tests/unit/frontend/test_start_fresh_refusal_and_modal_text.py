@@ -13,7 +13,7 @@
 #                F2 -- the restart modal says the parameters carry
 #                over a start-fresh.
 #####################################################################
-"""The canopy half of two owner rulings of 2026-09-24 on the A-N2 findings.
+"""The canopy half of two Overtoad rulings of 2026-09-24 on the A-N2 findings.
 
 juniper-ml ``reports/2026-09-23_canopy-a-n2-generate-stage-train-render/README.md`` records both.
 
