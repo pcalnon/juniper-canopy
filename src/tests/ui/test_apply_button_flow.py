@@ -89,4 +89,4 @@ def test_apply_pushes_typed_learning_rate_into_backend(dashboard_page, canopy_ur
             return
         time.sleep(0.25)
 
-    pytest.fail(f"Apply did not push nn_learning_rate={typed} to backend within 10s; " f"last observed via /api/state: {last_value}")
+    pytest.fail(f"Apply did not push nn_learning_rate={typed} to backend within 10s; last observed via /api/state: {last_value}")

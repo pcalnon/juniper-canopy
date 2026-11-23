@@ -59,7 +59,7 @@ def _load_active_conftest():
                 return module
         except OSError:
             continue
-    raise RuntimeError(f"Could not locate the active conftest module in sys.modules; " f"expected one with __file__ resolving to {expected_resolved}")
+    raise RuntimeError(f"Could not locate the active conftest module in sys.modules; expected one with __file__ resolving to {expected_resolved}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -350,7 +350,7 @@ class MetricsPanel(BaseComponent):
         # Data buffers
         self.metrics_history: List[Dict[str, Any]] = []
 
-        self.logger.info(f"MetricsPanel initialized: " f"update_interval={self.update_interval}ms, " f"max_data_points={self.max_data_points}, " f"smoothing_window={self.smoothing_window}")
+        self.logger.info(f"MetricsPanel initialized: update_interval={self.update_interval}ms, max_data_points={self.max_data_points}, smoothing_window={self.smoothing_window}")
 
     def get_layout(self) -> html.Div:
         """

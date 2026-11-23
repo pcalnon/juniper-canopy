@@ -269,7 +269,7 @@ class WebSocketManager:
         self._per_session_counts: Dict[str, int] = {}
         self._session_lock = threading.Lock()
 
-        self.logger.info(f"WebSocketManager initialized: " f"max_connections={self.max_connections}, " f"heartbeat_interval={self.heartbeat_interval}s, " f"reconnect_attempts={self.reconnect_attempts}, " f"reconnect_delay={self.reconnect_delay}s")
+        self.logger.info(f"WebSocketManager initialized: max_connections={self.max_connections}, heartbeat_interval={self.heartbeat_interval}s, reconnect_attempts={self.reconnect_attempts}, reconnect_delay={self.reconnect_delay}s")
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
         """
@@ -396,7 +396,7 @@ class WebSocketManager:
                 self._channel_counts[channel] = self._channel_counts.get(channel, 0) + 1
                 channel_count_after = self._channel_counts[channel]
 
-        self.logger.info(f"Client connected: {client_label} " f"(Total: {total_after})")
+        self.logger.info(f"Client connected: {client_label} (Total: {total_after})")
 
         # OBS-WIRE A.4: publish gauge OUTSIDE the lock — observability is a
         # best-effort side effect; we never want a Prometheus client error
@@ -603,7 +603,7 @@ class WebSocketManager:
         # SEC-F19 / D4: release the per-session slot symmetrically (also outside
         # _connections_lock; a no-op for a cookieless connection).
         self._decrement_session_count(websocket)
-        self.logger.info(f"Client disconnected: {client_id} " f"(Remaining: {remaining})")
+        self.logger.info(f"Client disconnected: {client_id} (Remaining: {remaining})")
 
         # OBS-WIRE A.4: publish gauge outside the lock (same rationale as
         # connect()). When the channel drains to zero we still publish 0
@@ -761,7 +761,7 @@ class WebSocketManager:
         for connection in disconnected:
             self.disconnect(connection)
 
-        self.logger.debug(f"Broadcast message #{current_count} to {len(connections)} clients " f"(type: {message.get('type', 'unknown')})")
+        self.logger.debug(f"Broadcast message #{current_count} to {len(connections)} clients (type: {message.get('type', 'unknown')})")
 
     def broadcast_sync(self, message: dict):
         """

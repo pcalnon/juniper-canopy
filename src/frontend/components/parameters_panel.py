@@ -193,7 +193,7 @@ class ParametersPanel(BaseComponent):
                             style={"color": "var(--header-color)", "marginBottom": "5px"},
                         ),
                         html.P(
-                            "Read-only overview of current applied parameter values. " "Use the sidebar controls to edit parameters.",
+                            "Read-only overview of current applied parameter values. Use the sidebar controls to edit parameters.",
                             style={"fontSize": "13px", "color": "var(--text-muted)", "marginBottom": "20px"},
                         ),
                     ],

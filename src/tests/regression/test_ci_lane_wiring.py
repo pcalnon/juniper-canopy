@@ -200,9 +200,7 @@ class TestTheStubCoversEverySubmoduleSrcImports:
         imported = _imported_submodules()
         stubbed = _stubbed_submodules()
         missing = {sub: paths for sub, paths in imported.items() if sub not in stubbed and sub not in NOT_STUBBED_BY_DESIGN}
-        assert not missing, (
-            "src/tests/conftest.py's juniper_cascor_client stub does not register " + ", ".join(sorted(missing)) + " -- so a lane installed WITHOUT the [juniper-cascor] extra dies at COLLECTION, not " "at an assertion. Imported by: " + "; ".join(f"{sub} <- {', '.join(sorted(str(p.relative_to(REPO)) for p in paths))}" for sub, paths in sorted(missing.items())) + ". Either register it in the stub branch of conftest, or add it to " "NOT_STUBBED_BY_DESIGN with the reason it must not be fabricated."
-        )
+        assert not missing, "src/tests/conftest.py's juniper_cascor_client stub does not register " + ", ".join(sorted(missing)) + " -- so a lane installed WITHOUT the [juniper-cascor] extra dies at COLLECTION, not at an assertion. Imported by: " + "; ".join(f"{sub} <- {', '.join(sorted(str(p.relative_to(REPO)) for p in paths))}" for sub, paths in sorted(missing.items())) + ". Either register it in the stub branch of conftest, or add it to NOT_STUBBED_BY_DESIGN with the reason it must not be fabricated."
 
     def test_testing_submodule_stays_unstubbed(self):
         """``.testing`` is exempt by design -- keep that a decision, not an accident."""

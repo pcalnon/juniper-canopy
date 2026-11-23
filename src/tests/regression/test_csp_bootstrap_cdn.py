@@ -84,7 +84,7 @@ class TestCSPBootstrapCDN:
                 assert "data:" in directive, f"img-src directive does not allow data: URIs: {directive!r}"
                 break
         else:
-            pytest.fail(f"No img-src directive found in CSP: {_DEFAULT_CSP!r}. " "Without img-src 'self' data:, Bootstrap form control SVG icons will not render.")
+            pytest.fail(f"No img-src directive found in CSP: {_DEFAULT_CSP!r}. Without img-src 'self' data:, Bootstrap form control SVG icons will not render.")
 
     def test_csp_does_not_allow_cdn_in_script_src(self):
         """CSP script-src must NOT include CDN domains.

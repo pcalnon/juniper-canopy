@@ -1977,7 +1977,7 @@ async def list_dataset_generators():
                     # whole diagnosis (401 = key missing/wrong, 403 = key rejected),
                     # and nothing caller-supplied is echoed.
                     system_logger.warning(
-                        "juniper-data refused GET /v1/generators with HTTP %s (api key %s); " "falling back to the built-in generator list, which carries no parameter schema",
+                        "juniper-data refused GET /v1/generators with HTTP %s (api key %s); falling back to the built-in generator list, which carries no parameter schema",
                         resp.status_code,
                         "configured" if settings.juniper_data_api_key else "NOT configured",
                     )

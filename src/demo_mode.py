@@ -802,7 +802,7 @@ class DemoMode:
         juniper_data_api_key = settings.juniper_data_api_key
 
         if not juniper_data_url:
-            raise JuniperDataConfigurationError("JUNIPER_DATA_URL environment variable is required. " "All datasets must be fetched from the JuniperData service. " "Set JUNIPER_DATA_URL=http://localhost:8100 to connect to a local instance.")
+            raise JuniperDataConfigurationError("JUNIPER_DATA_URL environment variable is required. All datasets must be fetched from the JuniperData service. Set JUNIPER_DATA_URL=http://localhost:8100 to connect to a local instance.")
 
         if n_rotations is None:
             n_rotations = getattr(self, "spiral_rotations", TrainingConstants.DEFAULT_SPIRAL_ROTATIONS)
@@ -1206,7 +1206,7 @@ class DemoMode:
         # degrades silently" claim found it degrades silently *in the UI*, which is the channel a
         # researcher actually reads. This flag is what reaches the badge.
         warnings.warn(
-            "DemoMode._generate_spiral_dataset_local() is deprecated and will be removed in a future release. " "Dataset generation is now handled by the JuniperData service.",
+            "DemoMode._generate_spiral_dataset_local() is deprecated and will be removed in a future release. Dataset generation is now handled by the JuniperData service.",
             DeprecationWarning,
             stacklevel=2,
         )
