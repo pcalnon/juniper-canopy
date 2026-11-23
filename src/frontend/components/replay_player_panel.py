@@ -106,7 +106,7 @@ class ReplayPlayerPanel(BaseComponent):
             [
                 html.H4("Replay Player", style={"marginBottom": "15px"}),
                 html.P(
-                    "Read-only playback of a snapshot's training history. " "Start a replay session from the Snapshots tab to populate this panel.",
+                    "Read-only playback of a snapshot's training history. Start a replay session from the Snapshots tab to populate this panel.",
                     style={"fontSize": "0.85rem", "color": "var(--text-muted)"},
                 ),
                 # Two view modes; visibility flipped by the session-store callback.
@@ -853,7 +853,7 @@ class ReplayPlayerPanel(BaseComponent):
             input_delta = arch.get("input_delta", 0)
             output_delta = arch.get("output_delta", 0)
             hidden = arch.get("hidden_preserved", 0)
-            hovers.append(f"<b>{before} → {after}</b><br>" f"{label} · timestamp: {ts}<br>" f"input Δ {input_delta:+d}, output Δ {output_delta:+d}, hidden {hidden} preserved")
+            hovers.append(f"<b>{before} → {after}</b><br>{label} · timestamp: {ts}<br>input Δ {input_delta:+d}, output Δ {output_delta:+d}, hidden {hidden} preserved")
         return {
             "type": "scatter",
             "mode": "markers",

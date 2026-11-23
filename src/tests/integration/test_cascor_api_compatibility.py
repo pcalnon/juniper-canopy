@@ -438,7 +438,7 @@ class TestCascorIntegrationImportCompatibility:
         except ImportError as e:
             # Document the known collision issue
             if "constants" in str(e):
-                pytest.skip(f"Module collision detected: Canopy's constants.py shadows Cascor's " f"constants/ package. This is handled by CascorIntegration at runtime. " f"Error: {e}")
+                pytest.skip(f"Module collision detected: Canopy's constants.py shadows Cascor's constants/ package. This is handled by CascorIntegration at runtime. Error: {e}")
             pytest.fail(f"Failed to import Cascor classes: {e}")
         finally:
             # Restore original state

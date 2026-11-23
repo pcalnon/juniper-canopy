@@ -170,7 +170,7 @@ def test_no_request_call_passes_v1_prefix() -> None:
             all_offenders[str(rel)] = offenders
 
     if all_offenders:
-        lines = ["The following _request(...) calls pass a /v1/-prefixed path. " "Strip the /v1 — the cascor-client's api_url already includes it."]
+        lines = ["The following _request(...) calls pass a /v1/-prefixed path. Strip the /v1 — the cascor-client's api_url already includes it."]
         for rel_path, offenders in sorted(all_offenders.items()):
             for line_no, arg in offenders:
                 lines.append(f"  {rel_path}:{line_no} -> path={arg!r}")

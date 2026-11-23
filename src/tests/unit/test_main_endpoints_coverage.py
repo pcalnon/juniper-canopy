@@ -93,7 +93,7 @@ class TestSnapshotHistory:
         import main
 
         history_file = snapshot_dir / "snapshot_history.jsonl"
-        history_file.write_text(json.dumps({"action": "create", "snapshot_id": "good"}) + "\n" "NOT VALID JSON\n" + json.dumps({"action": "restore", "snapshot_id": "also_good"}) + "\n")
+        history_file.write_text(json.dumps({"action": "create", "snapshot_id": "good"}) + "\nNOT VALID JSON\n" + json.dumps({"action": "restore", "snapshot_id": "also_good"}) + "\n")
 
         with patch.object(main, "_snapshots_dir", str(snapshot_dir)):
             response = app_client.get("/api/v1/snapshots/history")

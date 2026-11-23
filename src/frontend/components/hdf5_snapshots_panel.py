@@ -185,7 +185,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 ),
                 # Description
                 html.P(
-                    "View and manage HDF5 training state snapshots. Snapshots contain saved network states " "that can be loaded for analysis or resumed training.",
+                    "View and manage HDF5 training state snapshots. Snapshots contain saved network states that can be loaded for analysis or resumed training.",
                     style={"fontSize": "14px", "color": "var(--text-muted)", "marginBottom": "20px"},
                 ),
                 html.Hr(),

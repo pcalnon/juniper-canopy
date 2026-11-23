@@ -202,7 +202,7 @@ class ConfigManager:
                         current[key] = {}
                     elif not isinstance(current[key], dict):
                         # Handle collision: non-dict exists where dict is needed
-                        self.logger.warning(f"Environment override collision at {'.'.join(key_path[:-1])}: " f"replacing {type(current[key]).__name__} with dict")
+                        self.logger.warning(f"Environment override collision at {'.'.join(key_path[:-1])}: replacing {type(current[key]).__name__} with dict")
                         current[key] = {}
                     current = current[key]
 
@@ -252,7 +252,7 @@ class ConfigManager:
                 self.logger.warning(f"Missing required config key {key_path!r}, using default: {default_value}")
                 self.set(key_path, default_value)
             elif not isinstance(value, expected_type):
-                self.logger.warning(f"Invalid type for config key {key_path!r}: " f"expected {expected_type.__name__}, got {type(value).__name__}, " f"using default: {default_value}")
+                self.logger.warning(f"Invalid type for config key {key_path!r}: expected {expected_type.__name__}, got {type(value).__name__}, using default: {default_value}")
                 self.set(key_path, default_value)
 
         self.logger.debug("Configuration validation complete")
@@ -341,7 +341,7 @@ class ConfigManager:
 
             # Validate value ranges
             if not (param_config["min"] <= param_config["default"] <= param_config["max"]):
-                raise ValueError(f"Invalid range for {param_name}: " f"min={param_config['min']}, default={param_config['default']}, max={param_config['max']}")
+                raise ValueError(f"Invalid range for {param_name}: min={param_config['min']}, default={param_config['default']}, max={param_config['max']}")
 
             return cast(TrainingParamConfig, param_config)
 
@@ -365,7 +365,7 @@ class ConfigManager:
         param_config = self.get_training_param_config(param_name)
 
         if not (param_config["min"] <= value <= param_config["max"]):
-            raise ValueError(f"{param_name} value {value} is out of range " f"[{param_config['min']}, {param_config['max']}]")
+            raise ValueError(f"{param_name} value {value} is out of range [{param_config['min']}, {param_config['max']}]")
 
         return True
 
@@ -445,7 +445,7 @@ class ConfigManager:
                     const_value = getattr(constants_class, const_attr)
                     config_value = config.get(key)
                     if config_value != const_value:
-                        self.logger.warning(f"Config {param_name}.{key} ({config_value}) != " f"{constants_class.__name__}.{const_attr} ({const_value})")
+                        self.logger.warning(f"Config {param_name}.{key} ({config_value}) != {constants_class.__name__}.{const_attr} ({const_value})")
                         consistent = False
                 except AttributeError:
                     self.logger.warning(f"Constant {const_attr} not found in {constants_class.__name__}")
@@ -483,7 +483,7 @@ class ConfigManager:
                     break
 
         except ValueError as e:
-            self.logger.error(f"Unable to perform Constants check for {category} Class {constants_class}: " f"Config key {key} ({config.get(key)}), {const_name} ({const_value}) Raised: {e}")
+            self.logger.error(f"Unable to perform Constants check for {category} Class {constants_class}: Config key {key} ({config.get(key)}), {const_name} ({const_value}) Raised: {e}")
             raise ValueError("Unable to perform Constants check") from e
         return consistent
 

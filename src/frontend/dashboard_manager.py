@@ -2209,7 +2209,7 @@ class DashboardManager:
                         dbc.ModalBody(
                             [
                                 html.P(
-                                    "Juniper Canopy is a real-time monitoring dashboard for Cascade Correlation " "Neural Network training. Here's how to get started:",
+                                    "Juniper Canopy is a real-time monitoring dashboard for Cascade Correlation Neural Network training. Here's how to get started:",
                                     className="lead",
                                 ),
                                 html.Ol(
@@ -2251,7 +2251,7 @@ class DashboardManager:
                         dbc.ModalBody(
                             [
                                 dbc.Alert(
-                                    "Warning: in-flight dataset migration will potentially " "alter Network Architecture and will permanently affect " "History, Snapshots, and Training Replay.",
+                                    "Warning: in-flight dataset migration will potentially alter Network Architecture and will permanently affect History, Snapshots, and Training Replay.",
                                     color="warning",
                                     className="mb-3",
                                 ),
