@@ -1340,7 +1340,7 @@ class CascorServiceAdapter:
         skipped = sorted(k for k in params if k not in self._CANOPY_TO_CASCOR_PARAM_MAP and k not in self._CANOPY_LOCAL_PARAMS)
         if skipped:
             logger.warning(
-                "apply_params dropped %d unmapped key(s) — add to _CANOPY_TO_CASCOR_PARAM_MAP " "or document as canopy-only: %s",
+                "apply_params dropped %d unmapped key(s) — add to _CANOPY_TO_CASCOR_PARAM_MAP or document as canopy-only: %s",
                 len(skipped),
                 skipped,
             )

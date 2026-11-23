@@ -594,7 +594,7 @@ class TrainingMonitor:
             "total_hidden_units": total_hidden,
         }
 
-        self.logger.info(f"Cascade unit {hidden_unit_index} added " f"(correlation={correlation:.4f})")
+        self.logger.info(f"Cascade unit {hidden_unit_index} added (correlation={correlation:.4f})")
         self._trigger_callbacks("cascade_add", event=cascade_event)
 
     def on_topology_change(self, topology: NetworkTopology):

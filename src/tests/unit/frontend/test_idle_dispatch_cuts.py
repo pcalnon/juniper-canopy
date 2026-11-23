@@ -265,7 +265,7 @@ class TestWeightDrainGateRule:
     def test_disabled_unless_the_session_holds_a_snapshot_id(self, tmp_path):
         driver = tmp_path / "gate.js"
         driver.write_text(
-            "const fn = (" + _gate_js() + ");\n" "const cases = JSON.parse(process.argv[2]);\n" "console.log(JSON.stringify(cases.map(function (c) { return fn(c); })));\n",
+            "const fn = (" + _gate_js() + ");\nconst cases = JSON.parse(process.argv[2]);\nconsole.log(JSON.stringify(cases.map(function (c) { return fn(c); })));\n",
             encoding="utf-8",
         )
         proc = subprocess.run([NODE, str(driver), json.dumps([c for c, _ in self.CASES])], capture_output=True, text=True, timeout=60, check=False)  # nosec B603 - fixed interpreter, test-authored script

@@ -45,7 +45,7 @@ def _set_dash_number(page, selector, value):
 @pytest.mark.ui
 @pytest.mark.xfail(
     strict=True,
-    reason="L3 POC #2: the corrected native-value-setter (native prototype setter " "+ bubbling input+change+blur+debounce) does not propagate into dbc.Input's " "React State — Apply pushes the default, not the set value. dbc.Input's own " "value-tracking swallows the synthetic event. Un-xfail path is dash_duo " "(Selenium send_keys); see the audit doc §5.3. XPASS here = Dash fixed it.",
+    reason="L3 POC #2: the corrected native-value-setter (native prototype setter + bubbling input+change+blur+debounce) does not propagate into dbc.Input's React State — Apply pushes the default, not the set value. dbc.Input's own value-tracking swallows the synthetic event. Un-xfail path is dash_duo (Selenium send_keys); see the audit doc §5.3. XPASS here = Dash fixed it.",
 )
 def test_native_setter_does_not_reach_backend(dashboard_page, canopy_url):
     typed = 0.0123

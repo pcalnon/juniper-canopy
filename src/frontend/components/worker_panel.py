@@ -245,7 +245,7 @@ class WorkerPanel(BaseComponent):
             children.append(
                 html.Div(
                     html.Small(
-                        "Local in-process workers are not individually reported by the CasCor API; " "only remote registered workers are listed above.",
+                        "Local in-process workers are not individually reported by the CasCor API; only remote registered workers are listed above.",
                         style={"color": "var(--text-muted)", "fontStyle": "italic"},
                     ),
                     className="mt-2",

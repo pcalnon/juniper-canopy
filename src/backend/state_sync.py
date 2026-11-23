@@ -151,7 +151,7 @@ class CascorStateSync:
         except Exception as e:
             logger.debug(f"Failed to fetch metrics history during sync: {e}")
 
-        logger.info(f"State sync complete: status={state.status}, epoch={state.current_epoch}, " f"metrics={len(state.metrics_history)} entries")
+        logger.info(f"State sync complete: status={state.status}, epoch={state.current_epoch}, metrics={len(state.metrics_history)} entries")
         return state
 
     @staticmethod
