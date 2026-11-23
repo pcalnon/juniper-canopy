@@ -490,7 +490,7 @@ def test_a_padded_key_never_reaches_a_log_record(padded_key_fresh_boot):
 
 @pytest.mark.timeout(300)
 def test_a_padded_key_warns_once_at_boot(padded_key_fresh_boot):
-    """#678 follow-up: auth is enabled on a padded key exactly as set (not stripped: that would need an owner ruling),
+    """#678 follow-up: auth is enabled on a padded key exactly as set (not stripped: that would need an Overtoad ruling),
     so boot WARNs, once, through the system logger, and logs/system.log gets the line."""
     report = padded_key_fresh_boot
     padded = [warning for warning in report["warnings"] if warning["message"] == PADDED_KEY_WARNING]

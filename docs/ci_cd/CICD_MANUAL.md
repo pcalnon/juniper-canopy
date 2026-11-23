@@ -1027,7 +1027,7 @@ The date check has no local console script. It is the workflow step.
 
 Do not bypass TestPyPI stage; production publish is intentionally downstream. The contract: [`CICD_REFERENCE.md` § `publish.yml`](CICD_REFERENCE.md#publishyml), and juniper-cascor's [One Artifact, Checked Against TestPyPI](https://github.com/pcalnon/juniper-cascor/blob/main/docs/ci_cd/MANUAL.md#one-artifact-checked-against-testpypi), whose template steps this workflow copies verbatim.
 
-A release that did not reach PyPI follows the owner's ladder (ruling of 2026-11-15), in this order. Every rung publishes the files TestPyPI took, or nothing ([juniper-cascor's manual](https://github.com/pcalnon/juniper-cascor/blob/main/docs/ci_cd/MANUAL.md#recovering-a-release-that-did-not-reach-pypi)):
+A release that did not reach PyPI follows the Overtoad's ladder (ruling of 2026-11-15), in this order. Every rung publishes the files TestPyPI took, or nothing ([juniper-cascor's manual](https://github.com/pcalnon/juniper-cascor/blob/main/docs/ci_cd/MANUAL.md#recovering-a-release-that-did-not-reach-pypi)):
 
 1. Republish TestPyPI's files: dispatch this workflow from the release's tag.
 
@@ -1190,7 +1190,7 @@ Lines Changed: +45 / -12
 
 ##### Upload refused, job still green
 
-The live step is `Upload Coverage to Codecov` on `ci.yml` job `unit-tests` (juniper-canopy#779, owner ruling 2026-10-29). It is SHA-pinned `codecov/codecov-action`. The version record is the `# v7.1.1` comment on that `uses:` line. The step does not copy a tag into `uses:`.
+The live step is `Upload Coverage to Codecov` on `ci.yml` job `unit-tests` (juniper-canopy#779, Overtoad ruling 2026-10-29). It is SHA-pinned `codecov/codecov-action`. The version record is the `# v7.1.1` comment on that `uses:` line. The step does not copy a tag into `uses:`.
 
 | Input | Value |
 | ----- | ----- |

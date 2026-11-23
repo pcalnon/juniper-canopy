@@ -692,7 +692,7 @@ def enforce_loopback_bind_guard(
 ) -> None:
     """Refuse to start on an unattested non-loopback bind (SEC-F22 / D2).
 
-    Two-flag bind-posture attestation (the owner-ratified refinement of the
+    Two-flag bind-posture attestation (the Overtoad-ratified refinement of the
     original single ``fronting_auth_attested`` flag; design OQ-1):
 
     - Loopback ``host`` -> always allowed (no-op); canopy starts normally.

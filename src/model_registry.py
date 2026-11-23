@@ -180,7 +180,7 @@ class GeneratorBound:
 #       - the order the dropdown OFFERS, so ``multi_sine`` is the first enabled option under
 #         Recurrence; and
 #       - the restart modal's fallback. ``_open_restart_confirm_modal_handler`` keeps its
-#         swap by owner ruling (2026-09-22), a deliberate exception to OQ-6: a stranded,
+#         swap by Overtoad ruling (2026-09-22), a deliberate exception to OQ-6: a stranded,
 #         non-``⊥`` sidebar dataset is replaced there by ``enabled[0]``, so this order picks
 #         the replacement.
 #     Measured 2026-09-09, the first enabled entry is ``multi_sine``: generate 0.0s, fit
@@ -199,7 +199,7 @@ class GeneratorBound:
 #
 # ``task_type="regression"`` matches what juniper-data declares for all five, so these seeds
 # introduce no vocabulary disagreement. ``equities_seq`` agrees from generator 6.0.0, where
-# juniper-data#437 relabelled it and closed the X8 divergence (owner ruling 2026-09-24). That is
+# juniper-data#437 relabelled it and closed the X8 divergence (Overtoad ruling 2026-09-24). That is
 # juniper-data ``main`` and its releases from 0.17.0. Releases through 0.16.0 still declare it
 # ``classification`` (at ``5.0.0`` in 0.15.0 and 0.16.0), and juniper-deploy serves 0.16.0 until
 # juniper-deploy#243 moves its pin. canopy never reads that label (see the gate note on the
