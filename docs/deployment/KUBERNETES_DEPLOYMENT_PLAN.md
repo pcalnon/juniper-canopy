@@ -1146,7 +1146,7 @@ echo "Rotating secrets for $SECRET_NAME in $NAMESPACE"
 NEW_JWT_SECRET=$(openssl rand -base64 32)
 NEW_LOG_API_KEY=$(openssl rand -hex 16)
 
-# 2. Backup current secret: Overtoad-only, in the repo's gitignored tmp/ (never /tmp)
+# 2. Backup current secret: owner-only, in the repo's gitignored tmp/ (never /tmp)
 BACKUP_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tmp/secret-backup.yaml"
 mkdir -p "$(dirname "$BACKUP_FILE")"
 (umask 077; kubectl get secret $SECRET_NAME -n $NAMESPACE -o yaml > "$BACKUP_FILE")
