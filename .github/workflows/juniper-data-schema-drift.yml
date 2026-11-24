@@ -37,13 +37,14 @@
 #    TRIGGERS.
 #      * repository_dispatch `juniper-data-published`: juniper-data's notify-consumers workflow sends it,
 #        with client_payload {source, version, sha}, once a release is on PyPI -- the event
-#        juniper-recurrence's ci-recurrence-bench.yml already receives. It fires here only once
-#        juniper-data's notify matrix lists juniper-canopy. That workflow confirms delivery by finding a run
-#        whose title is the event type, which is a dispatch run's DEFAULT title: so no `run-name:` here.
+#        juniper-recurrence's ci-recurrence-bench.yml also receives. juniper-data's notify matrix has listed
+#        juniper-canopy since juniper-data#501 (2026-10-30); that day's manual re-send reached this workflow
+#        (run 41027857909). That workflow confirms delivery by finding a run whose title is the event type,
+#        which is a dispatch run's DEFAULT title: so no `run-name:` here.
 #      * schedule, daily at 07:17 UTC: the backstop. PyPI took six juniper-data releases between
 #        2026-09-05 and 2026-10-23, 2 to 16 days apart, so a weekly poll could leave a drift unseen for most
-#        of a release cycle; daily bounds that at a day whenever a dispatch does not arrive (canopy is not
-#        yet in that matrix, the dispatch token is a PAT that expires, a delivery can be lost). It is also
+#        of a release cycle; daily bounds that at a day whenever a dispatch does not arrive (the dispatch
+#        token is a PAT that expires, a delivery can be lost). It is also
 #        what sees drift that arrives through a pydantic release, with no juniper-data release to announce
 #        it. A run takes about a minute. Off the hour, because GitHub delays scheduled runs most at the top
 #        of the hour (canopy's own scheduled lanes start at 06:00).
