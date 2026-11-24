@@ -32,8 +32,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`, `docs/ci_cd/CICD_MANUAL.md`, `docs/testing/TESTING_ENVIRONMENT_SETUP.md`
     and `docs/testing/TESTING_MANUAL.md` describe the leg.
 
+- **A telemetry test that runs on every FastAPI the floor admits.** In
+  `src/tests/unit/test_main_import_and_lifespan.py`, the port of juniper-data#454's test,
+  `test_app_disables_fastapi_native_telemetry`, reads `app._telemetry` and skips below FastAPI 0.142. There
+  `telemetry=` is not a parameter, and FastAPI keeps it, as given, in `app.extra`. The new
+  `test_app_passes_the_telemetry_opt_out_on_every_fastapi` reads whichever the installed FastAPI has, so it runs there
+  too.
+  - From 0.143 an omitted `auto_configure` takes its default from `FASTAPI_OTEL_AUTO_CONFIGURE` when the app is built.
+    `main.py` builds `app` at import, so the test imports `main` in a fresh interpreter with that variable set to
+    `true`, and a dropped `auto_configure` then reads `True` (the other four switches default to `True` anyway).
+    That import takes about 2.5 s; the child's own timeout is 50 s, inside the unit lane's 60 s. The child leaves
+    through `os._exit(0)` once it has printed, so the Python 3.12 cleanup SIGABRT the unit step allows for cannot
+    fail it.
+  - Measured against 11 mutants of `main.py`'s `telemetry=` (the keyword removed, each switch dropped, each turned on),
+    under `JuniperCanopy1`'s FastAPI 0.137.0 and under 0.163.1, the lock's. The new test fails on all 22 runs and
+    passes on the unmutated source. The ported test skips on 0.137.0 and passes on 0.163.1 with `auto_configure`
+    dropped.
+
 ### Fixed
 
+- **`docs/ci_cd/CICD_MANUAL.md` no longer says the lockfile workflow's comment gets the `[dependabot skip]` tag
+  backwards.** A sentence in the paragraph after the runbook's commit-subject table said the comment above `lockfile-update.yml`'s
+  commit-message choice claims the tag keeps Dependabot from rebasing, the reverse of GitHub's documented behaviour.
+  That was true until juniper-canopy#730 (2026-10-08) corrected the comment; since then it says what the line
+  before it says, that the tag lets Dependabot keep rebasing. The sentence now says the comment agrees, and that it said
+  the reverse until #730. `docs/ci_cd/CICD_MANUAL.md` 0.29.5. The text is the one juniper-canopy#814's validation
+  prepared and that PR left out; the Overtoad's ruling 26 (2026-11-12) of the Cursor flood-4 evaluation.
 - **h5py installs on the informational Python 3.15 leg.** Phase 2 of the ecosystem's Python 3.15 migration (approved
   by the Overtoad on 2026-11-15) works through what the 3.15 legs found, and this is the first item: h5py publishes no
   CPython 3.15 wheel (3.16.0, 2026-03-06, the newest release on PyPI when re-probed on 2026-11-15, ships
@@ -159,6 +183,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Docs: `docs/ci_cd/CICD_MANUAL.md` (§ Runbook: Release publishing, with the recovery ladder; 0.29.4),
     `docs/ci_cd/CICD_REFERENCE.md` (§ `publish.yml` and the workflow inventory; 0.30.5),
     `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md` (the workflow permissions; 0.28.6) and `AGENTS.md` (the workflow table).
+
+- **`conf/conda_environment_cpu.yaml` pins dash 4.4.1, as `pyproject.toml` requires.** The CPU-only spec pinned
+  `dash=3.3.0=pyhd8ed1ab_0`, below `pyproject.toml`'s `dash>=4.0.0`, which canopy 0.10.0 ships, while
+  `conf/conda_environment.yaml`, the file it is derived from, pins `dash=4.4.1=pyhd8ed1ab_0`. It now pins that build.
+  It also gains the two rows dash 4 needs that it lacked, copied from the same file: `comm=0.2.3=pyhe01879c_0` and
+  `janus=2.0.0=pyhd8ed1ab_0`. `dash-bootstrap-components=2.0.4=pyhcf101f3_0` is unchanged.
+  - A `conda create --dry-run` of the file's 251 conda rows against conda-forge links every row at its pinned version
+    and build. The file's 39 `pypi_0` rows are pip installs, which no conda channel serves. Without the two new rows,
+    the solver added `comm` and `janus` itself, at `janus` 2.1.1.
 
 
 ## [0.10.0] - 2026-11-15
