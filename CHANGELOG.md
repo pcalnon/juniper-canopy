@@ -51,6 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`docs/ci_cd/CICD_MANUAL.md` no longer says the lockfile workflow's comment gets the `[dependabot skip]` tag
+  backwards.** A sentence in the paragraph after the runbook's commit-subject table said the comment above `lockfile-update.yml`'s
+  commit-message choice claims the tag keeps Dependabot from rebasing, the reverse of GitHub's documented behaviour.
+  That was true until juniper-canopy#730 (2026-10-08) corrected the comment; since then it says what the line
+  before it says, that the tag lets Dependabot keep rebasing. The sentence now says the comment agrees, and that it said
+  the reverse until #730. `docs/ci_cd/CICD_MANUAL.md` 0.29.5. The text is the one juniper-canopy#814's validation
+  prepared and that PR left out; the Overtoad's ruling 26 (2026-11-12) of the Cursor flood-4 evaluation.
 - **h5py installs on the informational Python 3.15 leg.** Phase 2 of the ecosystem's Python 3.15 migration (approved
   by the Overtoad on 2026-11-15) works through what the 3.15 legs found, and this is the first item: h5py publishes no
   CPython 3.15 wheel (3.16.0, 2026-03-06, the newest release on PyPI when re-probed on 2026-11-15, ships
