@@ -56,7 +56,7 @@ written against **juniper-recurrence 0.5.0**, its documented contract floor (`RE
   chose. The registry seed is the base. A form value goes into the request only when it differs from what the form
   showed for that field, and an edited field wins over the seed. The generic `nn_dataset_elements` / `nn_dataset_noise`
   fields are not sent to a generator that declares no `n_samples` / `noise`; no sequence generator does. This is
-  owner ruling R7's recommended default, applied pending the ruling. The declared parameters are a dated snapshot of
+  Overtoad ruling R7's recommended default, applied pending the ruling. The declared parameters are a dated snapshot of
   juniper-data's own schemas (`dataset_schema.DECLARED_PARAM_DEFAULTS`). The body Start would send can be read first
   from [`POST /api/recurrence/effective_request`](#post-apirecurrenceeffective_request), and both that preview and
   the Start log it at INFO.

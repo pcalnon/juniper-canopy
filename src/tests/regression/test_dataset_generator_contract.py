@@ -147,7 +147,7 @@ class TestX6StagingIsGuarded:
         assert resp.json()["status"] == "success"
 
 
-#: What juniper-data declares for ``equities_seq`` since juniper-data#437 (generator 6.0.0; owner
+#: What juniper-data declares for ``equities_seq`` since juniper-data#437 (generator 6.0.0; Overtoad
 #: ruling X8, 2026-09-24): on its ``main``, and in its releases from 0.17.0. Its releases through
 #: 0.16.0 declare ``classification`` (at ``5.0.0`` in 0.15.0 and 0.16.0), which juniper-deploy
 #: serves until juniper-deploy#243 moves its pin. RECORDED, not read: ``GeneratorInfo`` does not
@@ -168,7 +168,7 @@ class TestX8TaskTypeAgreesWithJuniperData:
     because the label never crossed the wire, and it would bite the day someone "fixed the
     drift" in the obvious direction.
 
-    The owner ruled on 2026-09-24 that juniper-data changes its label, and juniper-data#437 did,
+    The Overtoad ruled on 2026-09-24 that juniper-data changes its label, and juniper-data#437 did,
     at generator version 6.0.0. The class now pins the agreement. It keeps the tripwire, because
     relabelling canopy's seed ``classification`` would still strand the dataset.
     """
@@ -195,7 +195,7 @@ class TestX8TaskTypeAgreesWithJuniperData:
         still decides. It no longer decides where the SIDEBAR lands when Recurrence is picked:
         since OQ-6's ratification (canopy#652, 2026-09-22) the sidebar gate clears a stranded
         dataset to ``⊥`` and the operator chooses. It does decide the order the dropdown
-        OFFERS, and the restart modal's fallback, which keeps its ``enabled[0]`` swap by owner
+        OFFERS, and the restart modal's fallback, which keeps its ``enabled[0]`` swap by Overtoad
         ruling (2026-09-22), a deliberate exception to OQ-6. So ``multi_sine`` leading is what
         makes both the first option offered and the modal's replacement for a stranded dataset
         one that is instant, offline and actually learnable (r² 1.000), rather than

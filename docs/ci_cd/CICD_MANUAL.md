@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-11-16
-**Version:** 0.29.4
+**Last Updated:** 2026-11-24
+**Version:** 0.29.5
 **Status:** Current
 
 ## Table of Contents
@@ -793,7 +793,7 @@ The same regen can still move other pins. canopy#708, a `python-dotenv` floor bu
 | `pull_request` | The PR touches `pyproject.toml`, the head is in this repo, and the head ref does not start with `release/` | `chore(deps): auto-regenerate requirements.lock after pyproject change` |
 
 `[dependabot skip]` lets Dependabot keep rebasing its own branch: a rebase force-pushes over the regen commit, and that push runs this workflow again. Without the tag, Dependabot stops rebasing once another commit lands on its branch (GitHub docs, *Managing pull requests for dependency updates*).
-The workflow's own comment, above its commit-message choice in `lockfile-update.yml`, says the tag keeps Dependabot from rebasing; that is the reverse of GitHub's documented behaviour.
+The workflow's own comment, above its commit-message choice in `lockfile-update.yml`, says the same; until juniper-canopy#730 it said the tag keeps Dependabot from rebasing, the reverse of GitHub's documented behaviour.
 A regen commit can therefore vanish from a Dependabot PR. canopy#709's branch carried the signed regen `b63f211e` (narwhals 2.26.0 → 2.27.0, websockets 17.1 → 17.2). Dependabot's 2026-10-06 rebase onto canopy#708 dropped it, the regen on the new head committed nothing, and the PR merged with no lock change.
 `release/**` is excluded so a version-only `pyproject.toml` edit stays a single-purpose release PR.
 
@@ -1027,7 +1027,7 @@ The date check has no local console script. It is the workflow step.
 
 Do not bypass TestPyPI stage; production publish is intentionally downstream. The contract: [`CICD_REFERENCE.md` § `publish.yml`](CICD_REFERENCE.md#publishyml), and juniper-cascor's [One Artifact, Checked Against TestPyPI](https://github.com/pcalnon/juniper-cascor/blob/main/docs/ci_cd/MANUAL.md#one-artifact-checked-against-testpypi), whose template steps this workflow copies verbatim.
 
-A release that did not reach PyPI follows the owner's ladder (ruling of 2026-11-15), in this order. Every rung publishes the files TestPyPI took, or nothing ([juniper-cascor's manual](https://github.com/pcalnon/juniper-cascor/blob/main/docs/ci_cd/MANUAL.md#recovering-a-release-that-did-not-reach-pypi)):
+A release that did not reach PyPI follows the Overtoad's ladder (ruling of 2026-11-15), in this order. Every rung publishes the files TestPyPI took, or nothing ([juniper-cascor's manual](https://github.com/pcalnon/juniper-cascor/blob/main/docs/ci_cd/MANUAL.md#recovering-a-release-that-did-not-reach-pypi)):
 
 1. Republish TestPyPI's files: dispatch this workflow from the release's tag.
 
@@ -1190,7 +1190,7 @@ Lines Changed: +45 / -12
 
 ##### Upload refused, job still green
 
-The live step is `Upload Coverage to Codecov` on `ci.yml` job `unit-tests` (juniper-canopy#779, owner ruling 2026-10-29). It is SHA-pinned `codecov/codecov-action`. The version record is the `# v7.1.1` comment on that `uses:` line. The step does not copy a tag into `uses:`.
+The live step is `Upload Coverage to Codecov` on `ci.yml` job `unit-tests` (juniper-canopy#779, Overtoad ruling 2026-10-29). It is SHA-pinned `codecov/codecov-action`. The version record is the `# v7.1.1` comment on that `uses:` line. The step does not copy a tag into `uses:`.
 
 | Input | Value |
 | ----- | ----- |

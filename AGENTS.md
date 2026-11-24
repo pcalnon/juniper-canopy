@@ -5,7 +5,7 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.10.0
-**Last Updated**: 2026-11-16
+**Last Updated**: 2026-11-23
 
 ---
 
@@ -796,7 +796,7 @@ src/communication/         -> src/tests/unit/test_websocket_*.py
 ### Temporary files: `tmp/`, never `/tmp` (mandatory)
 
 **No file is ever written under `/tmp`** (nor `/var/tmp`) by this repo's scripts, tests, tools, services, sessions
-or agents (owner directive, 2026-10-26). On the Linux host `/tmp` is a tmpfs that `systemd-tmpfiles-clean` ages
+or agents (Overtoad directive, 2026-10-26). On the Linux host `/tmp` is a tmpfs that `systemd-tmpfiles-clean` ages
 daily (`q /tmp 1777 root root 10d`): a file untouched for ten days is deleted while still in use, and a reboot
 erases the rest. In the week to 2026-10-26 it emptied a live test stack's pid files and venv three times. macOS
 ages `/tmp` too.
@@ -810,7 +810,7 @@ ages `/tmp` too.
   derived from `TMPDIR`.
 - Out of scope: GitHub-hosted CI runners and a container's own `/tmp`.
 - Ecosystem rule and rationale: `juniper-ml/notes/JUNIPER_2026-10-26_JUNIPER-ECOSYSTEM_REPO-TMP-DIRECTORY-CONVENTION.md`.
-- **Owner rulings, 2026-10-26** (canonical: the note above): `juniper-check-doc-links` passes `--exclude tmp` and a
+- **The Overtoad rulings, 2026-10-26** (canonical: the note above): `juniper-check-doc-links` passes `--exclude tmp` and a
   local Docker build's `.dockerignore` lists `tmp/`; pytest does not ignore it (no `norecursedirs`, `--ignore` or
   `collect_ignore` names it). Full-tree repo copies and log-file copies may live there.
   - A script that counts matches with `grep` or `find` chooses its scope deliberately: the repo with its `tmp/`

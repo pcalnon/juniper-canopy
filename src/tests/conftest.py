@@ -205,7 +205,7 @@ def pytest_configure(config):
 
     # Display test environment configuration
     print("\n=== Test Environment Configuration ===")
-    print(f"CasCor Backend Tests: " f"{'ENABLED' if os.getenv('CASCOR_BACKEND_AVAILABLE') else 'DISABLED (set CASCOR_BACKEND_AVAILABLE=1)'}")
+    print(f"CasCor Backend Tests: {'ENABLED' if os.getenv('CASCOR_BACKEND_AVAILABLE') else 'DISABLED (set CASCOR_BACKEND_AVAILABLE=1)'}")
     print(f"Live Server Tests: {'ENABLED' if os.getenv('RUN_SERVER_TESTS') else 'DISABLED (set RUN_SERVER_TESTS=1)'}")
 
     enabled = os.getenv("RUN_DISPLAY_TESTS") or os.getenv("DISPLAY")

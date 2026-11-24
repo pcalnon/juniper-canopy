@@ -83,7 +83,7 @@ class TutorialPanel(BaseComponent):
         return html.Div(
             [
                 dbc.Alert(
-                    "Cascade Correlation (CasCor) is a constructive neural network algorithm " "that grows the network architecture during training by adding hidden units one at a time.",
+                    "Cascade Correlation (CasCor) is a constructive neural network algorithm that grows the network architecture during training by adding hidden units one at a time.",
                     color="info",
                 ),
                 html.H5("How It Works"),
@@ -92,25 +92,25 @@ class TutorialPanel(BaseComponent):
                         html.Li(
                             [
                                 html.Strong("Output Training: "),
-                                "Train output weights on the current network (initially input→output only). " "The network learns what it can with its current architecture.",
+                                "Train output weights on the current network (initially input→output only). The network learns what it can with its current architecture.",
                             ]
                         ),
                         html.Li(
                             [
                                 html.Strong("Candidate Training: "),
-                                "If error is still high, create a pool of candidate hidden units. " "Each candidate is trained to maximize correlation with the residual error.",
+                                "If error is still high, create a pool of candidate hidden units. Each candidate is trained to maximize correlation with the residual error.",
                             ]
                         ),
                         html.Li(
                             [
                                 html.Strong("Installation: "),
-                                "The best candidate (highest correlation) is permanently installed. " "Its input weights are frozen — only output weights are retrained.",
+                                "The best candidate (highest correlation) is permanently installed. Its input weights are frozen — only output weights are retrained.",
                             ]
                         ),
                         html.Li(
                             [
                                 html.Strong("Repeat: "),
-                                "Return to step 1. The network now has one more hidden unit. " "Continue until convergence or the max hidden unit limit.",
+                                "Return to step 1. The network now has one more hidden unit. Continue until convergence or the max hidden unit limit.",
                             ]
                         ),
                     ]
@@ -204,7 +204,7 @@ class TutorialPanel(BaseComponent):
                     size="sm",
                 ),
                 html.H5("Sidebar Controls", className="mt-3"),
-                html.P("The left sidebar contains training controls (Start/Stop/Pause/Resume/Reset) " "and meta parameter inputs organized into Neural Network and Candidate Node sections. " "Hover over any input for a tooltip description."),
+                html.P("The left sidebar contains training controls (Start/Stop/Pause/Resume/Reset) and meta parameter inputs organized into Neural Network and Candidate Node sections. Hover over any input for a tooltip description."),
             ]
         )
 

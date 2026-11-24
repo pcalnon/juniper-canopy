@@ -145,7 +145,7 @@ repos:
           - --max-complexity=15
           - --select=B,C,E,F,W,T4,B9
         additional_dependencies:
-          - flake8-bugbear>=24.0.0
+          - flake8-bugbear>=26.11.22
           - flake8-comprehensions>=3.14.0
           - flake8-simplify>=0.21.0
         files: ^src/
@@ -167,7 +167,7 @@ repos:
           - --max-complexity=20
           - --select=B,C,E,F,W,T4,B9
         additional_dependencies:
-          - flake8-bugbear>=24.0.0
+          - flake8-bugbear>=26.11.22
           - flake8-comprehensions>=3.14.0
           - flake8-simplify>=0.21.0
         files: ^src/tests/
@@ -268,7 +268,7 @@ repos:
           - development
           - --exclude
           - CHANGELOG.md
-          # The repo's gitignored tmp/ (owner ruling, 2026-10-26): the checker walks the tree, not git's
+          # The repo's gitignored tmp/ (Overtoad ruling, 2026-10-26): the checker walks the tree, not git's
           # files, so scratch under tmp/ would be scanned and fail.
           - --exclude
           - tmp

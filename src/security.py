@@ -692,7 +692,7 @@ def enforce_loopback_bind_guard(
 ) -> None:
     """Refuse to start on an unattested non-loopback bind (SEC-F22 / D2).
 
-    Two-flag bind-posture attestation (the owner-ratified refinement of the
+    Two-flag bind-posture attestation (the Overtoad-ratified refinement of the
     original single ``fronting_auth_attested`` flag; design OQ-1):
 
     - Loopback ``host`` -> always allowed (no-op); canopy starts normally.
@@ -724,7 +724,7 @@ def enforce_loopback_bind_guard(
                 if is_set
             )
             logger.warning(
-                "canopy bound to non-loopback host %r permitted by %s -- the operator attests the control-surface " "perimeter (a loopback-only host publish and/or a fronting authenticating proxy). This is an operator " "attestation, NOT a verification: the browser-control gate (Origin+CSRF) is bypassable by any in-network " "non-browser client, so the attested perimeter MUST actually be in place (SEC-F22/D2).",
+                "canopy bound to non-loopback host %r permitted by %s -- the operator attests the control-surface perimeter (a loopback-only host publish and/or a fronting authenticating proxy). This is an operator attestation, NOT a verification: the browser-control gate (Origin+CSRF) is bypassable by any in-network non-browser client, so the attested perimeter MUST actually be in place (SEC-F22/D2).",
                 host,
                 permitting,
             )

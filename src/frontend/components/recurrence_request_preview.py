@@ -19,7 +19,7 @@
 # Description:
 #     W1.2 of juniper-ml's plan notes/JUNIPER_2026-10-03_JUNIPER-RECURRENCE_EQUITIES-END-TO-END-AUDIT-AND-DEVELOPMENT-PLAN.md
 #     (finding F-C2: "No preview of the effective request before Start"). Ruling R7's recommended
-#     default, applied pending the owner's ruling, asks for "a read-only JSON 'effective request'
+#     default, applied pending the Overtoad's ruling, asks for "a read-only JSON 'effective request'
 #     preview shown before Start and logged at INFO". This panel sits above the Start button, is
 #     visible only for a one-shot (recurrence) model, and shows the exact POST /v1/train body the
 #     next Start would send, as the backend resolves it (POST /api/recurrence/effective_request).

@@ -6,7 +6,7 @@ Sub-Project: ad-hoc tooling
 Author: Paul Calnon
 Created: 2026-11-15
 Status: ad-hoc — investigation (negative control for the port of juniper-cascor#763 and #767, the one-artifact publish;
-        the owner's directive of 2026-11-15)
+        the Overtoad's directive of 2026-11-15)
 Retire when: the one-artifact template steps in publish.yml are replaced or removed.
 Related: .github/workflows/publish.yml (the steps marked "one-artifact publish template", and the republish job);
          src/tests/unit/test_publish_one_artifact.py; adapted from juniper-cascor's
