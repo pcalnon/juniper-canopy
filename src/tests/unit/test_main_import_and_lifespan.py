@@ -6,7 +6,9 @@ These tests focus on covering code paths reachable in demo mode.
 """
 
 import asyncio
+import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -335,6 +337,42 @@ class TestFastAPINativeTelemetry:
         assert app._telemetry["logs"] is False
         assert app._telemetry["operation_spans"] is False
         assert app._telemetry["auto_configure"] is False
+
+    def test_app_passes_the_telemetry_opt_out_on_every_fastapi(self):
+        """The opt-out reaches FastAPI on every version ``pyproject.toml`` admits, so this test never skips.
+
+        The test above reads ``app._telemetry`` and skips below FastAPI 0.142, where ``telemetry=`` is not a
+        parameter and FastAPI keeps it, as given, in ``app.extra``. This one reads whichever the installed FastAPI
+        has. From 0.143 an omitted ``auto_configure`` takes its default from ``FASTAPI_OTEL_AUTO_CONFIGURE`` when the
+        app is built, and ``app`` is built when ``main`` is imported, so a fresh interpreter imports it with the
+        variable set to ``true``: an ``auto_configure`` dropped from ``main.py``'s ``telemetry=`` then reads
+        ``True``, as the other four switches do by default. The child leaves through ``os._exit(0)`` once it has
+        printed, so a crash in interpreter cleanup (the Python 3.12 SIGABRT ``ci.yml``'s unit step allows for)
+        cannot fail the test.
+        """
+        probe = "\n".join(
+            [
+                "import json",
+                "import os",
+                "import sys",
+                "import main",
+                "config = getattr(main.app, '_telemetry', None)",
+                "if config is None:",
+                "    config = main.app.extra.get('telemetry', {})",
+                "switches = ('tracing', 'metrics', 'logs', 'operation_spans', 'auto_configure')",
+                "print('TELEMETRY=' + json.dumps({switch: config.get(switch) for switch in switches}))",
+                "sys.stdout.flush()",
+                "os._exit(0)",
+            ]
+        )
+        env = dict(os.environ, FASTAPI_OTEL_AUTO_CONFIGURE="true", JUNIPER_CANOPY_DEMO_MODE="1")
+        result = subprocess.run([sys.executable, "-c", probe], cwd=src_dir, env=env, capture_output=True, text=True, timeout=50)
+        assert result.returncode == 0, result.stderr[-2000:]
+        reports = [line for line in result.stdout.splitlines() if line.startswith("TELEMETRY=")]
+        assert len(reports) == 1, result.stdout[-2000:]
+        config = json.loads(reports[0].removeprefix("TELEMETRY="))
+        for switch, value in config.items():
+            assert value is False, switch
 
 
 async def _wait_until(predicate, timeout: float = 5.0, poll_interval: float = 0.005) -> bool:

@@ -32,6 +32,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`, `docs/ci_cd/CICD_MANUAL.md`, `docs/testing/TESTING_ENVIRONMENT_SETUP.md`
     and `docs/testing/TESTING_MANUAL.md` describe the leg.
 
+- **A telemetry test that runs on every FastAPI the floor admits.** In
+  `src/tests/unit/test_main_import_and_lifespan.py`, the port of juniper-data#454's test,
+  `test_app_disables_fastapi_native_telemetry`, reads `app._telemetry` and skips below FastAPI 0.142. There
+  `telemetry=` is not a parameter, and FastAPI keeps it, as given, in `app.extra`. The new
+  `test_app_passes_the_telemetry_opt_out_on_every_fastapi` reads whichever the installed FastAPI has, so it runs there
+  too.
+  - From 0.143 an omitted `auto_configure` takes its default from `FASTAPI_OTEL_AUTO_CONFIGURE` when the app is built.
+    `main.py` builds `app` at import, so the test imports `main` in a fresh interpreter with that variable set to
+    `true`, and a dropped `auto_configure` then reads `True` (the other four switches default to `True` anyway).
+    That import takes about 2.5 s; the child's own timeout is 50 s, inside the unit lane's 60 s. The child leaves
+    through `os._exit(0)` once it has printed, so the Python 3.12 cleanup SIGABRT the unit step allows for cannot
+    fail it.
+  - Measured against 11 mutants of `main.py`'s `telemetry=` (the keyword removed, each switch dropped, each turned on),
+    under `JuniperCanopy1`'s FastAPI 0.137.0 and under 0.163.1, the lock's. The new test fails on all 22 runs and
+    passes on the unmutated source. The ported test skips on 0.137.0 and passes on 0.163.1 with `auto_configure`
+    dropped.
+
 ### Fixed
 
 - **h5py installs on the informational Python 3.15 leg.** Phase 2 of the ecosystem's Python 3.15 migration (approved
