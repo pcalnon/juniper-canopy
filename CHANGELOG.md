@@ -160,6 +160,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `docs/ci_cd/CICD_REFERENCE.md` (§ `publish.yml` and the workflow inventory; 0.30.5),
     `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md` (the workflow permissions; 0.28.6) and `AGENTS.md` (the workflow table).
 
+- **`conf/conda_environment_cpu.yaml` pins dash 4.4.1, as `pyproject.toml` requires.** The CPU-only spec pinned
+  `dash=3.3.0=pyhd8ed1ab_0`, below `pyproject.toml`'s `dash>=4.0.0`, which canopy 0.10.0 ships, while
+  `conf/conda_environment.yaml`, the file it is derived from, pins `dash=4.4.1=pyhd8ed1ab_0`. It now pins that build.
+  It also gains the two rows dash 4 needs that it lacked, copied from the same file: `comm=0.2.3=pyhe01879c_0` and
+  `janus=2.0.0=pyhd8ed1ab_0`. `dash-bootstrap-components=2.0.4=pyhcf101f3_0` is unchanged.
+  - A `conda create --dry-run` of the file's 251 conda rows against conda-forge links every row at its pinned version
+    and build. The file's 39 `pypi_0` rows are pip installs, which no conda channel serves. Without the two new rows,
+    the solver added `comm` and `janus` itself, at `janus` 2.1.1.
+
 
 ## [0.10.0] - 2026-11-15
 
