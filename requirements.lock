@@ -105,9 +105,9 @@ numpy==2.5.5
     #   scipy
 opentelemetry-api==1.45.2
     # via fastapi
-packaging==26.3
+packaging==26.4
     # via plotly
-plotly==7.1.0
+plotly==7.2.0
     # via
     #   juniper-canopy (pyproject.toml)
     #   dash
