@@ -158,7 +158,7 @@ torch
 a2wsgi>=1.10
 annotated-types>=0.8.0
 anyio>=4.15.1
-attrs>=25.0
+attrs>=26.1.0
 certifi
 cffi>=2.1.1
 click>=8.5.1
