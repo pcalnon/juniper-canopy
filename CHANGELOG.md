@@ -51,6 +51,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The four X7 off-loop site tests check where the blocking call runs instead of timing the event loop** (the
+  Overtoad's ruling 28 (2026-11-12) of the Cursor flood-4 evaluation, "A follow-up PR (Recommended)"; its record is
+  juniper-ml's `notes/JUNIPER_2026-11-06_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-4-DISPOSITION.md` §8). The tests in
+  `src/tests/regression/test_x7_sites_outside_main_gate.py` (0.1.1) sampled the loop with a ticker every 20 ms and
+  failed when the worst gap between samples reached 0.2 s. A gap counts every moment the loop thread did not run,
+  whatever stopped it, and in the unit lane a full garbage collection of the session's heap stops every thread of the
+  pytest process at once: in two local runs of the lane on Python 3.13.18, 80 of the 82 collections over 50 ms were
+  generation-2 passes, 79 of them on the main thread, the eight in `src/tests/regression/` 681-950 ms. Stalls of that
+  size (whole-process stops in the four jobs whose logs settle it) failed these tests in ten CI jobs between
+  2026-11-02 and 2026-11-25, each with its call correctly offloaded: `test_relay_cascade_add_does_not_block_the_loop`
+  six times (0.783-1.059 s, all on the Python 3.13 leg, #807 and #814 among them) and
+  `test_initialize_sync_does_not_block_the_loop` four times (0.634-0.878 s, Python 3.12 on Linux and macOS, `main`'s
+  run for #834 among them). With full collections forced from a background thread over 8 million retained objects
+  (605-1136 ms each), the unmodified relay test failed 50 of 50 runs (0.636-1.140 s), and the same ticker around a
+  plain `asyncio.sleep`, with no relay at all, gapped 20 of 20.
+  - Each site's blocking call is now a `_HeldCall`: it records the thread it runs on and holds until a coroutine on
+    the event loop releases it. Each test asserts that the call ran off the loop thread and that the loop released it
+    while it was held. A stalled process only delays the release (a stall that outlasts the whole 10 s hold fails the
+    test); a call made inline is never released and gives up after `HOLD_SECONDS` (10 s, about nine times the longest
+    stall these tests met in CI).
+  - The sensitivity control is now `test_the_held_call_detects_an_inline_call` (was
+    `test_the_ticker_detects_an_inline_block`): it makes the call inline on purpose and requires the harness to see it
+    on the loop thread and unreleased. A second control, `test_the_held_call_detects_a_loop_blocked_on_its_result`,
+    makes the call on a worker thread while the loop waits synchronously for its result, and requires the harness to
+    see it off the loop thread and still unreleased: the release check, the only one that catches that shape, has a
+    control of its own. `_Ticker`, `_blocking` and the `BLOCK_SECONDS`, `TICK_SECONDS` and `STALL_SECONDS` constants
+    are gone.
+  - The relay test's other bound, 15 s for the whole relay run, no longer blames the loop when a slow run outlasts
+    it. The file imports the relay's two lazy imports (`juniper_cascor_protocol.envelope`, `observability`) at module
+    level, so an isolated run does not re-execute them inside that bound, and it waits with `asyncio.wait`: the relay
+    swallows `CancelledError`, so the `asyncio.wait_for` it replaces returned normally when it ran out, and the test
+    then failed as if the loop were blocked. A run that outlasts the bound now fails saying it was too slow to judge.
+  - Measured on Python 3.13.18, 50 runs each: with and without the forced collections, the relay test passes 50 of 50
+    and the whole file 300 of 300 (six tests). With `extract_network_topology` called inline on the loop, the relay
+    test fails 50 of 50, with and without them.
 - **Unit-lane tests no longer reach juniper-data's `:8100`, and the unit-lane network guard now refuses that port
   too** (the Overtoad's ruling 27 of 2026-11-12, "A follow-up PR", in juniper-ml's Cursor flood-4 arc; its record is
   `notes/JUNIPER_2026-11-06_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-4-DISPOSITION.md` §8). juniper-canopy#815's guard left the
