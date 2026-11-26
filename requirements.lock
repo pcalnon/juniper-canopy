@@ -150,7 +150,7 @@ retrying==1.4.2
     # via dash
 scipy==1.18.1
     # via juniper-canopy (pyproject.toml)
-sentry-sdk==3.0.0
+sentry-sdk==3.0.1
     # via juniper-canopy (pyproject.toml)
 setuptools==84.2.1
     # via dash
