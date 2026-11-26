@@ -1,7 +1,7 @@
 # Testing Reference
 
-**Last Updated:** November 12, 2026  
-**Version:** v0.26.4
+**Last Updated:** November 25, 2026  
+**Version:** v0.26.5
 
 Technical reference for the active pytest configuration, markers, fixtures, and CI-equivalent commands.
 
@@ -75,7 +75,7 @@ Registered markers include:
 - `requires_cassandra`
 - `api`
 - `generators`
-- `allow_service_ports` (opts a unit-lane test out of the network guard below; only for a test that connects to a service port it listens on itself)
+- `allow_service_ports` (opts a unit-lane test out of the network guard below and its juniper-data fake; only for a test that connects to a service port it listens on itself)
 
 Common selector examples:
 
@@ -100,16 +100,19 @@ Defined in `src/tests/conftest.py`:
 - `reset_singletons` (function, autouse)
 - `cleanup_test_environment` (function, autouse)
 - `service_port_guard` (session, autouse): the unit-lane network guard below
+- `juniper_data_fake` (function): the unit lane's in-process juniper-data below, to set its answer and read what it
+  answered; `_juniper_data_fake_transport` (session, autouse) installs it
 - plus sample data/config fixtures (`test_config`, `sample_training_metrics`, `sample_network_topology`, `sample_dataset`)
 
 Runtime setup behaviors in `conftest.py`:
 
 - Forces `JUNIPER_CANOPY_DEMO_MODE=1`
-- Sets `JUNIPER_DATA_URL=http://localhost:8100`
+- Sets `JUNIPER_DATA_URL=http://localhost:8100`, and removes `JUNIPER_CANOPY_JUNIPER_DATA_URL`, which would outrank it
 - Sets `CANOPY_RATE_LIMIT_ENABLED=false`
 - Adds `src/` to `sys.path` and `PYTHONPATH`
 - Injects stubs for `juniper_data_client` and `juniper_cascor_client` when unavailable
 - Refuses connects to Juniper service ports in the unit lane (the network guard below)
+- Answers the app's own requests to juniper-data's `:8100` in-process in the unit lane (the juniper-data fake below)
 
 These defaults make most unit/integration tests runnable without external services.
 
@@ -119,12 +122,13 @@ A unit test that connects to whatever listens on the host is not hermetic: on a 
 live canopy (`:8050`) or juniper-data (`:8100`), while CI's runner, with nothing listening, refuses the same
 connect. So while a unit-lane test runs (its setup, call and teardown), the guard in `src/tests/conftest.py`
 refuses every connect the pytest process makes through Python's `socket` module to a Juniper service port, the
-way an empty host does: canopy 8050-8059, juniper-cascor 8200-8202, juniper-recurrence 8210-8211. It then fails
-the test, even when the code under test swallowed the refusal and fell back. It cannot see a child process
-(`subprocess`, `multiprocessing` spawn), a uvloop/libuv transport or a direct `_socket.socket.connect` call, and
-a connect from a thread an earlier test left running fails whichever test is running then (the failure names
-that thread). juniper-data's 8100 is not guarded: 124 unit-lane tests still reach it through the app's own
-startup probe and `/v1/health/ready`, and guarding it is deferred.
+way an empty host does: canopy 8050-8059, juniper-data 8100, juniper-cascor 8200-8202, juniper-recurrence
+8210-8211. It then fails the test, even when the code under test swallowed the refusal and fell back. It cannot see
+a child process (`subprocess`, `multiprocessing` spawn), a uvloop/libuv transport or a direct
+`_socket.socket.connect` call, and a connect from a thread an earlier test left running fails whichever test is
+running then (the failure names that thread). The app's own httpx requests to juniper-data (its startup probe,
+`/v1/health/ready` and the generators proxy) never reach a socket in a guarded test: the juniper-data fake below
+answers them.
 
 - **Armed** for every test in the CI unit lane's directories (`unit/`, `regression/`, `contract/`, `performance/`)
   and for tests marked `unit` elsewhere that are not also marked `integration`.
@@ -135,6 +139,31 @@ startup probe and `/v1/health/ready`, and guarding it is deferred.
 
 Fix a refused test by mocking the client or transport, as its neighbours do. Pinned by
 `src/tests/unit/test_unit_lane_network_guard.py`.
+
+### Unit-lane juniper-data fake
+
+The app reaches juniper-data (`:8100`) through httpx: `main.py`'s lifespan probes it at startup and
+`/v1/health/ready` probes it again, both through `health.probe_dependency`, and once the startup probe has
+succeeded `/api/dataset/generators` asks it for its generator list. While a guarded test runs (the guard's arming, above),
+`src/tests/conftest.py` answers a request to port 8100 in-process at httpx's async transport
+(`httpx.AsyncHTTPTransport.handle_async_request`), so no socket is opened. Everything above that seam runs for real:
+httpx's client, `probe_dependency`'s mapping of the answer, the lifespan's `juniper_data_available` decision, the
+readiness verdict and the generator fallback.
+
+- **The default answer** is CI's: the connect is refused, which httpx raises as
+  `ConnectError("All connection attempts failed")`. A test sees the same juniper-data locally as in CI, whatever
+  listens on the host's `:8100`.
+- **Another answer**: take the `juniper_data_fake` fixture. `answer(200, body)` serves that response to every request
+  until `refuse()`, and `answered` lists the requests the fake answered, so a test can show that the app sent one.
+  Both are reset before every test. A module-scoped `client` starts the app before a test's own fixtures run, so a
+  test that needs the startup probe answered differently starts its own app.
+- **Only port 8100** is answered, whatever the host. A test's own server on an ephemeral port is reached for real,
+  and a test the guard does not arm reaches whatever listens on `:8100`.
+- `mock_juniper_data_client` mocks the `JuniperDataClient` the app builds. A connect to `:8100` that reaches a socket
+  any other way is refused, and fails the test, by the guard.
+
+Pinned by `src/tests/unit/test_unit_lane_juniper_data_fake.py`; `src/tests/unit/test_health.py` runs the readiness
+route against each of the fake's answers.
 
 ---
 

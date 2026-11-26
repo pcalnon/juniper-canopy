@@ -20,12 +20,17 @@ import threading
 from pathlib import Path
 from typing import Any, Dict
 
+import httpx
 import pytest
 
 # CRITICAL: Set demo mode BEFORE any imports of main.py
 os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"
 # CRITICAL: Set JuniperData URL BEFORE any imports (CAN-INT-002: mandatory)
 os.environ["JUNIPER_DATA_URL"] = "http://localhost:8100"
+# The canopy-specific JUNIPER_CANOPY_JUNIPER_DATA_URL outranks JUNIPER_DATA_URL (settings.py,
+# _check_juniper_data_url), so a shell that exports it (.env.prod names http://juniper-data:8100)
+# would move every juniper-data request off the URL pinned above.
+os.environ.pop("JUNIPER_CANOPY_JUNIPER_DATA_URL", None)
 # Disable rate limiting in tests to prevent 429 responses during rapid test execution
 os.environ["JUNIPER_CANOPY_RATE_LIMIT_ENABLED"] = "false"
 # CRITICAL: Set new-prefix env vars to prevent DeprecationWarnings from
@@ -303,11 +308,12 @@ def pytest_collection_modifyitems(config, items):
 # Fix a refused test by mocking the client or transport as its neighbours do,
 # never by opting out. Pinned by src/tests/unit/test_unit_lane_network_guard.py.
 
-# canopy 8050 (and the 8051-8059 E2E legs), juniper-cascor 8200 (container) /
-# 8201 (host) / 8202, juniper-recurrence 8210 / 8211. juniper-data's 8100 is NOT
-# guarded: 124 unit-lane tests reach it through the app's own startup probe
-# (main.py lifespan) and /v1/health/ready, so guarding it is deferred.
-SERVICE_PORTS = frozenset({*range(8050, 8060), 8200, 8201, 8202, 8210, 8211})
+# canopy 8050 (and the 8051-8059 E2E legs), juniper-data 8100, juniper-cascor 8200
+# (container) / 8201 (host) / 8202, juniper-recurrence 8210 / 8211. The app's own
+# requests to juniper-data (its startup probe, /v1/health/ready and the generators
+# proxy) never reach a socket in a guarded test: the UNIT-LANE JUNIPER-DATA FAKE
+# below answers them at httpx's transport.
+SERVICE_PORTS = frozenset({*range(8050, 8060), 8100, 8200, 8201, 8202, 8210, 8211})
 _UNIT_LANE_DIRS = frozenset({"unit", "regression", "contract", "performance"})
 _UNGUARDED_MARKERS = ("allow_service_ports", "e2e", "ui", "requires_server", "requires_cascor")
 _TESTS_ROOT = Path(__file__).resolve().parent
@@ -390,9 +396,10 @@ def service_port_guard():
 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_protocol(item, nextitem):
-    """Arm the guard for a guarded test across its setup, call and teardown."""
+    """Arm the guard (and with it the juniper-data fake) for a guarded test across its setup, call and teardown."""
     _SERVICE_PORT_GUARD.armed_for = item.nodeid if ServicePortGuard.applies_to(item) else None
     _SERVICE_PORT_GUARD.refused.clear()
+    _JUNIPER_DATA_FAKE.reset()
     try:
         return (yield)
     finally:
@@ -405,6 +412,100 @@ def pytest_runtest_makereport(item, call):
     report = yield
     _SERVICE_PORT_GUARD.flag(report)
     return report
+
+
+# ===================================================================
+# UNIT-LANE JUNIPER-DATA FAKE
+# ===================================================================
+# The app reaches juniper-data (:8100) through httpx: main.py's lifespan probes it at
+# startup and /v1/health/ready probes it again, both through health.probe_dependency,
+# and once the startup probe has succeeded /api/dataset/generators asks it for its generator
+# list. While a guarded test runs (the guard's arming, above), a request to port 8100
+# is answered here, in-process, at httpx's async transport -- the network seam -- and
+# never opens a socket. Everything above the seam runs for real: httpx's client,
+# probe_dependency's mapping of the answer to a DependencyStatus, the lifespan's
+# ``juniper_data_available`` decision, the readiness verdict and the generator fallback.
+#
+# * The default answer is the one CI's empty runner gives: the connect is refused,
+#   which httpx raises as ``ConnectError("All connection attempts failed")``. So a test
+#   sees the same juniper-data locally as in CI, whatever listens on the host's :8100.
+# * A test that needs another answer takes the ``juniper_data_fake`` fixture:
+#   ``answer(200, body)`` serves that response to every request until ``refuse()``, and
+#   ``answered`` lists the requests the fake answered, so a test can show that the app
+#   really sent one. The answer and the list are reset before every test. A
+#   module-scoped ``client`` starts the app before a test's own fixtures run, so a test
+#   that needs the startup probe answered differently starts its own app.
+# * Only port 8100 is answered, whatever the host. A test's own server on an ephemeral
+#   port is reached for real, and what the guard does not arm (the integration, e2e and
+#   ui lanes, and a test marked ``allow_service_ports``, ``requires_server`` or
+#   ``requires_cascor``) reaches whatever listens on :8100. So a test marked
+#   ``allow_service_ports`` must not use a module's shared ``client``: that app's startup
+#   probe would reach the host's :8100, and nothing resets the ``juniper_data_available``
+#   verdict it leaves. Such a test starts its own app and restores that flag.
+# * ``mock_juniper_data_client`` (below) mocks the JuniperDataClient the app builds. A
+#   connect to :8100 that reaches a socket any other way is refused, and fails the
+#   test, by the guard. Pinned by src/tests/unit/test_unit_lane_juniper_data_fake.py.
+
+
+class JuniperDataFake:
+    """Answers, in-process, the httpx requests a guarded test sends to juniper-data's port (see the section comment)."""
+
+    port = 8100
+    refusal = "All connection attempts failed"  # what httpx raises when an empty host refuses the connect
+
+    def __init__(self) -> None:
+        self.answered: list[str] = []  # "METHOD URL" of each request answered since the last reset
+        self.response: tuple[int, Any] | None = None  # None: refuse the connect, as an empty host does
+        self.real_handle_async_request = httpx.AsyncHTTPTransport.handle_async_request
+
+    def intercepts(self, request: httpx.Request) -> bool:
+        """Whether ``request`` goes to juniper-data's port while a guarded test runs."""
+        return _SERVICE_PORT_GUARD.armed_for is not None and request.url.port == self.port
+
+    def answer(self, status_code: int, body: Any = None) -> None:
+        """Serve ``status_code`` (with ``body`` as JSON, when given) to every request from now on."""
+        self.response = (status_code, body)
+
+    def refuse(self) -> None:
+        """Refuse every request from now on, as an empty host does (the default)."""
+        self.response = None
+
+    def reset(self) -> None:
+        """Back to the default answer, with nothing answered."""
+        self.response = None
+        self.answered.clear()
+
+    def respond(self, request: httpx.Request) -> httpx.Response:
+        """Record ``request`` and answer it."""
+        self.answered.append(f"{request.method} {request.url}")
+        if self.response is None:
+            raise httpx.ConnectError(self.refusal, request=request)
+        status_code, body = self.response
+        return httpx.Response(status_code, json=body, request=request)
+
+
+_JUNIPER_DATA_FAKE = JuniperDataFake()
+
+
+async def _fake_handle_async_request(transport, request):
+    if _JUNIPER_DATA_FAKE.intercepts(request):
+        return _JUNIPER_DATA_FAKE.respond(request)
+    return await _JUNIPER_DATA_FAKE.real_handle_async_request(transport, request)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _juniper_data_fake_transport():
+    """Route httpx's async transport through the juniper-data fake for the session; yields the fake."""
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(httpx.AsyncHTTPTransport, "handle_async_request", _fake_handle_async_request)
+        yield _JUNIPER_DATA_FAKE
+
+
+@pytest.fixture
+def juniper_data_fake(_juniper_data_fake_transport):
+    """The unit lane's in-process juniper-data (UNIT-LANE JUNIPER-DATA FAKE), reset after the test as well as before it."""
+    yield _juniper_data_fake_transport
+    _juniper_data_fake_transport.reset()
 
 
 # Phase B-pre-a + B-pre-b: WebSocket test infrastructure.
