@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-10-26
+**Last Updated**: 2026-11-26
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -1329,13 +1329,13 @@ is supposed to buy: **while an upstream is slow, canopy still answers**.
 
 | Id | Assertion |
 | --- | --- |
-| **T-A2** | 3 concurrent `GET /api/status` against a bounded 2.0 s stub; `GET /v1/health/live` answers in **< 500 ms** |
-| **T-A3** | Four vacuity guards: probe sample non-empty; every driver waited the stub's bound; the driver reached the backend (counted at the stub); the identical harness **fails** against a deliberately un-offloaded control app |
+| **T-A2** | 3 concurrent `GET /api/status` against a stub whose `get_status` records the thread it runs on and holds until the event loop releases it; the loop answers 10 `GET /v1/health/live` probes while the call is held, then releases it. Asserts the call ran **off the loop thread** and was **released by the loop**. No latency deadline: a whole-process stop (a full garbage collection, say) only delays the release, and `HOLD_SECONDS = 10` bounds only a loop that cannot run at all |
+| **T-A3** | Vacuity guards: the driver reached the backend (counted at the stub) and answered with the stub's result; every probe answered 200 while the slow call was held; the identical harness **catches** a deliberately un-offloaded control route (call on the loop thread, unreleased) and a control route whose loop waits synchronously for a worker's result (unreleased) |
 | **T-A4** | 8 threads × 4 uniquely-tagged requests against a local echo server: no cross-talk, one shared `Session`, headers unchanged afterwards |
 
-Not marked `slow` despite exceeding that marker's 1 s threshold: the coverage gate runs
-`-m "not slow"`, so the marker would remove the only behavioural check X7 has. Bound
-total runtime ~5 s.
+Not marked `slow`: the coverage gate runs `-m "not slow"`, so the marker would take these
+tests out of `ci.yml`'s unit lane. A passing run of the file takes about a second;
+`HOLD_SECONDS` is only waited out by a test that is about to fail.
 
 **T-A4 corrects constraint C5 on evidence.** C5 called for a `threading.local()` session
 because a shared `requests.Session` must not be used from multiple threads, and 1a
@@ -1391,8 +1391,9 @@ python util/ad-hoc/2026-09-04_async_blocking_callgraph.py
 - `/v1/health/live` is the canary (`{"status": "alive"}`). `/v1/health` and `/api/status`
   reach the backend and must be offloaded; `/v1/health/ready` probes dependencies via
   async `probe_dependency`.
-- Timing a responsiveness test from *inside* the coroutine measures only the coroutine.
-  Clock from request **issue** time, and create driver tasks before probes.
+- Do not time a responsiveness test. A latency counts every moment the loop thread did not
+  run, and a full garbage collection stops every thread: observe where the slow call runs and
+  whether the loop runs while it is held, as T-A2 and `test_x7_sites_outside_main_gate.py` do.
 
 Design of record (juniper-ml, revision 4):
 `notes/JUNIPER_2026-09-03_JUNIPER-CANOPY_X7-EVENT-LOOP-BLOCKING-REMEDIATION-DESIGN.md`.
