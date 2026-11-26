@@ -220,6 +220,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     and build. The file's 39 `pypi_0` rows are pip installs, which no conda channel serves. Without the two new rows,
     the solver added `comm` and `janus` itself, at `janus` 2.1.1.
 
+- **The republish job copies nothing a release run did not pass, and the install check can mint no credential**
+  (rulings 1 and 2 of 2026-11-16, on the one-artifact publish above; the port of juniper-cascor#777, the template's
+  sweep, copied verbatim).
+  - **The install check has a job of its own** (ruling 2). `Verify the TestPyPI install` needs `Publish to TestPyPI`,
+    and `Publish to PyPI` needs both. It runs the package TestPyPI serves, so it holds `contents: read` alone: no
+    environment and no `id-token`. Until now the check ran in the TestPyPI job, so the package it imported ran with
+    that job's OIDC token-request variables in its environment. It keeps its `setup-python` (3.14), its `--no-deps`
+    install from TestPyPI alone and its `juniper_canopy` import, and now runs every command from `$RUNNER_TEMP`, the
+    version read included: it reads `pyproject.toml` by its path in the workspace, from a sparse checkout that keeps no
+    credential (`persist-credentials: false`). `Publish to TestPyPI` drops its checkout and `setup-python` and holds
+    `id-token: write` alone, so the job that can mint runs only the template steps and the upload. The new job's name
+    holds "TestPyPI", so juniper-ml's release-train ceremony reads its failure as `HALT_TESTPYPI`.
+  - **The install retries, then names index lag.** After its 30 s wait it makes the template's 5 tries, 10 s apart,
+    where it made one, and after the fifth failed install fails with "… is not installable from TestPyPI after 5 tries
+    (index lag?): Re-run failed jobs; a real failure repeats".
+  - **The republish job refuses unless the tag's release run passed its TestPyPI jobs** (ruling 1).
+    `Find the release run's artifact` takes the tag's newest release run, whether or not its artifact has expired, and
+    refuses unless `Publish to TestPyPI` and `Verify the TestPyPI install` concluded success in their latest attempt
+    (`GET actions/runs/{id}/jobs?filter=all`, each job's record with the highest attempt); it refuses as well when the
+    tag has no release run. Until now it copied TestPyPI's files whatever the release run's jobs concluded.
+  - **`PUBLISH_TAG_PREFIX: v`**, the template's third parameter: the republish job takes the version from a tag only
+    after it, so a `juniper-canopy-v<version>` tag, whose version the step used to read, is refused before any request.
+    The build guard repeats the prefix, since a job-level `if:` cannot read `env`, and its comment notes that a future
+    `rc*` or `hf*` tag convention must widen it.
+  - **Comments**, from the template: the republish job's no longer says the ceremony never reads a dispatch run (since
+    juniper-ml#2592 its monitor does), and the PyPI job's says TestPyPI's record witnesses the files the run built,
+    whose wheel the install check installed.
+  - **Docs.** `docs/ci_cd/CICD_MANUAL.md` (§ Runbook: Release publishing; 0.29.6) states the install job and
+    the republish job's gate, and the ladder's new facts: when rung 1 refuses; that a TestPyPI job which failed on
+    index lag is re-run ("Re-run failed jobs" uploads the same bytes, which the index accepts) while a failed install
+    check needs a new patch version; never to re-cut a Release to retry; that a failed `Verify PyPI serves exactly
+    these files` comes after the upload; and which tags the ladder covers. Its paragraph saying that the republish job
+    never reads the TestPyPI job's result, and that rung 1 publishes files whose install check failed on lag, is gone.
+    `docs/ci_cd/CICD_REFERENCE.md` (§ `publish.yml`; 0.30.6) and `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
+    (the workflow permissions; 0.28.7) follow.
+  - **Pins**, in `src/tests/unit/test_publish_one_artifact.py` (113 cases, 69 before): the new job's name, `needs`,
+    permissions, Python, lack of an environment and sparse checkout; the PyPI job needing both TestPyPI jobs; each
+    job's keys, runner and exact steps; no `continue-on-error`, and no `if:` beyond the template's, on a job or a step;
+    no `PIP_*` variable in any `env`; each build step's command; the install step's exact commands, run from
+    `$RUNNER_TEMP`; each upload's exact inputs, so no `skip_existing` and no `attestations: false`; retention of
+    exactly 90 days; the workflow's name ending in "to PyPI"; the prefix with its guard; and each action pinned to one
+    ref. The rehearsals run the new find step against the stand-in GitHub API (no release run, a failed upload, a
+    failed or unfinished install check, a failed build, a job a re-run carried over, with and without GitHub's copies,
+    a failure a re-run repaired, a "Re-run all jobs" whose second attempt failed, each listing order, a listing over two
+    pages, an older run that passed behind a newer one that failed, and both prefixes), the fetch step against a
+    release run and a TestPyPI that name different files, and the install step's own shell against stand-in `pip`,
+    `python` and `sleep`. The new `src/tests/unit/test_publish_docs_bounds.py` (2 cases) reads the JSON
+    checks' bounds and the install check's wait and tries from `publish.yml` and requires the two docs to state them.
+    Each of 55 edits to a copy of the workflow, one at a time, fails the tests.
+  - `util/ad-hoc/2026-11-15_verify_publish_one_artifact_tests_are_not_vacuous.py`, the negative control of the entry
+    above, is left as it is, a record of that change. Run against this workflow, it catches 82 of its 86 mutations;
+    the other 4 no longer find the text they edit (the TestPyPI job's `setup-python`, the one-line `pip install`, the
+    `cd` just before the import, and the old tag parsing), and this change's own mutations cover each of the 4.
+
 
 ## [0.10.0] - 2026-11-15
 

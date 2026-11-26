@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-11-16
-**Version:** 0.30.5
+**Last Updated:** 2026-11-26
+**Version:** 0.30.6
 **Status:** Current
 
 ## Table of Contents
@@ -553,13 +553,16 @@ Operator runbook: [AGENTS.md date check](CICD_MANUAL.md#runbook-agentsmd-date-ch
 ### `publish.yml`
 
 - Trigger: GitHub release published; the build job's guard is `startsWith(github.event.release.tag_name, 'v')`. A `workflow_dispatch` from a release tag with the boolean input `republish_from_testpypi` runs the republish job alone: no other job runs on a dispatch. No `push: tags` (juniper-ml#555's double-fire).
-- Permissions: `permissions: {}` at the top. `Build and Validate` holds `contents: read` and `actions: read`; `Publish to TestPyPI` `contents: read` and `id-token: write`; `Publish to PyPI` `id-token: write`; `Republish the tested files (dispatch only)` `actions: read` and `id-token: write`. Only the jobs that upload can mint the OIDC token for trusted publishing.
+- Permissions: `permissions: {}` at the top. `Build and Validate` holds `contents: read` and `actions: read`; `Publish to TestPyPI` `id-token: write` alone (it checks out nothing and runs no install check); `Verify the TestPyPI install` `contents: read` alone, with no environment; `Publish to PyPI` `id-token: write`; `Republish the tested files (dispatch only)` `actions: read` and `id-token: write`. Only the jobs that upload can mint the OIDC token for trusted publishing.
 - Stages:
   1. `Build and Validate`, once: `pip install build twine`, `python -m build`, `twine check dist/*`, the import smoke test, `Record SHA256SUMS`, and `Upload dist artifacts`, which uploads `dist/` and `SHA256SUMS` as one artifact, `juniper-canopy-dist`, kept 90 days. Its first step, `Reuse an earlier attempt's artifact`, runs on attempt 2 and later: when the run already holds that artifact, every later step skips.
-  2. `Publish to TestPyPI`: `Verify the dist against SHA256SUMS`, the upload (`attestations: true`, no `skip-existing`), `Verify TestPyPI serves exactly these files` (TestPyPI's JSON for the version lists exactly those files and sha256), then the install verification, which imports from `$RUNNER_TEMP` so the checkout's `juniper_canopy/` cannot stand in for the wheel.
-  3. `Publish to PyPI`: the dist check, `Verify TestPyPI still serves exactly these files`, the upload (`attestations: true`), and `Verify PyPI serves exactly these files`. It checks out and builds nothing.
-- The steps marked `One-artifact publish template`, and the republish job, are juniper-cascor's, copied verbatim; its manual's [One Artifact, Checked Against TestPyPI](https://github.com/pcalnon/juniper-cascor/blob/main/docs/ci_cd/MANUAL.md#one-artifact-checked-against-testpypi) is the contract.
-  A JSON check polls up to 20 times, 15 s apart, while the index does not list a file yet, and fails at once on a file listed with another sha256 or one the run did not build. Pinned by `src/tests/unit/test_publish_one_artifact.py`. Recovery: [Runbook: Release publishing](CICD_MANUAL.md#runbook-release-publishing).
+  2. `Publish to TestPyPI`: `Verify the dist against SHA256SUMS`, the upload (`attestations: true`, no `skip-existing`), and, as its last step, `Verify TestPyPI serves exactly these files` (TestPyPI's JSON for the version lists exactly those files and sha256).
+  3. `Verify the TestPyPI install`, a job of its own after it (ruling 2 of 2026-11-16): `setup-python`, a sparse checkout of `pyproject.toml` that keeps no credential (`persist-credentials: false`), and the install verification, every command run from `$RUNNER_TEMP`, so the checkout's `juniper_canopy/` cannot stand in for the wheel.
+     It waits 30 s, then makes 5 tries, 10 s apart, and after the fifth failed try stops with `… is not installable from TestPyPI after 5 tries (index lag?): Re-run failed jobs; a real failure repeats`. Its name holds `TestPyPI`, so juniper-ml's release-train ceremony reads its failure as `HALT_TESTPYPI`.
+  4. `Publish to PyPI`, which needs both TestPyPI jobs: the dist check, `Verify TestPyPI still serves exactly these files`, the upload (`attestations: true`), and `Verify PyPI serves exactly these files`. It checks out and builds nothing.
+- The steps marked `One-artifact publish template`, and the republish job, are juniper-cascor's, copied verbatim; its manual's [One Artifact, Checked Against TestPyPI](https://github.com/pcalnon/juniper-cascor/blob/main/docs/ci_cd/MANUAL.md#one-artifact-checked-against-testpypi) is the contract. They read the workflow `env` values `PUBLISH_PACKAGE`, `PUBLISH_DIST_DIR` and `PUBLISH_TAG_PREFIX`, which is `v` here; the build guard repeats the prefix, since a job-level `if:` cannot read `env`.
+  A JSON check polls up to 20 times, 15 s apart, while the index does not list a file yet, and fails at once on a file listed with another sha256 or one the run did not build. The republish job refuses unless the tag's newest release run passed both TestPyPI jobs in their latest attempt (ruling 1 of 2026-11-16).
+  Pinned by `src/tests/unit/test_publish_one_artifact.py`, and the numbers in this section by `src/tests/unit/test_publish_docs_bounds.py`. Recovery: [Runbook: Release publishing](CICD_MANUAL.md#runbook-release-publishing).
 
 ### Container image (`publish-image.yml`)
 
@@ -887,7 +890,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-11-16
-**Version:** 0.30.5
+**Last Updated:** 2026-11-26
+**Version:** 0.30.6
 **Maintained By:** Development Team
 **Status:** ✅ Current
