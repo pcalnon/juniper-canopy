@@ -269,9 +269,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     a failure a re-run repaired, a "Re-run all jobs" whose second attempt failed, each listing order, a listing over two
     pages, an older run that passed behind a newer one that failed, and both prefixes), the fetch step against a
     release run and a TestPyPI that name different files, and the install step's own shell against stand-in `pip`,
-    `python` and `sleep`. The new `src/tests/unit/test_publish_docs_bounds.py` (2 cases) reads the JSON
-    checks' bounds and the install check's wait and tries from `publish.yml` and requires the two docs to state them.
-    Each of 55 edits to a copy of the workflow, one at a time, fails the tests.
+    `python` and `sleep`. The new `src/tests/unit/test_publish_docs_bounds.py` (2 cases) reads the JSON checks' bounds
+    and the install check's wait and tries from `publish.yml`, and requires `docs/ci_cd/CICD_REFERENCE.md` to state
+    the JSON checks' bounds, and both `CICD_REFERENCE.md` and `docs/ci_cd/CICD_MANUAL.md` to state the install check's
+    wait, tries and lag error. Each of 55 edits to a copy of the workflow, one at a time, fails the tests.
   - `util/ad-hoc/2026-11-15_verify_publish_one_artifact_tests_are_not_vacuous.py`, the negative control of the entry
     above, is left as it is, a record of that change. Run against this workflow, it catches 82 of its 86 mutations;
     the other 4 no longer find the text they edit (the TestPyPI job's `setup-python`, the one-line `pip install`, the

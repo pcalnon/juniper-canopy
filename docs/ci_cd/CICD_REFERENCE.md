@@ -562,7 +562,7 @@ Operator runbook: [AGENTS.md date check](CICD_MANUAL.md#runbook-agentsmd-date-ch
   4. `Publish to PyPI`, which needs both TestPyPI jobs: the dist check, `Verify TestPyPI still serves exactly these files`, the upload (`attestations: true`), and `Verify PyPI serves exactly these files`. It checks out and builds nothing.
 - The steps marked `One-artifact publish template`, and the republish job, are juniper-cascor's, copied verbatim; its manual's [One Artifact, Checked Against TestPyPI](https://github.com/pcalnon/juniper-cascor/blob/main/docs/ci_cd/MANUAL.md#one-artifact-checked-against-testpypi) is the contract. They read the workflow `env` values `PUBLISH_PACKAGE`, `PUBLISH_DIST_DIR` and `PUBLISH_TAG_PREFIX`, which is `v` here; the build guard repeats the prefix, since a job-level `if:` cannot read `env`.
   A JSON check polls up to 20 times, 15 s apart, while the index does not list a file yet, and fails at once on a file listed with another sha256 or one the run did not build. The republish job refuses unless the tag's newest release run passed both TestPyPI jobs in their latest attempt (ruling 1 of 2026-11-16).
-  Pinned by `src/tests/unit/test_publish_one_artifact.py`, and the numbers in this section by `src/tests/unit/test_publish_docs_bounds.py`. Recovery: [Runbook: Release publishing](CICD_MANUAL.md#runbook-release-publishing).
+  Pinned by `src/tests/unit/test_publish_one_artifact.py`, and the JSON checks' poll bounds and the install check's wait, tries and lag error by `src/tests/unit/test_publish_docs_bounds.py`. Recovery: [Runbook: Release publishing](CICD_MANUAL.md#runbook-release-publishing).
 
 ### Container image (`publish-image.yml`)
 
