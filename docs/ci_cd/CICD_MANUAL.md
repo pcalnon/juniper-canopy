@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-11-24
-**Version:** 0.29.5
+**Last Updated:** 2026-11-26
+**Version:** 0.29.6
 **Status:** Current
 
 ## Table of Contents
@@ -1018,14 +1018,18 @@ The date check has no local console script. It is the workflow step.
 
 ### Runbook: Release publishing
 
-`publish.yml` is release-triggered (`release: published`, a `v*` tag) and uses OIDC. It builds once, and both publish jobs upload that one artifact (`dist/` and `SHA256SUMS`), so PyPI receives exactly the files TestPyPI took and the install check tested:
+`publish.yml` is release-triggered (`release: published`, a `v*` tag) and uses OIDC. It builds once, and both publish jobs upload that one artifact (`dist/` and `SHA256SUMS`), so PyPI receives exactly the files TestPyPI took, whose wheel the install check installed:
 
 1. Build and `twine check`, then the import smoke test, once; `SHA256SUMS` records the files
 2. Publish to TestPyPI (`environment: testpypi`); TestPyPI's JSON must then list exactly those files and sha256
-3. Verify installation from TestPyPI; the import runs from `$RUNNER_TEMP`, outside the checkout, so it loads the installed wheel
-4. Publish to PyPI (`environment: pypi`), after TestPyPI's JSON is checked again; PyPI's JSON is checked after the upload
+3. Verify installation from TestPyPI, in a job of its own (`Verify the TestPyPI install`); the import runs from `$RUNNER_TEMP`, outside any checkout, so it loads the installed wheel
+4. Publish to PyPI (`environment: pypi`), once both TestPyPI jobs passed, after TestPyPI's JSON is checked again; PyPI's JSON is checked after the upload
 
 Do not bypass TestPyPI stage; production publish is intentionally downstream. The contract: [`CICD_REFERENCE.md` § `publish.yml`](CICD_REFERENCE.md#publishyml), and juniper-cascor's [One Artifact, Checked Against TestPyPI](https://github.com/pcalnon/juniper-cascor/blob/main/docs/ci_cd/MANUAL.md#one-artifact-checked-against-testpypi), whose template steps this workflow copies verbatim.
+
+The install check runs in a job of its own (ruling 2 of 2026-11-16). `Verify the TestPyPI install` needs `Publish to TestPyPI`, and `Publish to PyPI` needs both. It runs the package TestPyPI serves, so it holds `contents: read` alone, with no environment and no `id-token`: nothing it runs can mint a credential, and the job that can, `Publish to TestPyPI`, runs only the template steps and the upload.
+It reads the version from a sparse checkout of `pyproject.toml` that keeps no credential (`persist-credentials: false`), and installs and imports from `$RUNNER_TEMP`. It waits 30 s, then makes 5 tries, 10 s apart, because TestPyPI's simple index can lag behind its JSON; after the fifth failed try it stops with `… is not installable from TestPyPI after 5 tries (index lag?): Re-run failed jobs; a real failure repeats`.
+Its name holds `TestPyPI`, so juniper-ml's release-train ceremony reads its failure as `HALT_TESTPYPI`.
 
 A release that did not reach PyPI follows the Overtoad's ladder (ruling of 2026-11-15), in this order. Every rung publishes the files TestPyPI took, or nothing ([juniper-cascor's manual](https://github.com/pcalnon/juniper-cascor/blob/main/docs/ci_cd/MANUAL.md#recovering-a-release-that-did-not-reach-pypi)):
 
@@ -1035,18 +1039,26 @@ A release that did not reach PyPI follows the Overtoad's ladder (ruling of 2026-
    gh workflow run publish.yml --repo pcalnon/juniper-canopy --ref v<version> -f republish_from_testpypi=true
    ```
 
-   Only `Republish the tested files (dispatch only)` runs. It waits at the `pypi` gate like the release run (a fresh approval, then the 5-minute timer), builds nothing, downloads the version's files from TestPyPI, checks each file's bytes against TestPyPI's JSON and, while the release run's artifact exists (90 days), against its `SHA256SUMS`, uploads them, and checks PyPI's JSON.
-   Both publish environments admit tags only, so dispatch from the tag, never a branch. A tag cut before this change does not carry the job.
+   Only `Republish the tested files (dispatch only)` runs. It waits at the `pypi` gate like the release run (a fresh approval, then the 5-minute timer). Its first step then refuses unless the tag's newest release run of `publish.yml` exists and both its TestPyPI jobs, `Publish to TestPyPI` and `Verify the TestPyPI install`, concluded success in their latest attempt (ruling 1 of 2026-11-16).
+   Then it builds nothing, downloads the version's files from TestPyPI, checks each file's bytes against TestPyPI's JSON and, while the release run's artifact exists (90 days), against its `SHA256SUMS`, uploads them, and checks PyPI's JSON. Once that artifact has expired, TestPyPI's JSON is the only record: the job takes every file TestPyPI lists for the version.
+   Both publish environments admit tags only, so dispatch from the tag, never a branch. The job reads the version from the tag after `PUBLISH_TAG_PREFIX` (`v`): a tag that is not `v` followed by the exact version cannot be republished, and the job fails without publishing.
 2. If that fails, within 30 days of the release run: **Re-run failed jobs** on the release run. The re-run reuses the run's artifact and waits at the gate again. GitHub refuses a re-run after 30 days.
 3. Otherwise, cut a new patch version.
 
-When `Publish to TestPyPI` failed after its upload (at `Verify TestPyPI serves exactly these files`, or at the install check), find out why before taking any rung. TestPyPI already holds the files, and the republish job never reads that job's result: it publishes whatever TestPyPI holds.
+When rung 1 refuses, or a check of the release run failed:
 
-- The install check failed on index lag: its one `pip install` runs 30 seconds after the upload, and TestPyPI's simple index can be slower. The files are fine. Rung 1 publishes them; rung 2's re-run uploads the same files again (TestPyPI answers a byte-identical file with 200 and keeps the one it holds) and repeats both checks.
-- The install check failed because the package is broken (it does not install, or does not import): publish these files by no rung. Fix the package and cut a new patch version.
-- `Verify TestPyPI serves exactly these files` failed: TestPyPI holds other files for this version. Do not publish them. While the release run's artifact exists, the republish job refuses them too, because they disagree with its `SHA256SUMS`.
+- **A TestPyPI job failed on index lag** (a JSON check gave up, or the install check stopped with `… is not installable from TestPyPI after 5 tries (index lag?)`): within 30 days, **Re-run failed jobs** on the release run. It runs the failed job and those after it again: a re-run `Publish to TestPyPI` uploads the same bytes from the run's artifact, which TestPyPI accepts (HTTP 200 for a byte-identical file), and repeats its JSON check, and the install check then runs again.
+  Once both pass, the PyPI job waits at the gate as usual, and rung 1 has a release run to accept.
+- **The install check failed for real** (the package does not install or import, and a re-run fails the same way): fix the package and cut a new patch version. If unsure, re-run the failed jobs first: index lag passes on a re-run, and a real failure repeats. Neither a re-run nor a same-version re-cut can fix a real failure, because the index refuses new bytes under a file name it already holds.
+- **A Release that was re-cut**: never delete a Release and publish it again to retry. The re-cut starts a new release run, which builds again; once TestPyPI holds the version it refuses that run's files, and the failed run is then the tag's newest, so rung 1 refuses the tag for good. The next rung applies: "Re-run failed jobs" on the original release run, within 30 days of it; then a new patch version.
+- **`Verify TestPyPI serves exactly these files` failed**, because TestPyPI holds other files for this version: do not publish them. The run stopped before the install check and the PyPI upload, so rung 1 refuses the version. Find which upload put the other files there, and cut a new patch version.
+- **`Verify PyPI serves exactly these files` gave up waiting** (PyPI's JSON did not list the files within its bound): index lag. The files are already on PyPI, since the step runs after the upload. Within 30 days, "Re-run failed jobs" on the release run: the PyPI job uploads the same bytes again, which PyPI accepts, and repeats the check (a fresh `pypi` approval, then the 5-minute timer).
+  `Verify TestPyPI still serves exactly these files` giving up, before the upload, takes the same re-run; nothing reached PyPI.
+- **`Verify PyPI serves exactly these files` found a mismatch** (PyPI lists a file this run did not build, or another sha256): the files are on PyPI. Compare PyPI's JSON for the version with TestPyPI's and find which upload put the other file there; only a new patch version ships tested files under a clean version.
 
-Never use "Re-run all jobs" on a publish run, nor `gh run rerun <id>` without `--failed`. download-artifact takes the newest artifact of a name, so a rebuild would become the files every later job uploads; the build job's `Reuse an earlier attempt's artifact` step skips such a rebuild, but a tag cut before this change lacks the step. That older workflow also uploads to TestPyPI with `skip-existing: true`, so there the rebuild passes unnoticed: TestPyPI keeps its files, and PyPI receives the rebuild.
+Each rung acts on the workflow file as of the tag: a tag cut before juniper-canopy#823 (2026-11-16) has no rung 1, and one cut before the port of juniper-cascor#777 runs rung 1 without the check of the release run's TestPyPI jobs.
+
+Never use "Re-run all jobs" on a publish run, nor `gh run rerun <id>` without `--failed`. download-artifact takes the newest artifact of a name, so a rebuild would become the files every later job uploads; the build job's `Reuse an earlier attempt's artifact` step skips such a rebuild, but a tag cut before juniper-canopy#823 lacks the step. That older workflow also uploads to TestPyPI with `skip-existing: true`, so there the rebuild passes unnoticed: TestPyPI keeps its files, and PyPI receives the rebuild.
 
 ### Runbook: Container image serve and version
 
