@@ -9,14 +9,12 @@ and that the code above the seam runs for real against it: the lifespan's ``juni
 decision and the generators proxy with its fallback. ``test_health.py`` pins probe_dependency's
 mapping of each answer and the readiness verdict the same way.
 
-No case here can reach a live listener: the fake answers before any socket opens, the guard refuses
-:8100 if one did, and the two cases that make a real connect aim it at a port this test bound and
-never listened on, which the kernel refuses.
+No case here reaches a Juniper service: the fake answers before any socket opens, the guard refuses
+:8100 if one did, and the two cases that make a real connect aim it at port 9, where nothing
+listens, which the kernel refuses.
 """
 
 from __future__ import annotations
-
-import socket
 
 import httpx
 import pytest
@@ -32,10 +30,13 @@ GENERATORS = [{"name": "spiral", "display_name": "Spiral (juniper-data)"}]
 
 @pytest.fixture
 def unanswered_port():
-    """An ephemeral port this test binds on 127.0.0.1 and never listens on: a connect there is refused, as on an empty host."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as held:
-        held.bind(("127.0.0.1", 0))
-        yield held.getsockname()[1]
+    """Port 9 on 127.0.0.1, where nothing listens: a connect there is refused at once, as on an empty host.
+
+    It is the closed port ``src/tests/regression/test_x7_client_budget.py`` relies on. A port this test binds
+    and never listens on is not used: Linux refuses a connect to it, but CI's macOS runner let it time out
+    (``httpx.ConnectTimeout``).
+    """
+    return 9
 
 
 async def _get(url: str) -> httpx.Response:
