@@ -251,8 +251,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the republish job's gate, and the ladder's new facts: when rung 1 refuses; that a TestPyPI job which failed on
     index lag is re-run ("Re-run failed jobs" uploads the same bytes, which the index accepts) while a failed install
     check needs a new patch version; never to re-cut a Release to retry; that a failed `Verify PyPI serves exactly
-    these files` comes after the upload; and which tags the ladder covers. Its paragraph saying that the republish job
-    never reads the TestPyPI job's result, and that rung 1 publishes files whose install check failed on lag, is gone.
+    these files` comes after the upload and has two causes, kept apart: a check that gave up waiting, which is index
+    lag and is re-run the same way (as is `Verify TestPyPI still serves exactly these files` giving up before the
+    upload), and a mismatch, which needs a new patch version; and which tags the ladder covers. Its paragraph saying
+    that the republish job never reads the TestPyPI job's result, and that rung 1 publishes files whose install check
+    failed on lag, is gone.
     `docs/ci_cd/CICD_REFERENCE.md` (§ `publish.yml`; 0.30.6) and `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
     (the workflow permissions; 0.28.7) follow.
   - **Pins**, in `src/tests/unit/test_publish_one_artifact.py` (113 cases, 69 before): the new job's name, `needs`,

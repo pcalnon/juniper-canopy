@@ -1045,14 +1045,16 @@ A release that did not reach PyPI follows the Overtoad's ladder (ruling of 2026-
 2. If that fails, within 30 days of the release run: **Re-run failed jobs** on the release run. The re-run reuses the run's artifact and waits at the gate again. GitHub refuses a re-run after 30 days.
 3. Otherwise, cut a new patch version.
 
-When rung 1 refuses, or a release run failed before PyPI:
+When rung 1 refuses, or a check of the release run failed:
 
 - **A TestPyPI job failed on index lag** (a JSON check gave up, or the install check stopped with `… is not installable from TestPyPI after 5 tries (index lag?)`): within 30 days, **Re-run failed jobs** on the release run. It runs the failed job and those after it again: a re-run `Publish to TestPyPI` uploads the same bytes from the run's artifact, which TestPyPI accepts (HTTP 200 for a byte-identical file), and repeats its JSON check, and the install check then runs again.
   Once both pass, the PyPI job waits at the gate as usual, and rung 1 has a release run to accept.
 - **The install check failed for real** (the package does not install or import, and a re-run fails the same way): fix the package and cut a new patch version. If unsure, re-run the failed jobs first: index lag passes on a re-run, and a real failure repeats. Neither a re-run nor a same-version re-cut can fix a real failure, because the index refuses new bytes under a file name it already holds.
 - **A Release that was re-cut**: never delete a Release and publish it again to retry. The re-cut starts a new release run, which builds again; once TestPyPI holds the version it refuses that run's files, and the failed run is then the tag's newest, so rung 1 refuses the tag for good. The next rung applies: "Re-run failed jobs" on the original release run, within 30 days of it; then a new patch version.
 - **`Verify TestPyPI serves exactly these files` failed**, because TestPyPI holds other files for this version: do not publish them. The run stopped before the install check and the PyPI upload, so rung 1 refuses the version. Find which upload put the other files there, and cut a new patch version.
-- **`Verify PyPI serves exactly these files` failed**: this run's files are already on PyPI, since the step runs after the upload. Compare PyPI's JSON for the version with TestPyPI's and find which upload put the other file there; only a new patch version ships tested files under a clean version.
+- **`Verify PyPI serves exactly these files` gave up waiting** (PyPI's JSON did not list the files within its bound): index lag. The files are already on PyPI, since the step runs after the upload. Within 30 days, "Re-run failed jobs" on the release run: the PyPI job uploads the same bytes again, which PyPI accepts, and repeats the check (a fresh `pypi` approval, then the 5-minute timer).
+  `Verify TestPyPI still serves exactly these files` giving up, before the upload, takes the same re-run; nothing reached PyPI.
+- **`Verify PyPI serves exactly these files` found a mismatch** (PyPI lists a file this run did not build, or another sha256): the files are on PyPI. Compare PyPI's JSON for the version with TestPyPI's and find which upload put the other file there; only a new patch version ships tested files under a clean version.
 
 Each rung acts on the workflow file as of the tag: a tag cut before juniper-canopy#823 (2026-11-16) has no rung 1, and one cut before the port of juniper-cascor#777 runs rung 1 without the check of the release run's TestPyPI jobs.
 
