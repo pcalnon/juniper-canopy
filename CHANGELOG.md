@@ -313,6 +313,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the other 4 no longer find the text they edit (the TestPyPI job's `setup-python`, the one-line `pip install`, the
     `cd` just before the import, and the old tag parsing), and this change's own mutations cover each of the 4.
 
+- **The three Sentry init tests check the options the installed juniper-observability passes, so they keep passing
+  once PyPI serves juniper-observability 0.4.3.** 0.4.3 (juniper-ml#2647; Release `juniper-observability-v0.4.3`,
+  cut 2026-11-26, at its `pypi` gate) passes sentry-sdk 3.x's options on a 3.x SDK, and sentry-sdk 3.0.0 removed
+  `send_default_pii` and `enable_logs`. `ci.yml` installs `.[test,juniper-cascor,observability]`, which resolves the
+  newest juniper-observability below 0.5.0 and the newest sentry-sdk (3.0.1 since 2026-11-25), so three tests that
+  read those two options from the mocked `sentry_sdk.init` would fail with a `KeyError` on every unit leg once 0.4.3
+  is published: `TestConfigureSentry::test_initializes_when_dsn_provided` in `src/tests/unit/test_observability.py`,
+  and `TestConfigureSentryCoverage::test_send_default_pii_is_false` and `::test_enable_logs_is_true` in
+  `src/tests/unit/test_observability_coverage.py`.
+  - The new `src/tests/helpers/sentry_init_options.py` says which set the installed pair passes: 3.x's when
+    `juniper_observability.__version__` is 0.4.3 or later and `sentry_sdk.VERSION`'s major is 3, and 2.x's otherwise
+    (0.4.2 and earlier pass 2.x's on every SDK). It reads the version from the code, not from the installed metadata,
+    which an editable install can leave naming an older release.
+  - On the 3.x path the PII tests read `data_collection["user_info"]`, which carries the user and the client's
+    address that `send_default_pii` governed. The logs test requires one `LoggingIntegration` with a logs handler,
+    which is what feeds Sentry Logs on 3.x. On the 2.x path all three assert what they did before.
+  - Measured on `main` at `374c0fb9` with TestPyPI's 0.4.3 wheel (sha256 `4817790d…`), in venvs layered on
+    `JuniperCanopy1`. Before the change, the three files passed 69 of 69 under observability 0.4.2 with sentry-sdk
+    3.0.1 (today's CI) and under 0.4.3 with 2.77.0, and failed these three under 0.4.3 with 3.0.1; the unit lane
+    (`-m "unit and not slow"`) failed only these three there (4012 passed, 1 skipped). After it, 69 of 69 pass under
+    all three pairs, and the unit lane passes under 0.4.3 with 3.0.1 and with 2.77.0 (4015 passed, 1 skipped, each).
+    Inverting the helper's answer fails the three under every pair. Dropping its version check fails them under 0.4.2
+    with 3.0.1 only, and dropping its SDK check under 0.4.3 with 2.77.0 only.
+  - The floors themselves, `juniper-observability>=0.4.3` and a `<4` cap on sentry-sdk, follow in their own pull
+    request once 0.4.3 is on PyPI: item R15 of juniper-ml's
+    `notes/JUNIPER_2026-11-23_JUNIPER-ECOSYSTEM_R-OBS-SC-2-FOLLOW-UPS-REMAINING-TASKS.md`.
+
 
 ## [0.10.0] - 2026-11-15
 

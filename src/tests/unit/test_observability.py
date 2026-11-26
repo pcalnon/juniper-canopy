@@ -20,6 +20,7 @@ from observability import (
     set_demo_mode_active,
     set_websocket_connections,
 )
+from tests.helpers.sentry_init_options import takes_sentry_3x_options
 
 
 @pytest.mark.unit
@@ -142,7 +143,12 @@ class TestConfigureSentry:
             assert call_kwargs["dsn"] == "https://examplePublicKey@o0.ingest.sentry.io/0"
             assert call_kwargs["release"] == "test-service@1.0.0"
             assert call_kwargs["traces_sample_rate"] == 0.1
-            assert call_kwargs["send_default_pii"] is False
+            # sentry-sdk 3.x removed send_default_pii; there juniper-observability 0.4.3 passes data_collection.
+            if takes_sentry_3x_options():
+                assert "send_default_pii" not in call_kwargs
+                assert call_kwargs["data_collection"]["user_info"] is False
+            else:
+                assert call_kwargs["send_default_pii"] is False
 
     def test_custom_sample_rate(self):
         with patch("sentry_sdk.init") as mock_init:
