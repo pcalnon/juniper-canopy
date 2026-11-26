@@ -22,6 +22,7 @@ from observability import (
     request_id_var,
     set_build_info,
 )
+from tests.helpers.sentry_init_options import takes_sentry_3x_options
 
 
 @pytest.mark.unit
@@ -166,16 +167,45 @@ class TestConfigureSentryCoverage:
     """Additional coverage for configure_sentry."""
 
     def test_send_default_pii_is_false(self):
-        """Verify PII sending is explicitly disabled."""
+        """Verify PII sending is explicitly disabled, in the option set the installed pair passes.
+
+        On sentry-sdk 2.x that is ``send_default_pii=False``. sentry-sdk 3.x removed the option, and
+        juniper-observability 0.4.3 passes ``data_collection`` there instead, whose ``user_info`` carries the user
+        and the client's address that ``send_default_pii`` governed.
+        """
         with patch("sentry_sdk.init") as mock_init:
             configure_sentry("https://key@sentry.io/0", "svc", "1.0")
-            assert mock_init.call_args[1]["send_default_pii"] is False
+            kwargs = mock_init.call_args[1]
+            if takes_sentry_3x_options():
+                assert "send_default_pii" not in kwargs
+                assert kwargs["data_collection"]["user_info"] is False
+                # 2.x attached no cookies without send_default_pii.
+                assert kwargs["data_collection"]["cookies"] == {"mode": "off"}
+            else:
+                assert kwargs["send_default_pii"] is False
 
     def test_enable_logs_is_true(self):
-        """Verify Sentry log integration is enabled."""
+        """Verify Sentry Logs are enabled, in the option set the installed pair passes.
+
+        On sentry-sdk 2.x that is ``enable_logs=True``. sentry-sdk 3.x has no such option and installs no logging
+        integration by default: a ``LoggingIntegration`` with a logs handler (its ``level``, INFO unless set to
+        None) is what feeds Sentry Logs there.
+        """
         with patch("sentry_sdk.init") as mock_init:
             configure_sentry("https://key@sentry.io/0", "svc", "1.0")
-            assert mock_init.call_args[1]["enable_logs"] is True
+            kwargs = mock_init.call_args[1]
+            if takes_sentry_3x_options():
+                from sentry_sdk.integrations.logging import LoggingIntegration
+
+                assert "enable_logs" not in kwargs
+                logging_integrations = [integration for integration in kwargs["integrations"] if isinstance(integration, LoggingIntegration)]
+                assert len(logging_integrations) == 1
+                # What LoggingIntegration._handle_logs_record reads to turn a record into a Sentry Log; INFO is
+                # the level 2.x's enable_logs sends from.
+                assert logging_integrations[0]._logs_handler is not None
+                assert logging_integrations[0]._logs_handler.level == logging.INFO
+            else:
+                assert kwargs["enable_logs"] is True
 
     def test_release_format(self):
         """Verify release string follows 'service@version' format."""
