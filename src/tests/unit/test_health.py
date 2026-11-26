@@ -203,15 +203,21 @@ class TestCanopyHealthEndpoints:
         assert "mode" in body["details"]
         assert "training_active" in body["details"]
 
-    def test_readiness_includes_data_dependency(self, client):
-        """Test readiness probes JuniperData."""
+    def test_readiness_includes_data_dependency(self, client, juniper_data_fake):
+        """Test readiness probes JuniperData.
+
+        The unit lane's juniper-data fake (conftest.py) refuses the connect, as CI's empty runner does, so the answer
+        no longer depends on what listens on the host's :8100.
+        """
         response = client.get("/v1/health/ready")
         body = response.json()
         assert "juniper_data" in body["dependencies"]
         data_dep = body["dependencies"]["juniper_data"]
         assert data_dep["name"] == "JuniperData Service"
-        # Will be unhealthy in test (no real service running)
-        assert data_dep["status"] in ("healthy", "unhealthy")
+        assert data_dep["status"] == "unhealthy"
+        assert data_dep["message"].startswith("http://localhost:8100/v1/health/live ")
+        assert data_dep["message"].endswith(" ConnectError: All connection attempts failed")
+        assert juniper_data_fake.answered == ["GET http://localhost:8100/v1/health/live"]
 
     def test_readiness_cascor_not_configured(self, client):
         """Test readiness shows not_configured for CasCor when URL not set."""
@@ -220,6 +226,55 @@ class TestCanopyHealthEndpoints:
         cascor_dep = body["dependencies"]["juniper_cascor"]
         assert cascor_dep["status"] == "not_configured"
         assert "demo mode" in cascor_dep["message"]
+
+
+@pytest.mark.unit
+class TestReadinessAgainstTheJuniperDataFake:
+    """/v1/health/ready with the real probe and the real verdict, against the unit lane's in-process juniper-data.
+
+    Nothing above httpx's transport is patched (UNIT-LANE JUNIPER-DATA FAKE in conftest.py): each answer the fake gives
+    goes through ``probe_dependency``'s mapping and the readiness verdict as a real juniper-data's would.
+    """
+
+    def test_a_healthy_juniper_data_makes_canopy_ready(self, client, juniper_data_fake):
+        juniper_data_fake.answer(200, {"status": "alive"})
+        response = client.get("/v1/health/ready")
+        body = response.json()
+        data_dep = body["dependencies"]["juniper_data"]
+        assert response.status_code == 200
+        assert (body["status"], data_dep["status"], data_dep["message"]) == ("ready", "healthy", "http://localhost:8100/v1/health/live")
+        assert data_dep["latency_ms"] is not None
+        assert body["dependencies"]["juniper_cascor"]["status"] == "not_configured"
+        assert juniper_data_fake.answered == ["GET http://localhost:8100/v1/health/live"]
+
+    def test_an_error_status_from_juniper_data_degrades_canopy(self, client, juniper_data_fake):
+        juniper_data_fake.answer(503)
+        response = client.get("/v1/health/ready")
+        body = response.json()
+        data_dep = body["dependencies"]["juniper_data"]
+        assert response.status_code == 200
+        assert (body["status"], data_dep["status"]) == ("degraded", "unhealthy")
+        assert data_dep["message"].endswith(" HTTPStatusError: 503 Service Unavailable")
+
+    def test_a_refused_juniper_data_degrades_canopy(self, client, juniper_data_fake):
+        response = client.get("/v1/health/ready")
+        body = response.json()
+        assert response.status_code == 200
+        assert (body["status"], body["dependencies"]["juniper_data"]["status"]) == ("degraded", "unhealthy")
+        assert juniper_data_fake.answered == ["GET http://localhost:8100/v1/health/live"]
+
+    @pytest.mark.parametrize("status_code", [401, 404, 429])
+    def test_any_answer_but_200_degrades_canopy(self, client, juniper_data_fake, status_code):
+        """Only a 200 is healthy: a keyed, rate-limiting or wrong service on juniper-data's port is not."""
+        juniper_data_fake.answer(status_code)
+        body = client.get("/v1/health/ready").json()
+        assert (body["status"], body["dependencies"]["juniper_data"]["status"]) == ("degraded", "unhealthy")
+
+    async def test_a_failure_that_is_not_an_httpx_http_error_is_still_unhealthy(self):
+        """httpx.InvalidURL is not an httpx.HTTPError: the probe still answers ``unhealthy`` rather than raising into the lifespan."""
+        result = await probe_dependency("JuniperData", "http://localhost:80a0/v1/health/live")
+        assert result.status == "unhealthy"
+        assert "InvalidURL" in result.message
 
 
 @pytest.mark.unit

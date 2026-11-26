@@ -51,6 +51,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Unit-lane tests no longer reach juniper-data's `:8100`, and the unit-lane network guard now refuses that port
+  too** (the Overtoad's ruling 27 of 2026-11-12, "A follow-up PR", in juniper-ml's Cursor flood-4 arc; its record is
+  `notes/JUNIPER_2026-11-06_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-4-DISPOSITION.md` §8). juniper-canopy#815's guard left the
+  port out. A census of the CI unit lane on `main` at `60880efc` found 127 connects to `127.0.0.1:8100` from 124 tests
+  in 38 files, the numbers #815 measured. Every one was the app's own probe of juniper-data
+  (`health.probe_dependency`, `GET /v1/health/live`): 115 from 113 tests at startup (`main.py`'s lifespan, `:432`;
+  93 of those tests in their setup, where a fixture starts the app) and 12 from 12 tests through `/v1/health/ready`
+  (`:1305`). CI's runner refuses them, and the probe reports juniper-data unhealthy. On a machine running
+  juniper-data they reached it, and one healthy answer at startup sets `juniper_data_available` for the rest of the
+  session, which sends `/api/dataset/generators` to the live service.
+  - `src/tests/conftest.py` gains a juniper-data fake. While a test the guard arms runs, a request to port 8100 is
+    answered in-process at httpx's async transport (`httpx.AsyncHTTPTransport.handle_async_request`), so no socket
+    opens. Its default answer is CI's: the connect is refused, as `httpx.ConnectError("All connection attempts
+    failed")`. Everything above the transport runs for real: the probe's mapping of the answer, the startup
+    decision, the readiness verdict and the generator fallback. A test sets another answer, and reads what the fake
+    answered, through the new `juniper_data_fake` fixture. Other ports, and the lanes the guard does not arm, are
+    untouched. `mock_juniper_data_client` still mocks the `JuniperDataClient` the app builds.
+  - `src/tests/conftest.py` also removes `JUNIPER_CANOPY_JUNIPER_DATA_URL` at import. That variable outranks the
+    `JUNIPER_DATA_URL` the file pins, so a shell that exported it moved the app's juniper-data requests off `:8100`.
+  - The guard's ports gain 8100, so a connect to it that reaches a socket any other way fails the test.
+  - Tests: `src/tests/unit/test_unit_lane_juniper_data_fake.py` pins the fake and runs the startup probe, the
+    generators proxy and `/v1/health/ready` against it, down to the configured URL each request goes to and its 5 s
+    timeout. `test_health.py`'s readiness tests run the real probe against each of the fake's answers, a 401, 404 or
+    429 included; `test_readiness_includes_data_dependency` now expects the refusal instead of accepting either answer.
+    `test_unit_lane_network_guard.py` pins the refusal of `:8100`. Documented in
+    `docs/testing/TESTING_REFERENCE.md` (§ Unit-lane juniper-data fake); `pyproject.toml`'s `allow_service_ports`
+    marker text lists 8100.
 - **`docs/ci_cd/CICD_MANUAL.md` no longer says the lockfile workflow's comment gets the `[dependabot skip]` tag
   backwards.** A sentence in the paragraph after the runbook's commit-subject table said the comment above `lockfile-update.yml`'s
   commit-message choice claims the tag keeps Dependabot from rebasing, the reverse of GitHub's documented behaviour.

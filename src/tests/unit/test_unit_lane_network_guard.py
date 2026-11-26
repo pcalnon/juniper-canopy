@@ -3,13 +3,14 @@ Pin the unit-lane network guard (``src/tests/conftest.py``, UNIT-LANE NETWORK GU
 
 A unit test that connects to whatever listens on the host passes or fails by
 host state, and on a developer machine it talks to a live service such as the
-canopy on :8050. The guard refuses a connect to a Juniper service port while a
-unit-lane test runs, and fails that test even when the code under test
-swallowed the refusal. These tests pin both halves: what is refused (the
-service ports, over ``connect`` and ``connect_ex``, IPv4 and IPv6) and what is
-not (the ports either side of each range, a test's own ephemeral server, a Unix
-socket, the opt-out marker), which tests are armed, and that the report hook
-fails a phase whose refusal was swallowed. That failure must survive an xfail,
+canopy on :8050 or juniper-data on :8100. The guard refuses a connect to a
+Juniper service port while a unit-lane test runs, and fails that test even when
+the code under test swallowed the refusal. These tests pin both halves: what is
+refused (the service ports, juniper-data's 8100 among them, over ``connect`` and
+``connect_ex``, IPv4 and IPv6) and what is not (the ports either side of each
+range, a test's own ephemeral server, a Unix socket, the opt-out marker), which
+tests are armed, and that the report hook fails a phase whose refusal was
+swallowed. That failure must survive an xfail,
 and it must not blame the running test: a refusal made off the main thread is
 recorded with the thread's name, because a thread or task an earlier test left
 running fails whichever test is running when it connects.
@@ -33,8 +34,8 @@ import pytest
 pytestmark = pytest.mark.unit
 
 TESTS_ROOT = Path(__file__).resolve().parents[1]
-REFUSED = [("127.0.0.1", 8050), ("localhost", 8055), ("127.0.0.1", 8059), ("127.0.0.1", 8200), ("0.0.0.0", 8201), ("127.0.0.1", 8202), ("127.0.0.1", 8210), ("127.0.0.1", 8211)]  # nosec B104 - a connect destination, never bound
-NOT_REFUSED = [8049, 8060, 8199, 8203, 8209, 8212]
+REFUSED = [("127.0.0.1", 8050), ("localhost", 8055), ("127.0.0.1", 8059), ("127.0.0.1", 8100), ("localhost", 8100), ("127.0.0.1", 8200), ("0.0.0.0", 8201), ("127.0.0.1", 8202), ("127.0.0.1", 8210), ("127.0.0.1", 8211)]  # nosec B104 - a connect destination, never bound
+NOT_REFUSED = [8049, 8060, 8099, 8101, 8199, 8203, 8209, 8212]
 
 
 @pytest.fixture
@@ -229,6 +230,17 @@ def test_the_report_hook_fails_a_phase_that_swallowed_a_refusal(request, no_real
     report = request.config.hook.pytest_runtest_makereport(item=request.node, call=phase)
     assert report.failed
     assert "127.0.0.1:8050" in str(report.longrepr)
+    assert no_real_connect == []
+
+
+def test_the_report_hook_fails_a_phase_that_swallowed_a_juniper_data_refusal(request, no_real_connect):
+    """juniper-data's 8100 is guarded like the rest: a refused connect there, swallowed, still fails the phase."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock, contextlib.suppress(OSError):
+        sock.connect(("127.0.0.1", 8100))
+    phase = pytest.CallInfo.from_call(lambda: None, when="call")
+    report = request.config.hook.pytest_runtest_makereport(item=request.node, call=phase)
+    assert report.failed
+    assert "a connect to 127.0.0.1:8100, a Juniper service port, was refused while this test ran" in str(report.longrepr)
     assert no_real_connect == []
 
 
