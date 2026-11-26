@@ -51,6 +51,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The X7 health test checks where the slow upstream call runs, and that the loop answers while it is held, instead
+  of timing the answers** (the Overtoad's ruling 49 of 2026-11-26, "Separate follow-up PR (Recommended)", in
+  juniper-ml's Cursor flood-4 arc, whose parent is its ruling 28; their record is
+  `notes/JUNIPER_2026-11-06_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-4-DISPOSITION.md` §8).
+  `src/tests/regression/test_x7_loop_responsiveness.py`'s `test_health_stays_fast_while_upstream_is_slow` failed when
+  the slowest `/v1/health/live` answer reached 1.0 s (`HEALTH_DEADLINE_SECONDS`), so a stall of about a second inside
+  its measurement failed it with `/api/status` correctly offloaded. Five CI jobs failed it between 2026-11-09 and
+  2026-11-26, at 1.031-1.182 s, on Python 3.12 (macOS), 3.13 and 3.14. Locally, a full garbage collection of
+  1.28-1.96 s run on the event-loop thread as the measurement starts failed it 50 times in 50, with every
+  `get_status` call on a worker thread.
+  - The stub's `get_status` now records the thread it runs on and holds until a coroutine on the event loop releases
+    it. That coroutine sends the ten probes once the call is in flight, and releases it after all of them are
+    answered. The test asserts that the call ran off the loop thread, that the loop released it, and that every probe
+    answered 200 while it was held. A stall only delays the release, and fails the test only if it outlasts
+    `HOLD_SECONDS = 10`, which bounds a loop that cannot run at all, not a slow one.
+  - `test_the_measurement_can_detect_blocking` runs the same measurement against an inline control route and requires
+    the call on the loop thread and unreleased. The new `test_the_measurement_can_detect_a_loop_blocked_on_its_result`
+    runs it against a route whose loop waits synchronously for a worker's result, and requires the call unreleased.
+    `test_the_deadline_stays_below_the_blocking_floor`, `_timed`, `HEALTH_DEADLINE_SECONDS` and `STUB_BLOCK_SECONDS`
+    are removed: no deadline is left to guard.
+  - `docs/AGENTS_REFERENCE.md` § Behavioural tests describes the new assertions. Its T-A2 row said "< 500 ms", the
+    bound before 2026-09-21. Its § Pitfalls no longer says to clock a responsiveness test from request issue time.
 - **The four X7 off-loop site tests check where the blocking call runs instead of timing the event loop** (the
   Overtoad's ruling 28 (2026-11-12) of the Cursor flood-4 evaluation, "A follow-up PR (Recommended)"; its record is
   juniper-ml's `notes/JUNIPER_2026-11-06_JUNIPER-ECOSYSTEM_CURSOR-FLOOD-4-DISPOSITION.md` §8). The tests in
