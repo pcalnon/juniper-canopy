@@ -143,11 +143,14 @@ class TestConfigureSentry:
             assert call_kwargs["dsn"] == "https://examplePublicKey@o0.ingest.sentry.io/0"
             assert call_kwargs["release"] == "test-service@1.0.0"
             assert call_kwargs["traces_sample_rate"] == 0.1
-            # sentry-sdk 3.x removed send_default_pii; there juniper-observability 0.4.3 passes data_collection.
+            # sentry-sdk 3.x removed these four (an unknown option raises TypeError); there juniper-observability
+            # 0.4.3 passes data_collection instead.
+            removed_in_3x = {"send_default_pii", "include_local_variables", "enable_logs", "before_send_transaction"}
             if takes_sentry_3x_options():
-                assert "send_default_pii" not in call_kwargs
+                assert not removed_in_3x & call_kwargs.keys()
                 assert call_kwargs["data_collection"]["user_info"] is False
             else:
+                assert "data_collection" not in call_kwargs
                 assert call_kwargs["send_default_pii"] is False
 
     def test_custom_sample_rate(self):

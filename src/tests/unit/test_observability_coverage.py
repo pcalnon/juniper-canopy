@@ -179,6 +179,8 @@ class TestConfigureSentryCoverage:
             if takes_sentry_3x_options():
                 assert "send_default_pii" not in kwargs
                 assert kwargs["data_collection"]["user_info"] is False
+                # 2.x attached no cookies without send_default_pii.
+                assert kwargs["data_collection"]["cookies"] == {"mode": "off"}
             else:
                 assert kwargs["send_default_pii"] is False
 
@@ -198,8 +200,10 @@ class TestConfigureSentryCoverage:
                 assert "enable_logs" not in kwargs
                 logging_integrations = [integration for integration in kwargs["integrations"] if isinstance(integration, LoggingIntegration)]
                 assert len(logging_integrations) == 1
-                # What LoggingIntegration._handle_logs_record reads to turn a record into a Sentry Log.
+                # What LoggingIntegration._handle_logs_record reads to turn a record into a Sentry Log; INFO is
+                # the level 2.x's enable_logs sends from.
                 assert logging_integrations[0]._logs_handler is not None
+                assert logging_integrations[0]._logs_handler.level == logging.INFO
             else:
                 assert kwargs["enable_logs"] is True
 

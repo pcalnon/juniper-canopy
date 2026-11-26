@@ -26,16 +26,28 @@ option raises ``TypeError``), so on the 3.x path:
 The tests that mock ``sentry_sdk.init`` patch the real module, so they take the path of the installed pair. The
 version is read from the code (``juniper_observability.__version__``) rather than from its installed metadata,
 because an editable install's metadata can name an older release than the code it imports.
+
+``sentry_sdk`` is imported when the question is asked, not at import: sentry-sdk is canopy's optional
+``observability`` extra, and the modules importing this one hold many tests that never touch Sentry.
+
+A pre-release of 0.4.3 (``0.4.3rc1``, ``0.4.3.dev0``) counts as 0.4.3. On a sentry-sdk major other than 2 or 3,
+0.4.3 initialises nothing and these tests fail, which is meant: canopy's sentry-sdk range is to be capped below 4.
+
+The answer is derived from the two versions, not from the library's own dispatch (``_sentry_sdk_major`` in
+``juniper_observability.sentry``), so that a dispatch bug in the library still fails these tests. The cost: the
+unreleased juniper-ml commits between ``b54f961b`` (juniper-ml#2647) and ``b9442e3c`` (#2666) carry the 3.x code
+labelled 0.4.2, and an editable install of one of them reads as 2.x here.
 """
 
 import juniper_observability
-import sentry_sdk
 from packaging.version import Version
 
 #: The first juniper-observability release whose ``configure_sentry`` passes sentry-sdk 3.x's options on 3.x.
-FIRST_RELEASE_WITH_3X_OPTIONS = Version("0.4.3")
+FIRST_RELEASE_WITH_3X_OPTIONS = (0, 4, 3)
 
 
 def takes_sentry_3x_options() -> bool:
     """True when the installed ``configure_sentry`` passes sentry-sdk 3.x's options to ``sentry_sdk.init``."""
-    return Version(juniper_observability.__version__) >= FIRST_RELEASE_WITH_3X_OPTIONS and Version(sentry_sdk.VERSION).major == 3
+    import sentry_sdk
+
+    return Version(juniper_observability.__version__).release >= FIRST_RELEASE_WITH_3X_OPTIONS and Version(sentry_sdk.VERSION).major == 3
